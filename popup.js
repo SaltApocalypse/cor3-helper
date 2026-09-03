@@ -64,7 +64,7 @@ async function applyHelperMode(isHelper, mode) {
     const automationKeys = [
         'autoRefresh', 'autoJobSolverEnabled', 'autoFinishAllJobsEnabled', 'autoClearIps',
         'autoJobsDebugConsoleEnabled', 'autoUpdateMarkets', 'decisionModifiers', 'autoSendMerc',
-        'autoSellCheapest'
+        'autoSellCheapest', 'autoDrone'
     ];
 
     if (mode === 'update') {
@@ -84,6 +84,10 @@ async function applyHelperMode(isHelper, mode) {
                 chrome.storage.sync.set({ [key]: value });
             } else if (key === 'autoSendMerc') {
                 disabledValue = {"autoChooseMerc":false,"autoChooseUsolFirst":false,"ignoreEliteMerc":false,"applyMercCostLimiter":false,"maxMercCost":15000,"disabledReason":null,"enabled":false,"mercenaryId":"","mercenaryName":""};
+                value = isHelper ? disabledValue : (oldValues[key] ?? disabledValue);
+                chrome.storage.sync.set({ [key]: value });
+            } else if (key === 'autoDrone') {
+                disabledValue = {"autoClaim":true,"autoChooseLocation":false,"autoDecide":true,"enabled":false,"fullChargeBeforeLaunch":false,"locationConfigId":"","missionConfigId":"","lowBatteryThreshold":30,"pauseOnRepairFail":true,"paused":false,"repairEnabled":false,"repairOnLowBattery":false,"repairThreshold":60};
                 value = isHelper ? disabledValue : (oldValues[key] ?? disabledValue);
                 chrome.storage.sync.set({ [key]: value });
             } else if (key === 'decisionModifiers') {
@@ -176,6 +180,12 @@ async function applyHelperMode(isHelper, mode) {
 
     ['noWaitAutoChooseCheckbox', 'autoChooseCheckbox', 'autoSellCheapestToggle', 'autoChooseMercToggle', 'autoChooseUsolFirstToggle', 'ignoreEliteMercToggle', 'applyMercCostLimiterToggle', 'getRidOfVeteransToggle', 'autoSendMercenaryToggle'].forEach(key => {
         ((document.getElementById(key)).closest('.auto-choose-row')).style.display = isHelper ? 'none' : 'flex';
+    });
+
+    // Drone automation rows
+    ['autoDroneToggle', 'autoDroneClaimToggle', 'autoDroneDecideToggle', 'autoChooseDroneLocationToggle', 'autoDroneFullChargeToggle', 'autoDroneRepairToggle', 'autoDroneRepairOnLowBatteryToggle', 'autoDronePauseOnFailToggle', 'droneRepairThresholdInput', 'droneLowBatteryThresholdInput', 'droneMissionSelectRow'].forEach(key => {
+        const el = document.getElementById(key);
+        if (el) el.closest('.auto-choose-row').style.display = isHelper ? 'none' : 'flex';
     });
 
     // Hide merc cost display/edit rows in helper mode
@@ -675,7 +685,7 @@ function refreshAllTimestamps() {
     showLastUpdated(usolMarketLastUpdated, 'usolMarketDataUpdatedAt');
     showLastUpdated(expeditionLastUpdated, 'expeditionsDataUpdatedAt');
     showLastUpdated(decisionLastUpdated, 'expeditionsDataUpdatedAt');
-    showLastUpdated(personalDroneLastUpdated, 'expeditionsDataUpdatedAt');
+    showLastUpdated(personalDroneLastUpdated, 'droneDataUpdatedAt');
     if (inventoryLastUpdated) showLastUpdated(inventoryLastUpdated, 'stashDataUpdatedAt');
     if (archivedExpLastUpdated) showLastUpdated(archivedExpLastUpdated, 'archivedExpeditionsUpdatedAt');
     if (mercenariesLastUpdated) showLastUpdated(mercenariesLastUpdated, 'mercenariesUpdatedAt');
@@ -696,7 +706,7 @@ decisionsSectionToggle.addEventListener('click', () => {
     decisionsSectionBody.classList.toggle('open');
 });
 
-function renderExpeditionInfo(expeditions) {
+async function renderExpeditionInfo(expeditions) {
     expeditionInfoContainer.innerHTML = '';
 
     // Check for expedition launch errors
@@ -737,14 +747,22 @@ function renderExpeditionInfo(expeditions) {
         }
     });
 
-    if (!expeditions || expeditions.length === 0) {
+    // Fetch the in-progress drone mission so it renders alongside mercenary expeditions
+    const { droneMissionData, droneData } = await chrome.storage.local.get(['droneMissionData', 'droneData']);
+    const droneHasMissionObj = !!(droneMissionData && droneMissionData.status === 'RUNNING');
+    const droneActiveNoObj = !!(droneData && droneData.activeMissionId && !droneMissionData);
+    const droneRunning = droneHasMissionObj || droneActiveNoObj;
+
+    const hasExpeditions = !!(expeditions && expeditions.length > 0);
+
+    if (!hasExpeditions && !droneRunning) {
         if (!expeditionInfoContainer.innerHTML) {
             expeditionInfoContainer.innerHTML = '<div class="no-decisions">No active expeditions.</div>';
         }
         return;
     }
 
-    for (const exp of expeditions) {
+    if (hasExpeditions) for (const exp of expeditions) {
         // Store endTime for live timer ticking
         if (exp.endTime) {
             expeditionEndTimes[exp.id] = exp.endTime;
@@ -822,6 +840,36 @@ function renderExpeditionInfo(expeditions) {
             ${bodyHtml}
         `;
         expeditionInfoContainer.appendChild(card);
+    }
+
+    if (droneRunning) {
+        const droneCard = document.createElement('div');
+        droneCard.className = 'expedition-card';
+        if (droneHasMissionObj) {
+            const dKey = 'drone_' + droneMissionData.id;
+            if (droneMissionData.endTime) expeditionEndTimes[dKey] = droneMissionData.endTime;
+            const dLoc = (droneMissionData.location && droneMissionData.location.name) || '';
+            const dMis = (droneMissionData.mission && droneMissionData.mission.name) || '';
+            droneCard.innerHTML = `
+                <div class="exp-header">
+                    <span class="exp-title">🛩️ ${dLoc} — ${dMis}</span>
+                    <span class="exp-status running">DRONE</span>
+                </div>
+                <div class="detail-row"><span class="label">Type:</span> Drone Mission</div>
+                <div class="detail-row"><span class="label">Risk:</span> ${droneMissionData.finalRisk ?? '--'}</div>
+                <div class="detail-row"><span class="label">Battery Cost:</span> ${droneMissionData.batteryCost ?? '--'}</div>
+                ${droneMissionData.endTime ? `<div class="exp-timer-row"><span style="font-size:11px;color:var(--accent-orange);">⏳ <span class="exp-timer" data-exp-id="${dKey}">${formatTimeRemaining(droneMissionData.endTime)}</span></span></div>` : ''}
+            `;
+        } else {
+            droneCard.innerHTML = `
+                <div class="exp-header">
+                    <span class="exp-title">🛩️ Drone Mission</span>
+                    <span class="exp-status running">DRONE</span>
+                </div>
+                <div class="detail-row"><span class="label">Type:</span> Drone Mission in progress</div>
+            `;
+        }
+        expeditionInfoContainer.appendChild(droneCard);
     }
 
     // Wire up pin buttons
@@ -1244,12 +1292,267 @@ refreshExpeditionsBtn.addEventListener('click', () => requestExpeditions());
 const personalDroneSectionToggle = document.getElementById('personalDroneSectionToggle');
 const personalDroneSectionBody = document.getElementById('personalDroneSectionBody');
 const personalDroneContainer = document.getElementById('personalDroneContainer');
+const refreshDroneBtn = document.getElementById('refreshDroneBtn');
+const droneWarning = document.getElementById('droneWarning');
+const droneLocationSelect = document.getElementById('droneLocationSelect');
+const droneMissionSelect = document.getElementById('droneMissionSelect');
+const droneMissionSelectRow = document.getElementById('droneMissionSelectRow');
+const autoDroneToggle = document.getElementById('autoDroneToggle');
+const autoDroneClaimToggle = document.getElementById('autoDroneClaimToggle');
+const autoDroneDecideToggle = document.getElementById('autoDroneDecideToggle');
+const autoChooseDroneLocationToggle = document.getElementById('autoChooseDroneLocationToggle');
+const autoDroneFullChargeToggle = document.getElementById('autoDroneFullChargeToggle');
+const autoDroneRepairToggle = document.getElementById('autoDroneRepairToggle');
+const droneRepairThresholdInput = document.getElementById('droneRepairThresholdInput');
+const autoDroneRepairOnLowBatteryToggle = document.getElementById('autoDroneRepairOnLowBatteryToggle');
+const droneLowBatteryThresholdInput = document.getElementById('droneLowBatteryThresholdInput');
+const autoDronePauseOnFailToggle = document.getElementById('autoDronePauseOnFailToggle');
+
+let _droneData = null;
+let _droneMissionData = null;
+let _droneTimerInterval = null;
 
 personalDroneSectionToggle.addEventListener('click', async () => {
     personalDroneSectionToggle.classList.toggle('open');
     personalDroneSectionBody.classList.toggle('open');
-    personalDroneContainer.innerHTML = '<div><div class="no-decisions">Soon™</div></div>';
+    if (personalDroneSectionBody.classList.contains('open') && !_droneData) {
+        await requestDrone();
+    }
 });
+
+if (refreshDroneBtn) {
+    refreshDroneBtn.addEventListener('click', () => requestDrone());
+}
+
+function droneSettingsToStorage() {
+    return {
+        enabled: autoDroneToggle ? autoDroneToggle.checked : false,
+        autoClaim: autoDroneClaimToggle ? autoDroneClaimToggle.checked : true,
+        autoDecide: autoDroneDecideToggle ? autoDroneDecideToggle.checked : true,
+        autoChooseLocation: autoChooseDroneLocationToggle ? autoChooseDroneLocationToggle.checked : false,
+        fullChargeBeforeLaunch: autoDroneFullChargeToggle ? autoDroneFullChargeToggle.checked : false,
+        locationConfigId: droneLocationSelect ? droneLocationSelect.value : '',
+        missionConfigId: droneMissionSelect ? droneMissionSelect.value : '',
+        repairEnabled: autoDroneRepairToggle ? autoDroneRepairToggle.checked : false,
+        repairThreshold: droneRepairThresholdInput ? (parseInt(droneRepairThresholdInput.value, 10) || 60) : 60,
+        repairOnLowBattery: autoDroneRepairOnLowBatteryToggle ? autoDroneRepairOnLowBatteryToggle.checked : false,
+        lowBatteryThreshold: droneLowBatteryThresholdInput ? (parseInt(droneLowBatteryThresholdInput.value, 10) || 30) : 30,
+        pauseOnRepairFail: autoDronePauseOnFailToggle ? autoDronePauseOnFailToggle.checked : true
+    };
+}
+
+function saveDroneSettings(patch) {
+    chrome.storage.sync.get('autoDrone', (data) => {
+        const existing = data.autoDrone || {};
+        const next = Object.assign({}, existing, droneSettingsToStorage(), patch || {});
+        chrome.storage.sync.set({ autoDrone: next });
+    });
+}
+
+function updateDroneMissionSelectRow() {
+    if (autoChooseDroneLocationToggle && droneMissionSelectRow) {
+        droneMissionSelectRow.style.display = autoChooseDroneLocationToggle.checked ? 'none' : 'flex';
+    }
+}
+
+function populateDroneSelects() {
+    if (!droneLocationSelect || !droneMissionSelect || !_droneData) return;
+    const locations = (_droneData.locations || []);
+    const prevLoc = droneLocationSelect.value;
+    const prevMis = droneMissionSelect.value;
+    droneLocationSelect.innerHTML = '';
+    for (const loc of locations) {
+        const opt = document.createElement('option');
+        opt.value = loc.id;
+        opt.textContent = loc.name;
+        droneLocationSelect.appendChild(opt);
+    }
+    if (locations.length === 0) {
+        droneMissionSelect.innerHTML = '';
+        return;
+    }
+    const selLoc = locations.find(l => l.id === prevLoc) || locations[0];
+    droneLocationSelect.value = selLoc.id;
+    droneMissionSelect.innerHTML = '';
+    for (const m of (selLoc.missions || [])) {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.name;
+        droneMissionSelect.appendChild(opt);
+    }
+    if (selLoc.missions && selLoc.missions.some(m => m.id === prevMis)) {
+        droneMissionSelect.value = prevMis;
+    }
+}
+
+function renderDrone() {
+    if (!personalDroneContainer) return;
+    personalDroneContainer.innerHTML = '';
+
+    if (!_droneData || !_droneData.drone) {
+        personalDroneContainer.innerHTML = '<div class="no-decisions">No drone data yet. Click 🔄 to refresh.</div>';
+        return;
+    }
+
+    const drone = _droneData.drone;
+    const battery = _droneData.battery || {};
+    const durPct = drone.maxDurability ? Math.max(0, Math.min(100, Math.round(drone.durability / drone.maxDurability * 100))) : 0;
+    const battPct = battery.max ? Math.max(0, Math.min(100, Math.round(battery.current / battery.max * 100))) : 0;
+
+    const durColor = durPct > 60 ? 'var(--accent-green)' : durPct > 30 ? 'var(--accent-orange)' : 'var(--accent-red,#ff4444)';
+    const battColor = battPct > 40 ? 'var(--accent-green)' : battPct > 15 ? 'var(--accent-orange)' : 'var(--accent-red,#ff4444)';
+
+    let statusText = 'Idle';
+    let statusColor = 'var(--accent-green)';
+    if (drone.isDestroyed) { statusText = 'DESTROYED'; statusColor = 'var(--accent-red,#ff4444)'; }
+    else if (drone.isRepairing) { statusText = 'Repairing…'; statusColor = 'var(--accent-orange)'; }
+    else if (_droneData.activeMissionId) { statusText = 'On mission'; statusColor = 'var(--accent-blue)'; }
+
+    let missionHtml = '';
+    if (_droneMissionData && _droneData.activeMissionId && _droneMissionData.status === 'RUNNING') {
+        const loc = (_droneMissionData.location && _droneMissionData.location.name) || '';
+        const mis = (_droneMissionData.mission && _droneMissionData.mission.name) || '';
+        missionHtml = `<div class="detail-row"><span class="label">Mission:</span> ${loc} — ${mis}</div>`;
+        if (_droneMissionData.endTime) {
+            missionHtml += `<div class="detail-row"><span class="label">Returns:</span> <span class="drone-mission-timer" data-end="${_droneMissionData.endTime}">${formatTimeRemaining(_droneMissionData.endTime)}</span></div>`;
+        }
+    }
+
+    let repairHtml = '';
+    if (drone.isRepairing && drone.repairSecondsRemaining != null) {
+        repairHtml = `<div class="detail-row"><span class="label">Repair:</span> ${Math.ceil(drone.repairSecondsRemaining / 60)}m remaining</div>`;
+    }
+
+    let batteryHtml = `<div class="detail-row"><span class="label">Battery:</span> ${battery.current ?? '--'}/${battery.max ?? '--'}</div>`;
+    if (typeof battery.restoreSeconds === 'number' && battery.restoreSeconds > 0 && battery.current < battery.max) {
+        batteryHtml += `<div class="detail-row"><span class="label">Full in:</span> ${Math.floor(battery.restoreSeconds / 3600)}h ${Math.floor((battery.restoreSeconds % 3600) / 60)}m</div>`;
+    }
+
+    const card = document.createElement('div');
+    card.className = 'expedition-card';
+    card.innerHTML = `
+        <div class="exp-header">
+            <span class="exp-title">🛩️ ${drone.name || 'Drone'}</span>
+            <span class="exp-status" style="color:${statusColor};">${statusText}</span>
+        </div>
+        <div style="padding:4px 0;">
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text-muted);">
+                <span style="width:52px;">Durability</span>
+                <div style="flex:1;height:8px;background:rgba(255,255,255,0.08);border-radius:4px;overflow:hidden;">
+                    <div style="height:100%;width:${durPct}%;background:${durColor};border-radius:4px;"></div>
+                </div>
+                <span style="width:52px;text-align:right;">${drone.durability}/${drone.maxDurability}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text-muted);margin-top:4px;">
+                <span style="width:52px;">Battery</span>
+                <div style="flex:1;height:8px;background:rgba(255,255,255,0.08);border-radius:4px;overflow:hidden;">
+                    <div style="height:100%;width:${battPct}%;background:${battColor};border-radius:4px;"></div>
+                </div>
+                <span style="width:52px;text-align:right;">${battPct}%</span>
+            </div>
+            ${missionHtml}
+            ${repairHtml}
+            ${batteryHtml}
+        </div>
+    `;
+    personalDroneContainer.appendChild(card);
+
+    // Live mission timer ticking
+    if (_droneTimerInterval) { clearInterval(_droneTimerInterval); _droneTimerInterval = null; }
+    const timerEl = personalDroneContainer.querySelector('.drone-mission-timer');
+    if (timerEl) {
+        _droneTimerInterval = setInterval(() => {
+            const end = timerEl.dataset.end;
+            if (end) timerEl.textContent = formatTimeRemaining(end);
+        }, 1000);
+    }
+}
+
+async function requestDrone() {
+    if (!personalDroneContainer) return;
+    personalDroneContainer.innerHTML = '<div class="no-decisions">Requesting drone data...</div>';
+    try {
+        const tab = await getCor3Tab();
+        if (tab) await chrome.tabs.sendMessage(tab.id, { action: "requestDroneOptions" });
+    } catch (e) { /* not reachable */ }
+    await waitForStorageKey('droneData', 8000);
+    await loadDrone();
+    refreshAllTimestamps();
+}
+
+async function loadDrone() {
+    const { droneData, droneMissionData } = await chrome.storage.local.get(['droneData', 'droneMissionData']);
+    _droneData = droneData || null;
+    _droneMissionData = droneMissionData || null;
+    populateDroneSelects();
+    renderDrone();
+    refreshAllTimestamps();
+}
+
+// --- Drone settings load/save ---
+chrome.storage.sync.get('autoDrone', (data) => {
+    const cfg = data.autoDrone || {};
+    if (autoDroneToggle) autoDroneToggle.checked = !!cfg.enabled;
+    if (autoDroneClaimToggle) autoDroneClaimToggle.checked = cfg.autoClaim !== false;
+    if (autoDroneDecideToggle) autoDroneDecideToggle.checked = cfg.autoDecide !== false;
+    if (autoChooseDroneLocationToggle) autoChooseDroneLocationToggle.checked = !!cfg.autoChooseLocation;
+    if (autoDroneFullChargeToggle) autoDroneFullChargeToggle.checked = !!cfg.fullChargeBeforeLaunch;
+    if (autoDroneRepairToggle) autoDroneRepairToggle.checked = !!cfg.repairEnabled;
+    if (droneRepairThresholdInput) droneRepairThresholdInput.value = cfg.repairThreshold ?? 60;
+    if (autoDroneRepairOnLowBatteryToggle) autoDroneRepairOnLowBatteryToggle.checked = !!cfg.repairOnLowBattery;
+    if (droneLowBatteryThresholdInput) droneLowBatteryThresholdInput.value = cfg.lowBatteryThreshold ?? 30;
+    if (autoDronePauseOnFailToggle) autoDronePauseOnFailToggle.checked = cfg.pauseOnRepairFail !== false;
+    updateDroneMissionSelectRow();
+    updateDroneWarning(cfg);
+    if (cfg.locationConfigId && droneLocationSelect) droneLocationSelect.value = cfg.locationConfigId;
+    if (cfg.missionConfigId && droneMissionSelect) droneMissionSelect.value = cfg.missionConfigId;
+});
+
+function updateDroneWarning(cfg) {
+    if (!droneWarning) return;
+    if (cfg && cfg.paused) {
+        droneWarning.textContent = '⚠️ Auto-drone is paused. Re-enable auto-dispatch to resume.';
+        droneWarning.style.display = '';
+    } else {
+        droneWarning.style.display = 'none';
+    }
+}
+
+const droneToggleEls = [autoDroneToggle, autoDroneClaimToggle, autoDroneDecideToggle, autoChooseDroneLocationToggle, autoDroneFullChargeToggle, autoDroneRepairToggle, autoDroneRepairOnLowBatteryToggle, autoDronePauseOnFailToggle].filter(Boolean);
+droneToggleEls.forEach(el => {
+    el.addEventListener('change', () => {
+        if (el === autoChooseDroneLocationToggle) updateDroneMissionSelectRow();
+        if (el === autoDroneToggle && autoDroneToggle.checked) {
+            // User re-enabled — clear paused state and warnings in a single atomic write
+            chrome.storage.sync.get('autoDrone', (data) => {
+                const existing = data.autoDrone || {};
+                chrome.storage.sync.set({ autoDrone: Object.assign({}, existing, droneSettingsToStorage(), { paused: false }) });
+            });
+            chrome.storage.local.remove('droneWarning');
+            updateDroneWarning(null);
+            requestDrone();
+        } else {
+            saveDroneSettings();
+        }
+    });
+});
+
+if (droneRepairThresholdInput) {
+    droneRepairThresholdInput.addEventListener('change', () => saveDroneSettings());
+}
+if (droneLowBatteryThresholdInput) {
+    droneLowBatteryThresholdInput.addEventListener('change', () => saveDroneSettings());
+}
+
+if (droneLocationSelect) {
+    droneLocationSelect.addEventListener('change', () => {
+        populateDroneSelects();
+        saveDroneSettings();
+    });
+}
+if (droneMissionSelect) {
+    droneMissionSelect.addEventListener('change', () => saveDroneSettings());
+}
 
 // --- Inventory (inline expandable) ---
 const inventoryContainer = document.getElementById('inventoryContainer');
@@ -1446,6 +1749,7 @@ function renderSpecialistTimers(data) {
 // Load cached inventory on popup open
 loadInventory();
 loadSpecialistTimers();
+loadDrone();
 
 function renderInventory(data) {
     inventoryContainer.innerHTML = '';
@@ -3167,6 +3471,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (changes.mercenariesData || changes.usolMercenariesData || changes.mercConfigData) {
         loadMercenaries();
     }
+    if (changes.droneData || changes.droneMissionData) {
+        loadDrone();
+        loadExpeditions(); // reflect in-progress drone mission in Active Expedition
+    }
+    if (changes.droneWarning) {
+        const warn = changes.droneWarning.newValue;
+        if (warn && droneWarning) {
+            droneWarning.textContent = '⚠️ ' + warn;
+            droneWarning.style.display = '';
+        }
+    }
     if (changes.mercWarning) {
         const warning = changes.mercWarning.newValue;
         if (warning && mercWarning) {
@@ -3221,6 +3536,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
         if (autoSendMercenaryToggle) {
             autoSendMercenaryToggle.checked = !!settings.enabled;
         }
+    }
+    if (changes.autoDrone && changes.autoDrone.newValue) {
+        const cfg = changes.autoDrone.newValue;
+        if (autoDroneToggle) autoDroneToggle.checked = !!cfg.enabled;
+        updateDroneWarning(cfg);
     }
 });
 
