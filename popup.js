@@ -259,6 +259,7 @@ const sidePanelBtn = document.getElementById('sidePanelBtn');
     const allSections = mainView.querySelectorAll(':scope > .section');
 
     for (const s of allSections) {
+        if (s.style.display === 'none') continue; // panel hidden by Info Panel toggle
         if (s.textContent.includes('Daily Ops') && !s.querySelector('#marketContainer')) {
             addCard([s]);
             break;
@@ -267,29 +268,13 @@ const sidePanelBtn = document.getElementById('sidePanelBtn');
 
     let marketsSection = null;
     for (const s of allSections) {
+        if (s.style.display === 'none') continue; // panel hidden by Info Panel toggle
         if (s.querySelector('#marketContainer')) { marketsSection = s; break; }
     }
     if (marketsSection) {
+        // Keep all four markets grouped under one "Markets" card (each market is now collapsible)
         wrappedEls.add(marketsSection);
-        const mTitle = marketsSection.querySelector(':scope > .section-title');
-        const subSections = marketsSection.querySelectorAll(':scope > .sub-section');
-        const overlays = [
-            marketsSection.querySelector('#marketInfoOverlay'),
-            marketsSection.querySelector('#marketInfoPopup')
-        ].filter(Boolean);
-
-        if (subSections.length > 0) {
-            const firstGroup = [mTitle, subSections[0]].filter(Boolean);
-            if (subSections.length === 1) firstGroup.push(...overlays);
-            addCard(firstGroup);
-            for (let mi = 1; mi < subSections.length; mi++) {
-                const group = [subSections[mi]];
-                if (mi === subSections.length - 1) group.push(...overlays);
-                addCard(group);
-            }
-        } else {
-            addCard([marketsSection]);
-        }
+        addCard([marketsSection]);
     }
 
     let expeditionsSection = null;
@@ -300,34 +285,19 @@ const sidePanelBtn = document.getElementById('sidePanelBtn');
         }
     }
     if (expeditionsSection) {
+        // Keep Expeditions (title + mode tabs + A/B layer panels) as ONE card
         wrappedEls.add(expeditionsSection);
-        const expChildren = Array.from(expeditionsSection.children);
-        const splitPoints = [
-            { id: 'personalDroneSectionToggle', label: 'Personal Drone' },
-            { id: 'decisionsSectionToggle', label: 'Decisions' },
-            { id: 'inventorySectionToggle', label: 'Inventory' },
-            { id: 'mercenariesSectionToggle', label: 'Mercenaries' },
-            { id: 'archivedExpSectionToggle', label: 'Archived' }
-        ];
-        const splitIndices = [];
-        for (const sp of splitPoints) {
-            const idx = expChildren.findIndex(el =>
-                el.nodeType === 1 && (el.id === sp.id || el.querySelector('#' + sp.id))
-            );
-            if (idx >= 0) splitIndices.push(idx);
-        }
-        splitIndices.sort((a, b) => a - b);
+        addCard([expeditionsSection]);
+    }
 
-        if (splitIndices.length > 0) {
-            addCard(expChildren.slice(0, splitIndices[0]));
-            for (let si = 0; si < splitIndices.length; si++) {
-                const start = splitIndices[si];
-                const end = si + 1 < splitIndices.length ? splitIndices[si + 1] : expChildren.length;
-                addCard(expChildren.slice(start, end));
-            }
-        } else {
-            addCard([expeditionsSection]);
-        }
+    // Inventory is its own section now — place it right after Expeditions
+    let inventorySection = null;
+    for (const s of allSections) {
+        if (s.id === 'inventoryPanelSection') { inventorySection = s; break; }
+    }
+    if (inventorySection) {
+        wrappedEls.add(inventorySection);
+        addCard([inventorySection]);
     }
 
     let loadoutSection = null;
@@ -338,22 +308,9 @@ const sidePanelBtn = document.getElementById('sidePanelBtn');
         }
     }
     if (loadoutSection) {
+        // Keep Loadout with its three sub-blocks (Hardwares / Softwares / System Overview) as ONE card
         wrappedEls.add(loadoutSection);
-        const ldChildren = Array.from(loadoutSection.children);
-        const swToggleIdx = ldChildren.findIndex(el => el.querySelector('#loadoutSwToggle') || el.id === 'loadoutSwToggle');
-        const ovToggleIdx = ldChildren.findIndex(el => el.querySelector('#loadoutOverviewToggle') || el.id === 'loadoutOverviewToggle');
-        const ldSplits = [swToggleIdx, ovToggleIdx].filter(i => i >= 0).sort((a, b) => a - b);
-
-        if (ldSplits.length > 0) {
-            addCard(ldChildren.slice(0, ldSplits[0]));
-            for (let li = 0; li < ldSplits.length; li++) {
-                const start = ldSplits[li];
-                const end = li + 1 < ldSplits.length ? ldSplits[li + 1] : ldChildren.length;
-                addCard(ldChildren.slice(start, end));
-            }
-        } else {
-            addCard([loadoutSection]);
-        }
+        addCard([loadoutSection]);
     }
 
     for (const s of allSections) {
@@ -372,9 +329,8 @@ const sidePanelBtn = document.getElementById('sidePanelBtn');
     if (st) versionEls.push(st);
     addCard(versionEls);
 
-    if (marketsSection) marketsSection.remove();
-    if (expeditionsSection) expeditionsSection.remove();
-    if (loadoutSection) loadoutSection.remove();
+    // Markets, Loadout and Expeditions sections were moved whole into cards above — nothing
+    // left behind in mainView to clean up.
 
     const remaining = Array.from(mainView.children).filter(
         el => !wrappedEls.has(el) && el !== headerRow && !el.classList.contains('theme-dropdown') && el !== grid
@@ -653,6 +609,9 @@ const usolMarketLastUpdated = document.getElementById('usolMarketLastUpdated');
 const expeditionLastUpdated = document.getElementById('expeditionLastUpdated');
 const decisionLastUpdated = document.getElementById('decisionLastUpdated');
 const personalDroneLastUpdated = document.getElementById('personalDroneLastUpdated');
+const droneActiveLastUpdated = document.getElementById('droneActiveLastUpdated');
+const droneDecisionsLastUpdated = document.getElementById('droneDecisionsLastUpdated');
+const droneArchivedLastUpdated = document.getElementById('droneArchivedLastUpdated');
 const inventoryLastUpdated = document.getElementById('inventoryLastUpdated');
 const archivedExpLastUpdated = document.getElementById('archivedExpLastUpdated');
 const mercenariesLastUpdated = document.getElementById('mercenariesLastUpdated');
@@ -686,6 +645,9 @@ function refreshAllTimestamps() {
     showLastUpdated(expeditionLastUpdated, 'expeditionsDataUpdatedAt');
     showLastUpdated(decisionLastUpdated, 'expeditionsDataUpdatedAt');
     showLastUpdated(personalDroneLastUpdated, 'droneDataUpdatedAt');
+    if (droneActiveLastUpdated) showLastUpdated(droneActiveLastUpdated, 'droneMissionUpdatedAt');
+    if (droneDecisionsLastUpdated) showLastUpdated(droneDecisionsLastUpdated, 'droneMissionUpdatedAt');
+    if (droneArchivedLastUpdated) showLastUpdated(droneArchivedLastUpdated, 'droneArchivedUpdatedAt');
     if (inventoryLastUpdated) showLastUpdated(inventoryLastUpdated, 'stashDataUpdatedAt');
     if (archivedExpLastUpdated) showLastUpdated(archivedExpLastUpdated, 'archivedExpeditionsUpdatedAt');
     if (mercenariesLastUpdated) showLastUpdated(mercenariesLastUpdated, 'mercenariesUpdatedAt');
@@ -706,7 +668,35 @@ decisionsSectionToggle.addEventListener('click', () => {
     decisionsSectionBody.classList.toggle('open');
 });
 
-async function renderExpeditionInfo(expeditions) {
+// Wire collapsible Active Expedition B-layer blocks (both expedition modes)
+[['mercExpActiveToggle', 'mercExpActiveBody'], ['droneExpActiveToggle', 'droneExpActiveBody']].forEach(([thId, tbId]) => {
+    const h = document.getElementById(thId);
+    const b = document.getElementById(tbId);
+    if (h && b) h.addEventListener('click', () => { h.classList.toggle('open'); b.classList.toggle('open'); });
+});
+
+// --- Expedition mode tabs (Mercenaries A layer / Personal Drone A layer) ---
+const expTabMercenaries = document.getElementById('expTabMercenaries');
+const expTabDrone = document.getElementById('expTabDrone');
+const expPanelMercenaries = document.getElementById('expPanelMercenaries');
+const expPanelDrone = document.getElementById('expPanelDrone');
+
+function switchExpeditionMode(mode) {
+    if (!expTabMercenaries || !expTabDrone || !expPanelMercenaries || !expPanelDrone) return;
+    const merc = mode === 'merc';
+    expTabMercenaries.classList.toggle('active', merc);
+    expTabDrone.classList.toggle('active', !merc);
+    expPanelMercenaries.classList.toggle('active', merc);
+    expPanelDrone.classList.toggle('active', !merc);
+}
+if (expTabMercenaries) {
+    expTabMercenaries.addEventListener('click', () => switchExpeditionMode('merc'));
+}
+if (expTabDrone) {
+    expTabDrone.addEventListener('click', () => switchExpeditionMode('drone'));
+}
+
+function renderExpeditionInfo(expeditions) {
     expeditionInfoContainer.innerHTML = '';
 
     // Check for expedition launch errors
@@ -747,22 +737,14 @@ async function renderExpeditionInfo(expeditions) {
         }
     });
 
-    // Fetch the in-progress drone mission so it renders alongside mercenary expeditions
-    const { droneMissionData, droneData } = await chrome.storage.local.get(['droneMissionData', 'droneData']);
-    const droneHasMissionObj = !!(droneMissionData && droneMissionData.status === 'RUNNING');
-    const droneActiveNoObj = !!(droneData && droneData.activeMissionId && !droneMissionData);
-    const droneRunning = droneHasMissionObj || droneActiveNoObj;
-
-    const hasExpeditions = !!(expeditions && expeditions.length > 0);
-
-    if (!hasExpeditions && !droneRunning) {
+    if (!expeditions || expeditions.length === 0) {
         if (!expeditionInfoContainer.innerHTML) {
             expeditionInfoContainer.innerHTML = '<div class="no-decisions">No active expeditions.</div>';
         }
         return;
     }
 
-    if (hasExpeditions) for (const exp of expeditions) {
+    for (const exp of expeditions) {
         // Store endTime for live timer ticking
         if (exp.endTime) {
             expeditionEndTimes[exp.id] = exp.endTime;
@@ -840,36 +822,6 @@ async function renderExpeditionInfo(expeditions) {
             ${bodyHtml}
         `;
         expeditionInfoContainer.appendChild(card);
-    }
-
-    if (droneRunning) {
-        const droneCard = document.createElement('div');
-        droneCard.className = 'expedition-card';
-        if (droneHasMissionObj) {
-            const dKey = 'drone_' + droneMissionData.id;
-            if (droneMissionData.endTime) expeditionEndTimes[dKey] = droneMissionData.endTime;
-            const dLoc = (droneMissionData.location && droneMissionData.location.name) || '';
-            const dMis = (droneMissionData.mission && droneMissionData.mission.name) || '';
-            droneCard.innerHTML = `
-                <div class="exp-header">
-                    <span class="exp-title">🛩️ ${dLoc} — ${dMis}</span>
-                    <span class="exp-status running">DRONE</span>
-                </div>
-                <div class="detail-row"><span class="label">Type:</span> Drone Mission</div>
-                <div class="detail-row"><span class="label">Risk:</span> ${droneMissionData.finalRisk ?? '--'}</div>
-                <div class="detail-row"><span class="label">Battery Cost:</span> ${droneMissionData.batteryCost ?? '--'}</div>
-                ${droneMissionData.endTime ? `<div class="exp-timer-row"><span style="font-size:11px;color:var(--accent-orange);">⏳ <span class="exp-timer" data-exp-id="${dKey}">${formatTimeRemaining(droneMissionData.endTime)}</span></span></div>` : ''}
-            `;
-        } else {
-            droneCard.innerHTML = `
-                <div class="exp-header">
-                    <span class="exp-title">🛩️ Drone Mission</span>
-                    <span class="exp-status running">DRONE</span>
-                </div>
-                <div class="detail-row"><span class="label">Type:</span> Drone Mission in progress</div>
-            `;
-        }
-        expeditionInfoContainer.appendChild(droneCard);
     }
 
     // Wire up pin buttons
@@ -1486,6 +1438,8 @@ async function loadDrone() {
     _droneMissionData = droneMissionData || null;
     populateDroneSelects();
     renderDrone();
+    renderDroneActive();
+    renderDroneDecisions();
     refreshAllTimestamps();
 }
 
@@ -1554,6 +1508,192 @@ if (droneMissionSelect) {
     droneMissionSelect.addEventListener('change', () => saveDroneSettings());
 }
 
+// ============================================================================
+// Drone B-layer panels: Active Expedition / Decisions / Archived Expeditions
+// ============================================================================
+
+// --- Minimal UI language helper (en / zh) ------------------------------
+// Static UI text is English for now; localization (including zh) is a later pass.
+let UI_LANG = 'en';
+try {
+    chrome.storage.sync.get('uiLang', (d) => { if (d && d.uiLang) UI_LANG = d.uiLang; });
+} catch (e) {}
+function uiT(en, zh) { return UI_LANG === 'zh' ? zh : en; }
+
+// Map known game config ids / english names to Chinese so the UI stays readable
+// regardless of the client language the game returns.
+const DRONE_ZH = {
+    '019f7ef6-b720-7d74-a21f-629f48acf812': '火星地表',
+    '019f7ef6-b720-7ca9-b426-aec91235a611': '地表勘察',
+    'The Surface of Mars': '火星地表',
+    'Surface Exploration': '地表勘察'
+};
+function droneLocName(loc) {
+    if (!loc) return '';
+    if (UI_LANG === 'zh' && loc.name && DRONE_ZH[loc.name]) return DRONE_ZH[loc.name];
+    if (UI_LANG === 'zh' && DRONE_ZH[loc.id]) return DRONE_ZH[loc.id];
+    return loc.name || '';
+}
+function droneMisName(mis) {
+    if (!mis) return '';
+    if (UI_LANG === 'zh' && mis.name && DRONE_ZH[mis.name]) return DRONE_ZH[mis.name];
+    if (UI_LANG === 'zh' && DRONE_ZH[mis.id]) return DRONE_ZH[mis.id];
+    return mis.name || '';
+}
+
+const droneActiveContainer = document.getElementById('droneActiveContainer');
+const droneDecisionsSectionToggle = document.getElementById('droneDecisionsToggle');
+const droneDecisionsSectionBody = document.getElementById('droneDecisionsSectionBody');
+const droneDecisionsContainer = document.getElementById('droneDecisionsContainer');
+const droneDecisionsCount = document.getElementById('droneDecisionsCount');
+const droneArchivedToggle = document.getElementById('droneArchivedToggle');
+const droneArchivedSectionBody = document.getElementById('droneArchivedSectionBody');
+const droneArchivedContainer = document.getElementById('droneArchivedContainer');
+const refreshDroneActiveBtn = document.getElementById('refreshDroneActiveBtn');
+const refreshDroneArchivedBtn = document.getElementById('refreshDroneArchivedBtn');
+
+let _droneActiveTimer = null;
+
+droneDecisionsSectionToggle.addEventListener('click', () => {
+    droneDecisionsSectionToggle.classList.toggle('open');
+    droneDecisionsSectionBody.classList.toggle('open');
+});
+droneArchivedToggle.addEventListener('click', () => {
+    droneArchivedToggle.classList.toggle('open');
+    droneArchivedSectionBody.classList.toggle('open');
+    if (!droneArchivedSectionBody.classList.contains('open') && !_droneArchivedLoaded) return;
+    if (droneArchivedSectionBody.classList.contains('open') && !_droneArchivedLoaded) requestDroneArchived();
+});
+let _droneArchivedLoaded = false;
+
+function renderDroneActive() {
+    if (!droneActiveContainer) return;
+    if (_droneActiveTimer) { clearInterval(_droneActiveTimer); _droneActiveTimer = null; }
+    droneActiveContainer.innerHTML = '';
+    const mission = _droneMissionData;
+    const isRunning = mission && _droneData && _droneData.activeMissionId && mission.status === 'RUNNING';
+    if (!isRunning) {
+        droneActiveContainer.innerHTML = '<div class="no-decisions">'+uiT('No active drone mission.', '没有进行中的无人机任务。')+'</div>';
+        return;
+    }
+    const loc = droneLocName(mission.location);
+    const mis = droneMisName(mission.mission);
+    const card = document.createElement('div');
+    card.className = 'expedition-card';
+    card.innerHTML = `
+        <div class="exp-header">
+            <span class="exp-title">🛩️ ${loc} — ${mis}</span>
+            <span class="exp-status running">DRONE</span>
+        </div>
+        <div class="detail-row"><span class="label">Risk:</span> ${mission.finalRisk ?? '--'}</div>
+        <div class="detail-row"><span class="label">Battery Cost:</span> ${mission.batteryCost ?? '--'}</div>
+        ${mission.endTime ? `<div class="exp-timer-row"><span style="font-size:11px;color:var(--accent-orange);">⏳ <span class="drone-active-timer" data-end="${mission.endTime}">${formatTimeRemaining(mission.endTime)}</span></span></div>` : ''}
+    `;
+    droneActiveContainer.appendChild(card);
+    const timerEl = card.querySelector('.drone-active-timer');
+    if (timerEl) {
+        _droneActiveTimer = setInterval(() => { timerEl.textContent = formatTimeRemaining(timerEl.dataset.end); }, 1000);
+    }
+}
+
+function renderDroneDecisions() {
+    if (!droneDecisionsContainer) return;
+    droneDecisionsContainer.innerHTML = '';
+    const mission = _droneMissionData;
+    const isRunning = mission && _droneData && _droneData.activeMissionId && mission.status === 'RUNNING';
+    const events = isRunning && Array.isArray(mission.channelEvents) ? mission.channelEvents : [];
+    const decisions = events.filter(e => e.type === 'DECISION' || e.type === 'HAZARD');
+    if (droneDecisionsCount) droneDecisionsCount.textContent = decisions.length ? '(' + decisions.length + ')' : '';
+    if (!isRunning || decisions.length === 0) {
+        droneDecisionsContainer.innerHTML = '<div class="no-decisions">'+uiT('No active mission decisions.', '没有进行中的任务决策。')+'</div>';
+        return;
+    }
+    for (const ev of decisions) {
+        const chosen = (Array.isArray(mission.resolvedEvents) ? mission.resolvedEvents : []).find(r => r.eventId === ev.eventId);
+        const chosenLabel = chosen && Array.isArray(ev.options) ? (ev.options.find(o => o.id === chosen.optionId) || {}).label : null;
+        const statusColor = ev.isResolved ? 'var(--accent-green)' : 'var(--accent-orange)';
+        const statusText = ev.isResolved ? uiT('Resolved','已处理') : uiT('Pending','待处理');
+        const row = document.createElement('div');
+        row.style.cssText = 'font-size:10px;color:var(--text-muted);padding:4px 0;border-bottom:1px solid var(--border);';
+        row.innerHTML = `
+            <div style="display:flex;justify-content:space-between;gap:6px;">
+                <span style="font-weight:bold;color:${ev.type === 'DECISION' ? 'var(--accent-cyan)' : 'var(--accent-red)'};">${ev.type === 'DECISION' ? '🧭' : '⚠️'} ${ev.type}</span>
+                <span style="color:${statusColor};">${statusText}</span>
+            </div>
+            <div>${ev.message || ''}</div>
+            ${chosenLabel ? `<div style="color:var(--accent-green);">✔ ${chosenLabel}</div>` : ''}
+        `;
+        droneDecisionsContainer.appendChild(row);
+    }
+}
+
+function renderDroneArchived(data) {
+    if (!droneArchivedContainer) return;
+    droneArchivedContainer.innerHTML = '';
+    let items = data;
+    if (data && !Array.isArray(data) && data.items) items = data.items;
+    if (!items || !Array.isArray(items) || items.length === 0) {
+        droneArchivedContainer.innerHTML = '<div class="no-decisions">'+uiT('No archived drone missions found.', '没有已归档的无人机任务。')+'</div>';
+        return;
+    }
+    for (const m of items) {
+        const outcome = (m.outcome || m.status || 'ARCHIVED').toUpperCase();
+        let cls = 'outcome-full';
+        if (outcome.includes('PARTIAL')) cls = 'outcome-partial';
+        else if (outcome.includes('FAIL')) cls = 'outcome-fail';
+        const loc = droneLocName(m.location);
+        const mis = droneMisName(m.mission);
+        const card = document.createElement('div');
+        card.className = 'archived-exp-card';
+        card.innerHTML = `
+            <div class="archived-exp-header">
+                <span class="archived-exp-merc">🛩️ ${mis || '?'}</span>
+                <span class="outcome-tag ${cls}">${outcome}</span>
+            </div>
+            <div class="archived-exp-info">
+                📍 ${loc || '--'}<br>
+                ${m.startTime ? '🕐 ' + new Date(m.startTime).toLocaleString() : ''}<br>
+                ${m.finalRisk !== undefined ? '⚠️ Risk: ' + m.finalRisk + ' · ' : ''}${m.damageDealt !== undefined ? '💥 Dmg: ' + m.damageDealt : ''}
+                ${(m.loot && m.loot.length) ? '<br>' + uiT('📦 Loot: ','📦 战利品：') + m.loot.length + (UI_LANG === 'zh' ? ' 件' : ' item(s)') : ''}
+            </div>
+        `;
+        droneArchivedContainer.appendChild(card);
+    }
+}
+
+async function requestDroneArchived() {
+    if (!droneArchivedContainer) return;
+    droneArchivedContainer.innerHTML = '<div class="no-decisions">'+uiT('Loading archived drone missions...','正在加载已归档的无人机任务...')+'</div>';
+    try {
+        const tab = await getCor3Tab();
+        if (tab) await chrome.tabs.sendMessage(tab.id, { action: "requestDroneArchived", cursor: null, limit: 20 });
+    } catch (e) { /* not reachable */ }
+    await waitForStorageKey('droneArchivedData', 8000);
+    await loadDroneArchived();
+    refreshAllTimestamps();
+    _droneArchivedLoaded = true;
+}
+
+async function loadDroneArchived() {
+    const { droneArchivedData } = await chrome.storage.local.get('droneArchivedData');
+    renderDroneArchived(droneArchivedData || null);
+    refreshAllTimestamps();
+}
+
+if (refreshDroneActiveBtn) {
+    refreshDroneActiveBtn.addEventListener('click', async () => {
+        try {
+            const tab = await getCor3Tab();
+            if (tab) await chrome.tabs.sendMessage(tab.id, { action: "requestDroneOptions" });
+        } catch (e) { /* not reachable */ }
+        setTimeout(() => loadDrone(), 2000);
+    });
+}
+if (refreshDroneArchivedBtn) {
+    refreshDroneArchivedBtn.addEventListener('click', () => requestDroneArchived());
+}
+loadDroneArchived();
+
 // --- Inventory (inline expandable) ---
 const inventoryContainer = document.getElementById('inventoryContainer');
 const inventorySectionToggle = document.getElementById('inventorySectionToggle');
@@ -1591,8 +1731,112 @@ async function requestAndLoadInventory() {
 
 async function loadInventory() {
     const { stashData } = await chrome.storage.local.get('stashData');
+    _stashData = stashData || null;
     renderInventory(stashData);
+    updateInventoryBatchSell();
 }
+
+// --- Inventory batch sell (rarity + craft-tag filters, both required) ---
+let _stashData = null;
+const invBatchRarity = document.getElementById('invBatchRarity');
+const invBatchTag = document.getElementById('invBatchTag');
+const invBatchCount = document.getElementById('invBatchCount');
+const invBatchSellBtn = document.getElementById('invBatchSellBtn');
+let _invBatchConfirmTimer = null;
+
+function inventoryBatchMatches() {
+    if (!_stashData || !Array.isArray(_stashData.items)) return [];
+    const rarity = invBatchRarity ? invBatchRarity.value : 'COMMON';
+    const tag = invBatchTag ? invBatchTag.value : 'NONE';
+    const wantCraft = tag === 'CRAFT';
+    return _stashData.items.filter(it =>
+        it.canSell && it.sellPrice && it.sellPrice > 0 &&
+        (it.tier || '').toUpperCase() === rarity &&
+        !!it.canCraft === wantCraft
+    );
+}
+
+let _invBatchSelling = false;
+let _invBatchTimer = null;
+
+function finishInventoryBatch() {
+    if (!_invBatchSelling) return;
+    _invBatchSelling = false;
+    if (_invBatchTimer) { clearTimeout(_invBatchTimer); _invBatchTimer = null; }
+    loadInventory(); // will call updateInventoryBatchSell() to refresh button
+}
+
+function updateInventoryBatchSell() {
+    if (!invBatchCount || !invBatchSellBtn) return;
+    const matches = inventoryBatchMatches();
+    const count = matches.length;
+    invBatchCount.textContent = count === 0 ? 'no matches' : count + ' item(s) · 💰 ' + matches.reduce((s, i) => s + (i.sellPrice * (i.quantity || 1)), 0).toLocaleString();
+    if (!_invBatchSelling) {
+        invBatchSellBtn.disabled = count === 0;
+        invBatchSellBtn.style.opacity = count === 0 ? '0.4' : '';
+        invBatchSellBtn.textContent = 'Sell';
+        invBatchSellBtn.style.borderColor = 'var(--accent-green)';
+        invBatchSellBtn.style.color = 'var(--accent-green)';
+        invBatchSellBtn.classList.remove('inv-sell-confirm');
+    }
+}
+
+if (invBatchRarity) invBatchRarity.addEventListener('change', updateInventoryBatchSell);
+if (invBatchTag) invBatchTag.addEventListener('change', updateInventoryBatchSell);
+
+if (invBatchSellBtn) {
+    invBatchSellBtn.addEventListener('click', async () => {
+        const matches = inventoryBatchMatches();
+        if (matches.length === 0 || _invBatchSelling) return;
+        if (!invBatchSellBtn.classList.contains('inv-sell-confirm')) {
+            // First click: ask for confirmation
+            invBatchSellBtn.classList.add('inv-sell-confirm');
+            invBatchSellBtn.textContent = 'Confirm sell ' + matches.length + '?';
+            invBatchSellBtn.style.borderColor = 'var(--accent-orange)';
+            invBatchSellBtn.style.color = 'var(--accent-orange)';
+            if (_invBatchConfirmTimer) clearTimeout(_invBatchConfirmTimer);
+            _invBatchConfirmTimer = setTimeout(() => {
+                updateInventoryBatchSell();
+            }, 4000);
+            return;
+        }
+        // Second click: execute (page-world batch in content-early)
+        if (_invBatchConfirmTimer) clearTimeout(_invBatchConfirmTimer);
+        _invBatchSelling = true;
+        invBatchSellBtn.classList.remove('inv-sell-confirm');
+        invBatchSellBtn.disabled = true;
+        invBatchSellBtn.textContent = 'Selling ' + matches.length + '…';
+        invBatchSellBtn.style.opacity = '';
+        _invBatchTimer = setTimeout(finishInventoryBatch, 60000); // safety fallback
+        try {
+            const tab = await getCor3Tab();
+            if (!tab) { finishInventoryBatch(); return; }
+            // Single-sell requests are sent while in the stash room — join it first
+            try { await chrome.tabs.sendMessage(tab.id, { action: 'requestStash' }); } catch (e) { /* best effort */ }
+            await new Promise(r => setTimeout(r, 2000));
+            // content.js replies after the full batch; then request one final stash refresh
+            await new Promise((resolve) => {
+                chrome.tabs.sendMessage(tab.id, {
+                    action: 'batchSellItems',
+                    items: matches.map(m => ({ itemId: m.id, quantity: m.quantity || 1 }))
+                }, () => resolve());
+            });
+            await chrome.tabs.sendMessage(tab.id, { action: 'requestStash' });
+            setTimeout(finishInventoryBatch, 1200);
+        } catch (err) {
+            console.log('[COR3 Helper] Batch sell error:', err);
+            cor3LogError('popup.js', err, { action: 'batchSellItems' });
+            finishInventoryBatch();
+        }
+    });
+}
+
+// Finish/settle when the page-world batch reports completion
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes._invBatchDone && _invBatchSelling) {
+        finishInventoryBatch();
+    }
+});
 
 async function loadSpecialistTimers() {
     try {
@@ -2758,6 +3002,31 @@ async function refreshUsolMarketData() {
 
 refreshUsolMarketBtn.addEventListener('click', () => refreshUsolMarketData());
 
+// --- Collapsible market panels (fold arrows like Hardwares/Softwares) ---
+function wireMarketToggle(toggleId, bodyId, containerId, requestAction) {
+    const toggle = document.getElementById(toggleId);
+    const body = document.getElementById(bodyId);
+    const container = document.getElementById(containerId);
+    if (!toggle || !body) return;
+    toggle.addEventListener('click', async () => {
+        const wasOpen = body.classList.contains('open');
+        toggle.classList.toggle('open');
+        body.classList.toggle('open');
+        // If expanding an empty panel, fetch its data
+        if (!wasOpen && container && container.innerText.indexOf('No market data cached') !== -1) {
+            try {
+                const tab = await getCor3Tab();
+                if (tab) await chrome.tabs.sendMessage(tab.id, { action: requestAction });
+            } catch (e) { /* not reachable */ }
+        }
+    });
+}
+
+wireMarketToggle('coreMarketToggle', 'coreMarketBody', 'marketContainer', 'requestMarket');
+wireMarketToggle('darkMarketToggle', 'darkMarketBody', 'darkMarketContainer', 'requestDarkMarket');
+wireMarketToggle('soyuzMarketToggle', 'soyuzMarketBody', 'soyuzMarketContainer', 'requestSoyuzMarket');
+wireMarketToggle('usolMarketToggle', 'usolMarketBody', 'usolMarketContainer', 'requestUsolMarket');
+
 // On popup open: load cached market data (no WS requests)
 chrome.storage.local.get(['marketData', 'darkMarketData', 'darkMarketAvailable', 'darkMarketMaintenanceEndsAt', 'darkMarketBlockerServer', 'soyuzMarketData', 'soyuzMarketAvailable', 'soyuzMarketMaintenanceEndsAt', 'soyuzMarketBlockerServer', 'usolMarketData', 'usolMarketAvailable', 'usolMarketMaintenanceEndsAt', 'usolMarketBlockerServer'], (result) => {
     if (result.marketData) {
@@ -3473,7 +3742,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
     }
     if (changes.droneData || changes.droneMissionData) {
         loadDrone();
-        loadExpeditions(); // reflect in-progress drone mission in Active Expedition
+    }
+    if (changes.droneArchivedData) {
+        loadDroneArchived();
     }
     if (changes.droneWarning) {
         const warn = changes.droneWarning.newValue;
@@ -5497,15 +5768,57 @@ chrome.storage.onChanged.addListener((changes, area) => {
     }
 });
 
-// --- Toggles Show More/Less ---
-const togglesExtra = document.getElementById('togglesExtra');
+// --- Toggles Show All/Hide (collapses the entire Automation/QoL content) ---
+const togglesBody = document.getElementById('togglesBody');
 const togglesShowMoreBtn = document.getElementById('togglesShowMoreBtn');
-if (togglesShowMoreBtn && togglesExtra) {
+if (togglesShowMoreBtn && togglesBody) {
+    const updateTogglesBtn = () => {
+        const hidden = togglesBody.style.display === 'none';
+        togglesShowMoreBtn.textContent = hidden ? 'Show toggles ▾' : 'Hide toggles ▴';
+    };
     togglesShowMoreBtn.addEventListener('click', () => {
-        const isHidden = togglesExtra.style.display === 'none';
-        togglesExtra.style.display = isHidden ? '' : 'none';
-        togglesShowMoreBtn.textContent = isHidden ? 'Show Less ▲' : 'Show More ▼';
+        togglesBody.style.display = togglesBody.style.display === 'none' ? '' : 'none';
+        updateTogglesBtn();
     });
+    updateTogglesBtn();
+}
+
+// --- Info Panel visibility (Daily Ops / Markets are info panels, not automation) ---
+const dailyOpsPanelToggle = document.getElementById('dailyOpsPanelToggle');
+const dailyOpsPanelStatus = document.getElementById('dailyOpsPanelStatus');
+const dailyOpsPanelSection = document.getElementById('dailyOpsPanelSection');
+const marketsPanelToggle = document.getElementById('marketsPanelToggle');
+const marketsPanelStatus = document.getElementById('marketsPanelStatus');
+const marketsPanelSection = document.getElementById('marketsPanelSection');
+
+function applyPanelVisibility(toggleEl, statusEl, section, key) {
+    const enabled = toggleEl.checked;
+    statusEl.textContent = enabled ? 'On' : 'Off';
+    statusEl.style.color = enabled ? 'var(--accent-green)' : 'var(--text-dim)';
+    section.style.display = enabled ? '' : 'none';
+    const card = section.closest('.popout-card');
+    if (card) card.style.display = enabled ? '' : 'none';
+    chrome.storage.sync.set({ [key]: enabled });
+}
+
+chrome.storage.sync.get(['dailyOpsPanelEnabled', 'marketsPanelEnabled'], (data) => {
+    if (dailyOpsPanelToggle) dailyOpsPanelToggle.checked = data.dailyOpsPanelEnabled !== false;
+    if (marketsPanelToggle) marketsPanelToggle.checked = data.marketsPanelEnabled !== false;
+    if (dailyOpsPanelToggle && dailyOpsPanelStatus && dailyOpsPanelSection) {
+        applyPanelVisibility(dailyOpsPanelToggle, dailyOpsPanelStatus, dailyOpsPanelSection, 'dailyOpsPanelEnabled');
+    }
+    if (marketsPanelToggle && marketsPanelStatus && marketsPanelSection) {
+        applyPanelVisibility(marketsPanelToggle, marketsPanelStatus, marketsPanelSection, 'marketsPanelEnabled');
+    }
+});
+
+if (dailyOpsPanelToggle && dailyOpsPanelStatus && dailyOpsPanelSection) {
+    dailyOpsPanelToggle.addEventListener('change', () =>
+        applyPanelVisibility(dailyOpsPanelToggle, dailyOpsPanelStatus, dailyOpsPanelSection, 'dailyOpsPanelEnabled'));
+}
+if (marketsPanelToggle && marketsPanelStatus && marketsPanelSection) {
+    marketsPanelToggle.addEventListener('change', () =>
+        applyPanelVisibility(marketsPanelToggle, marketsPanelStatus, marketsPanelSection, 'marketsPanelEnabled'));
 }
 
 // --- Auto Job Solver ---
