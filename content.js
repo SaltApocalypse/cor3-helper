@@ -239,6 +239,24 @@ window.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'COR3_WS_DRONE_REPAIR') {
         console.log('[COR3 Helper] Auto-drone: repair started');
     }
+    if (event.data && event.data.type === 'COR3_BATCH_SELL_DONE') {
+        chrome.storage.local.set({ _invBatchDone: { ts: Date.now(), count: event.data.count || 0 } });
+    }
+    if (event.data && event.data.type === 'COR3_WS_DRONE_ARCHIVED') {
+        const arcData = event.data.data || {};
+        const items = Array.isArray(arcData.items) ? arcData.items : [];
+        chrome.storage.local.get('droneArchivedData', (prev) => {
+            let mergedItems = items;
+            if (prev.droneArchivedData && Array.isArray(prev.droneArchivedData.items) && prev.droneArchivedData.items.length > 0) {
+                const seen = new Set(prev.droneArchivedData.items.map(i => i.id));
+                mergedItems = prev.droneArchivedData.items.concat(items.filter(i => !seen.has(i.id)));
+            }
+            chrome.storage.local.set({
+                droneArchivedData: Object.assign({}, arcData, { items: mergedItems }),
+                droneArchivedUpdatedAt: now
+            });
+        });
+    }
     if (event.data && event.data.type === 'COR3_WS_DRONE_ERROR') {
         handleDroneError(event.data.action, event.data.error);
     }
@@ -1591,8 +1609,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         window.postMessage({ type: 'COR3_LEAVE_STASH' }, '*');
         sendResponse({ success: true });
     } else if (request.action === "sellItem") {
-        window.postMessage({ type: 'COR3_SELL_ITEM', itemId: request.itemId, quantity: request.quantity || 1 }, '*');
+        window.postMessage({ type: 'COR3_SELL_ITEM', itemId: request.itemId, quantity: request.quantity || 1, skipStashRefresh: !!request.skipStashRefresh }, '*');
         sendResponse({ success: true });
+    } else if (request.action === "batchSellItems") {
+        // Drive batch through the same proven single-sell path, skipping per-sell stash
+        // refresh; one explicit stash refresh is requested afterwards by the popup.
+        const items = request.items || [];
+        console.log('[COR3 Helper] batchSellItems requested, n=', Array.isArray(items) ? items.length : 0);
+        if (!Array.isArray(items) || items.length === 0) {
+            sendResponse({ success: true, count: 0 });
+            return;
+        }
+        let bi = 0;
+        (function sellNextOne() {
+            if (bi >= items.length) {
+                sendResponse({ success: true, count: items.length });
+                return;
+            }
+            const it = items[bi++];
+            window.postMessage({ type: 'COR3_SELL_ITEM', itemId: it.itemId, quantity: it.quantity || 1, skipStashRefresh: true }, '*');
+            setTimeout(sellNextOne, 800 + Math.floor(Math.random() * 200));
+        })();
+        return true; // async sendResponse when batch finishes
     } else if (request.action === "keepWorkerAlive") {
         window.postMessage({ type: 'COR3_KEEP_ALIVE' }, '*');
         sendResponse({ success: true });
@@ -1679,6 +1717,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: true });
     } else if (request.action === "repairDrone") {
         window.postMessage({ type: 'COR3_REPAIR_DRONE', targetDurability: request.targetDurability }, '*');
+        sendResponse({ success: true });
+    } else if (request.action === "requestDroneArchived") {
+        window.postMessage({ type: 'COR3_REQUEST_DRONE_ARCHIVED', cursor: request.cursor || null, limit: request.limit || 20 }, '*');
         sendResponse({ success: true });
     } else if (request.action === "fetchDailyOps") {
         // Fetch daily ops in page context using stored bearer token

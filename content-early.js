@@ -706,6 +706,8 @@ var webVersion = null;
                 window.postMessage({ type: 'COR3_WS_DRONE_EVENT', data: payload.data }, '*');
             } else if (dmAction === 'completed') {
                 window.postMessage({ type: 'COR3_WS_DRONE_COMPLETED', data: payload.data }, '*');
+            } else if (dmAction === 'get.archived') {
+                window.postMessage({ type: 'COR3_WS_DRONE_ARCHIVED', data: payload.data }, '*');
             }
             return;
         }
@@ -1574,6 +1576,13 @@ var webVersion = null;
         wsSend(msg);
         return true;
     };
+    window.__cor3RequestDroneArchived = function (cursor, limit) {
+        console.log('[COR3 Helper] Requesting drone archived missions');
+        var data = { cursor: cursor || null, limit: limit || 20 };
+        var msg = '42["event",{"event":{"name":"drone-missions","action":"get.archived"},"data":' + JSON.stringify(data) + '}]';
+        wsSend(msg);
+        return true;
+    };
 
     // Get a random human-like delay (400–900ms)
     function humanDelay() {
@@ -1797,6 +1806,34 @@ var webVersion = null;
                 window.__cor3RequestStash();
             }, 1500);
         }
+        return true;
+    };
+
+    // Batch sell runs here in the page world (same place single sells are sent) so the
+    // WS socket/throttle is handled directly. Each sell.item response already echoes the
+    // updated stash, so content.js/popup update automatically between items.
+    window.__cor3BatchSellItems = function (items) {
+        var list = Array.isArray(items) ? items : [];
+        console.log('[COR3 Helper] Batch selling', list.length, 'item(s)');
+        if (list.length === 0) return true;
+        var idx = 0;
+        function step() {
+            if (idx >= list.length) {
+                console.log('[COR3 Helper] Batch sell complete:', list.length);
+                window.postMessage({ type: 'COR3_BATCH_SELL_DONE', count: list.length }, '*');
+                setTimeout(function () {
+                    if (window.__cor3RequestStash) window.__cor3RequestStash();
+                }, 600);
+                return;
+            }
+            var it = list[idx++];
+            var qty = it.quantity || 1;
+            console.log('[COR3 Helper] Batch selling', it.itemId, 'qty', qty);
+            var msg = '42["event",{"event":{"name":"stash","action":"sell.item"},"data":{"itemId":"' + it.itemId + '","quantity":' + qty + '}}]';
+            wsSend(msg);
+            setTimeout(step, 700 + Math.floor(Math.random() * 200));
+        }
+        setTimeout(step, 250);
         return true;
     };
 
@@ -3321,6 +3358,9 @@ var webVersion = null;
         if (event.data && event.data.type === 'COR3_SELL_ITEM') {
             window.__cor3SellItem(event.data.itemId, event.data.quantity || 1, event.data.skipStashRefresh);
         }
+        if (event.data && event.data.type === 'COR3_BATCH_SELL') {
+            window.__cor3BatchSellItems(event.data.items);
+        }
         // Decision response from popup
         if (event.data && event.data.type === 'COR3_RESPOND_DECISION') {
             window.__cor3RespondDecision(event.data.expeditionId, event.data.messageId, event.data.selectedOption);
@@ -3372,6 +3412,9 @@ var webVersion = null;
         }
         if (event.data && event.data.type === 'COR3_REPAIR_DRONE') {
             window.__cor3RepairDrone(event.data.targetDurability);
+        }
+        if (event.data && event.data.type === 'COR3_REQUEST_DRONE_ARCHIVED') {
+            window.__cor3RequestDroneArchived(event.data.cursor, event.data.limit);
         }
         if (event.data && event.data.type === 'COR3_STOP_DECRYPT_SOLVER') {
             window.__solverAbort = true;
