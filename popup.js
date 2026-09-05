@@ -1578,22 +1578,35 @@ function renderDroneActive() {
     }
     const loc = droneLocName(mission.location);
     const mis = droneMisName(mission.mission);
+    if (mission.endTime) expeditionEndTimes[mission.id] = mission.endTime; // shared timer/pin map
     const card = document.createElement('div');
     card.className = 'expedition-card';
     card.innerHTML = `
         <div class="exp-header">
-            <span class="exp-title">🛩️ ${loc} — ${mis}</span>
-            <span class="exp-status running">DRONE</span>
+            <span class="exp-title">📍 ${loc} — ${mis}</span>
+            <span class="exp-status running">${mission.status || 'RUNNING'}</span>
         </div>
         <div class="detail-row"><span class="label">Risk:</span> ${mission.finalRisk ?? '--'}</div>
         <div class="detail-row"><span class="label">Battery Cost:</span> ${mission.batteryCost ?? '--'}</div>
-        ${mission.endTime ? `<div class="exp-timer-row"><span style="font-size:11px;color:var(--accent-orange);">⏳ <span class="drone-active-timer" data-end="${mission.endTime}">${formatTimeRemaining(mission.endTime)}</span></span></div>` : ''}
+        ${mission.endTime ? `
+        <div class="exp-timer-row">
+            <span style="font-size:11px;color:var(--accent-orange);">⏳ <span class="exp-timer" data-exp-id="${mission.id}">${formatTimeRemaining(mission.endTime)}</span></span>
+            <button class="refresh-btn-small pin-btn pin-exp-btn" data-exp-id="${mission.id}" title="Pin Expedition Timer">📌</button>
+        </div>` : ''}
     `;
     droneActiveContainer.appendChild(card);
-    const timerEl = card.querySelector('.drone-active-timer');
-    if (timerEl) {
-        _droneActiveTimer = setInterval(() => { timerEl.textContent = formatTimeRemaining(timerEl.dataset.end); }, 1000);
-    }
+    // Wire pin button the same way mercenary expedition cards do
+    droneActiveContainer.querySelectorAll('.pin-exp-btn').forEach(btn => {
+        const expId = btn.dataset.expId;
+        btn.classList.toggle('pinned', !!pinnedTimers['exp_' + expId]);
+        btn.addEventListener('click', async () => {
+            const key = 'exp_' + expId;
+            pinnedTimers[key] = !pinnedTimers[key];
+            btn.classList.toggle('pinned', !!pinnedTimers[key]);
+            await savePinnedState();
+            renderPinnedTimers();
+        });
+    });
 }
 
 function renderDroneDecisions() {
@@ -3529,10 +3542,13 @@ function renderPinnedTimers() {
         pinnedTimersContainer.appendChild(row);
     }
 
-    // Resolve expedition names from storage and clean up stale pins
-    chrome.storage.local.get('expeditionsData', async (result) => {
+    // Resolve expedition/drone names from storage and clean up stale pins
+    chrome.storage.local.get(['expeditionsData', 'droneMissionData'], async (result) => {
         const exps = result.expeditionsData || [];
+        const droneMission = result.droneMissionData || null;
         const activeExpIds = new Set(exps.map(e => e.id));
+        const activeDroneId = droneMission && droneMission.status === 'RUNNING' ? droneMission.id : null;
+        if (activeDroneId) activeExpIds.add(activeDroneId);
         let staleRemoved = false;
 
         // Remove pins for expeditions that no longer exist
@@ -3559,6 +3575,13 @@ function renderPinnedTimers() {
             if (labelEl) {
                 labelEl.textContent = `${exp.locationName || 'Expedition'} — ${exp.zoneName || ''}`;
             }
+        }
+        if (activeDroneId) {
+            const loc = droneLocName(droneMission.location);
+            const mis = droneMisName(droneMission.mission);
+            if (droneMission.endTime) expeditionEndTimes[activeDroneId] = droneMission.endTime;
+            const labelEl = pinnedTimersContainer.querySelector(`.pinned-exp-label[data-exp-id="${activeDroneId}"]`);
+            if (labelEl) labelEl.textContent = `${loc} — ${mis}`;
         }
     });
 }
