@@ -444,7 +444,90 @@
         </div>
         <div class="last-updated" id="personalDroneLastUpdated"></div>
         <div class="expandable-body" id="personalDroneSectionBody">
+            <div style="display:flex;justify-content:flex-end;margin-bottom:4px;">
+                <button id="refreshDroneBtn" class="refresh-btn-small" title="Refresh Drone">🔄</button>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Auto-dispatch drone</span>
+                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneToggle"><span class="slider-track"></span></label>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Auto-claim rewards</span>
+                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneClaimToggle"><span class="slider-track"></span></label>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Auto-resolve mission events</span>
+                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneDecideToggle"><span class="slider-track"></span></label>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Auto-choose mission</span>
+                <label class="alarm-toggle-switch"><input type="checkbox" id="autoChooseDroneLocationToggle"><span class="slider-track"></span></label>
+            </div>
+            <div class="auto-choose-row" id="droneMissionSelectRow">
+                <span style="font-size:10px;">Destination</span>
+                <div style="display:flex;gap:4px;">
+                    <select id="droneLocationSelect" style="max-width:110px;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;"></select>
+                    <select id="droneMissionSelect" style="max-width:110px;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;"></select>
+                </div>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Launch only when fully charged</span>
+                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneFullChargeToggle"><span class="slider-track"></span></label>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Auto-repair drone</span>
+                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneRepairToggle"><span class="slider-track"></span></label>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Repair below durability</span>
+                <input type="number" id="droneRepairThresholdInput" min="1" max="99" value="60" style="width:52px;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:2px 4px;">
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Repair when battery &lt; <input type="number" id="droneLowBatteryThresholdInput" min="1" max="99" value="30" style="width:40px;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:2px 4px;">%</span>
+                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneRepairOnLowBatteryToggle"><span class="slider-track"></span></label>
+            </div>
+            <div class="auto-choose-row">
+                <span style="font-size:10px;">Pause if repair fails</span>
+                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDronePauseOnFailToggle"><span class="slider-track"></span></label>
+            </div>
+            <div id="droneWarning" style="display:none;background:rgba(255,160,0,0.15);border:1px solid var(--accent-orange);border-radius:6px;padding:6px 10px;margin-bottom:6px;font-size:10px;color:var(--accent-orange);"></div>
             <div id="personalDroneContainer"></div>
+
+            <!-- B layer: Active Expedition -->
+            <div class="market-sub-header" style="margin-top:8px;">
+                <div class="expandable-header open" id="droneExpActiveToggle" style="flex:1;">
+                    <span class="expand-arrow-sub">▶</span>
+                    <span class="market-sub-label">📍 Active Expedition</span>
+                </div>
+                <button id="refreshDroneActiveBtn" class="refresh-btn-small" title="Refresh Drone Mission">🔄</button>
+            </div>
+            <div class="last-updated" id="droneActiveLastUpdated"></div>
+            <div class="expandable-body open" id="droneExpActiveBody">
+                <div id="droneActiveContainer"><div class="no-decisions">No active drone mission.</div></div>
+            </div>
+
+            <!-- B layer: Decisions -->
+            <div class="expandable-header" id="droneDecisionsToggle">
+                <span class="expand-arrow-sub">▶</span>
+                <span class="market-sub-label">📋 Decisions <span id="droneDecisionsCount" style="font-size:9px;color:var(--text-dim);"></span></span>
+            </div>
+            <div class="last-updated" id="droneDecisionsLastUpdated"></div>
+            <div class="expandable-body" id="droneDecisionsSectionBody">
+                <div id="droneDecisionsContainer"><div class="no-decisions">No active mission decisions.</div></div>
+            </div>
+
+            <!-- B layer: Archived Expeditions -->
+            <div class="market-sub-header" style="margin-top:8px;">
+                <div class="expandable-header" id="droneArchivedToggle" style="flex:1;">
+                    <span class="expand-arrow-sub">▶</span>
+                    <span class="market-sub-label">📦 Archived Expeditions</span>
+                </div>
+                <button id="refreshDroneArchivedBtn" class="refresh-btn-small" title="Refresh Drone Archived">🔄</button>
+            </div>
+            <div class="last-updated" id="droneArchivedLastUpdated"></div>
+            <div class="expandable-body" id="droneArchivedSectionBody">
+                <div id="droneArchivedContainer"><div class="no-decisions">No archived drone missions.</div></div>
+            </div>
         </div>
 
         <!-- Decisions (expandable) -->
@@ -514,6 +597,22 @@
         <div class="last-updated" id="inventoryLastUpdated"></div>
         <div class="expandable-body" id="inventorySectionBody">
             <div id="specialistTimerInfo" style="display:none;"></div>
+            <!-- Batch sell toolbar -->
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px;font-size:10px;color:var(--text-secondary);">
+                <span>Rarity</span>
+                <select id="invBatchRarity" style="width:auto;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:2px 4px;">
+                    <option value="COMMON" selected>COMMON</option>
+                    <option value="RARE">RARE</option>
+                    <option value="EPIC">EPIC</option>
+                </select>
+                <span>Tag</span>
+                <select id="invBatchTag" style="width:auto;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:2px 4px;">
+                    <option value="NONE" selected>NONE</option>
+                    <option value="CRAFT">CRAFT</option>
+                </select>
+                <span id="invBatchCount" style="color:var(--text-dim);">-</span>
+                <button id="invBatchSellBtn" class="refresh-btn-small" style="margin-left:auto;padding:4px 10px !important;font-size:11px;border:1px solid var(--accent-green);color:var(--accent-green);">Sell</button>
+            </div>
             <div id="inventoryContainer"><div class="no-decisions">Loading inventory...</div></div>
             <div class="loadout-hw-info-overlay" id="inventoryInfoOverlay"></div>
             <div class="loadout-hw-info-popup" id="inventoryInfoPopup"></div>
