@@ -18,16 +18,18 @@ The use of automation tools may be detectable by the site's developers and could
 - **Auto Decrypt Hacking** — Automatically solves decryption hacks when enabled. Just toggle it on and the extension handles the rest
 - **Auto ICE Wall Hacking** — Automatically solves ICE Wall hacking minigame. Detects triangle patterns and clicks them in the correct sequence to complete the puzzle
 - **Auto Simple Decrypt Hacking** — Automatically solves Simple Decrypt hacking minigame. Clicks the decrypt button and monitors progress until completion
-- **Anti-AFK Clicker** — Prevents the anti-AFK screen locker from appearing by simulating a click on the desktop wrapper every 3 minutes. Performs an immediate click on enable, then repeats on interval. Automatically enabled when any automation feature starts (Auto Job Solver, Auto Valuable Seller, Auto Daily Hacking, hack solvers, etc.)
+- **Anti-AFK Clicker** — Automatically prevents the anti-AFK screen locker from appearing by simulating a click on the desktop wrapper every 3 minutes. Enabled internally whenever any automation feature starts (Auto Job Solver, Auto Valuable Seller, Auto Daily Hacking, hack solvers, etc.)
 - **Auto Daily Hacking** — Fully automated daily ops solver. Opens daily ops tab, starts the task, detects the puzzle type (System Log Integrity or Signal Hack), solves it end-to-end, closes windows, and auto-disables the toggle after completion. Includes retry logic (up to 3 attempts) with automatic window cleanup between retries
 - **Auto Job Solver** — Automated market job solver supporting 9 job types: File Decryption, IP Injection, Data Download, Log Deletion, Log Download, Decrypt & Extract, File Elimination, Data Upload, and IP Cleanup. Features a tabbed UI showing HOME, D4RK, SOYUZ, and USOL market jobs with per-type checkboxes, a start/stop button, and a debug console with Jobs and Logs tabs. Jobs are sorted by server priority (furthest first) and job type priority, automatically handle endpoint setting (with hack-through if unreachable), server login (with hack if no active access), type-specific actions, and job completion with reward tracking. Checks server maintenance status before each job and skips jobs on servers currently in maintenance. Includes dynamic loadout management — automatically equips the right hack/decrypt software before each job and retries with loadout swaps on power/software errors
 - **Auto Valuable Seller** — Automated valuable file/log scanner and seller. Scans all reachable servers for valuable files and logs, downloads them, and sells to the best market. Automatically equips optimal SEARCH and HACK software for each server type before scanning. Features a debug console with real-time progress logs, a server/download results UI, and a Maintenance tab with per-server checkbox selections and batch "Force selected!" for triggering multiple servers at once (furthest-to-closest order)
 - **Auto Dismiss Failed Jobs** — Toggle to automatically dismiss failed and bugged jobs after each solver run, keeping the job queue clean
 - **Auto Finish All Jobs** — Background scheduling that automatically starts the Auto Job Solver when new jobs become available after reset. Uses chrome.alarms to schedule runs at job reset times with retry logic. Works even when the popup is closed. Server maintenance–aware: skips jobs on servers currently in maintenance and schedules retries at the earlier of job reset or maintenance end.
-- **Auto Clear Generated IPs** — Periodically cleans up auto-generated IPs (10.x, 172.x, 192.x, 198.x) from servers, keeping at most 10 per server. Runs every 3 hours in the background. Automatically hacks servers if access has expired.
-- **Market Path-Through** — When market servers (D4RK, SOYUZ, USOL) are unreachable (no-path-to-server), automatically attempts to establish a path by setting endpoints to intermediate servers, hacking them if needed for access, then retrying the market endpoint.
+- **Market Path-Through** — When market servers (D4RK, SOYUZ, USOL) or USOL mercenary endpoints are unreachable (no-path-to-server), dynamically fetches the live network map, discovers all paths via DFS, filters out maintenance-blocked routes, and walks intermediate servers (set endpoint + hack) before retrying the target. Falls back to alternate paths if one fails mid-way.
 - **Daily Ops** — Countdown to your next daily ops task with streak bonus, difficulty, and claim status
-- **Market Monitoring** — View Market-1 (HOME), Market-2 (D4RK), Market-3 (SOYUZ), and Market-4 (USOL) stats, job reset timers, items list (with INFO popup for item details), and jobs list (with Category/Server/Reward columns)
+- **Market Monitoring** — View Market-1 (HOME), Market-2 (D4RK), Market-3 (SOYUZ), and Market-4 (USOL) stats, job reset timers, items list (with INFO popup for item details), and jobs list (with Category/Server/Reward columns). Each market is collapsible (fold arrow)
+- **Expedition Mode Tabs** — The Expeditions section is split into Mercenaries and Personal Drone tabs. Each tab groups its Active Expedition, mode hub, Decisions and Archived Expeditions as collapsible sub-panels (unified layout)
+- **Info Panel Toggles** — Show/hide the Daily Ops and Markets information panels from the Automation/QoL toggles section
+- **Inventory (standalone section)** — Inventory is its own section after Expeditions, shared across both expedition modes, with the batch-sell toolbar
 - **Loadout Viewer** — View and manage your equipped hardware (CPU/GPU/RAM/PSU) and installed software. Game-style card UI with hardware specs, software power ratios, resource supply/demand overview with boot status, CHANGE/INFO buttons for hardware, and sort/search/equip/unequip for software
 - **Active Expedition Tracking** — See active expeditions with remaining timer, cost, risk, insurance, and mercenary info
 - **Expedition Decisions** — View and respond to pending decisions by clicking them with score calculation
@@ -41,11 +43,12 @@ The use of automation tools may be detectable by the site's developers and could
 - **Apply Merc Cost Limiter** — When enabled, mercenaries with costs above the configured "Maximum merc cost limit" are excluded from auto-choose selection. Default limit is 15,000.
 - **Get rid of Veterans** — When enabled, overrides loot/risk modifiers for veteran mercenary expeditions with loot=1 and risk=10, making decisions favor high-risk options to have higher chance on getting rid of veteran mercs. Located in the Decisions section.
 - **Auto Sell Cheapest Items** — Enable "auto sell" toggle for extension to sell two cheapest items from inventory automatically when there is not enough space to pickup expedition container items.
+- **Inventory Batch Sell** — In the Inventory section, filter stash items by rarity (COMMON/RARE/EPIC) and craft tag (NONE/CRAFT), then sell all matching items in one action. Both filters must be chosen; a second confirmation click is required before selling.
+- **Personal Drone Automation** — Fully automated drone missions (Personal Drone Assembling): auto-dispatch, auto-claim rewards, auto-resolve in-mission decisions, and custom repair rules (durability threshold, low-battery top-up, pause on repair failure, launch only when fully charged). Includes rate-limit retry with backoff that auto-disables on repeated failures. Active drone mission, its decisions, and archived drone missions are shown in the Expeditions panel, with the active mission pin-able like mercenary expeditions.
 - **Archived Expeditions** — View past expeditions with outcome, cost, risk, location, loot container details and item images. Auto-loaded on startup
 - **Multi-Alarm System** — Create multiple configurable alarms for any timer (daily ops, market job resets, expeditions). Each alarm has its own threshold, volume, continuous mode, and on/off toggle
 - **Move Notifications** — Option to move in-game notification toasts and history panel from the right side to the left side of the screen
 - **Secret Link/Server Finder** — Scans all known server IPs on the network map to discover hidden connections and servers. Sends `connect.ip` for each known IP, then compares before/after map data. Uses a toggle switch (auto-disables after scan) with progress and results shown in a log box. Reports new connections and new servers found
-- **Resizable Network Map** — Toggle to make the in-game network map window resizable via drag
 - **Helper-Only Mode** — Toggle to hide all automation features, converting the extension to a pure info/helper tool
 - **Auto Update Markets** — Toggle to automatically refresh market data when WebSocket events arrive
 - **Version Tracking** — Displays extension, web, system, and patch versions
@@ -57,21 +60,44 @@ The use of automation tools may be detectable by the site's developers and could
 
 ## Installation
 
-1. **Download** — Clone or download this repository:
+### Option A: Pre-built Release (recommended)
+
+1. **Download** — Go to [GitHub Releases](https://github.com/Femtoce11/cor3-helper/releases) and download the latest `dist.zip` asset.
+
+2. **Extract** — Unzip `dist.zip` to a folder on your computer.
+
+3. **Open Chrome Extensions** — Navigate to `chrome://extensions/` in your browser.
+
+4. **Enable Developer Mode** — Toggle the **Developer mode** switch in the top-right corner.
+
+5. **Load the Extension** — Click **Load unpacked** and select the extracted `dist/` folder (containing `manifest.json`).
+
+6. **Navigate to cor3.gg** — Open [https://cor3.gg](https://cor3.gg) and log in. The extension will automatically start intercepting game data.
+
+7. **Open the Popup** — Click the COR3 Helper icon in your browser toolbar to view your dashboard.
+
+### Option B: Build from Source
+
+1. **Clone** — Clone the repository:
    ```
    git clone https://github.com/Femtoce11/cor3-helper.git
    ```
-   Or click **Code → Download ZIP** and extract it somewhere on your computer.
 
-2. **Open Chrome Extensions** — Navigate to `chrome://extensions/` in your browser.
+2. **Install Dependencies** — From the project root, run:
+   ```
+   npm install
+   ```
 
-3. **Enable Developer Mode** — Toggle the **Developer mode** switch in the top-right corner.
+3. **Build** — Bundle the extension into the `dist/` folder:
+   ```
+   npm run build
+   ```
+   For development, use watch mode to rebuild on changes:
+   ```
+   npm run watch
+   ```
 
-4. **Load the Extension** — Click **Load unpacked** and select the folder containing the extension files (the folder with `manifest.json`).
-
-5. **Navigate to cor3.gg** — Open [https://cor3.gg](https://cor3.gg) and log in. The extension will automatically start intercepting game data.
-
-6. **Open the Popup** — Click the COR3 Helper icon in your browser toolbar to view your dashboard.
+4. Follow steps 3–7 from **Option A** above to load the `dist/` folder in Chrome.
 
 ## Usage
 
@@ -86,7 +112,6 @@ The use of automation tools may be detectable by the site's developers and could
 - **Auto Simple Decrypt Hacking** — Toggle the switch to enable. It automatically solves Simple Decrypt hacking minigames by clicking the decrypt button and monitoring progress.
 - **Auto Daily Hacking** — Toggle the switch to enable. It opens daily ops, starts the task, solves the puzzle automatically, and disables itself when done.
 - **Auto Job Solver** — Toggle the switch to reveal job selection UI. Choose job types from HOME, D4RK, SOYUZ, and USOL market tabs, then click Start. The debug console shows real-time job progress and logs. Toggle "Auto Finish All Jobs" for fully automatic operation.
-- **Auto Clear Generated IPs** — Toggle the switch to enable. Runs every 3 hours in the background to clean up excess auto-generated IPs from servers.
 - **Set decision scores** by clicking edit button. After the change click save button to keep the changes. This way you can change default scoring that extension shows next to each decision.
 - **Enable auto choose decision** for extension to automatically choose best decision according to scoring which is calculated by default/modified loot/risk modifiers.
 - **Enable auto send mercenary** for extension to send selected mercenary by itself after the current expedition ends.
@@ -110,7 +135,7 @@ The use of automation tools may be detectable by the site's developers and could
 | `msgpack-codec.js`         | Socket.IO v5 binary packet codec — converts between legacy 42[...] strings and binary msgpack WS frames using notepack.io                                                 |
 | `content-early.js`         | Injected at `document_start` — intercepts WebSocket/HTTP polling messages, WS send functions, D4RK path-through logic                                                     |
 | `content.js`               | Injected at `document_idle` — relays data to storage, handles auto-refresh, auto job solver injection, notification repositioning                                         |
-| `background.js`            | Service worker — auto finish all jobs scheduling, auto clear IPs scheduling, expedition polling, alarm management                                                         |
+| `background.js`            | Service worker — auto finish all jobs scheduling, expedition polling, alarm management                                                         |
 | `ws-messages.js`           | IndexedDB writer for WS messages and categorized logs (auto-jobs, auto-valuable, errors). 24h purge                                                                       |
 | `ws-interceptor.js`        | WebSocket interceptor helper                                                                                                                                              |
 | `decrypt-solver.js`        | Auto-solver for decryption hacking minigame (injected into page when enabled)                                                                                             |
@@ -126,9 +151,12 @@ The use of automation tools may be detectable by the site's developers and could
 | `devtools-log-viewer.html` | Offline log viewer UI — standalone popout window for importing and viewing exported logs                                                                                  |
 | `devtools-log-viewer.js`   | Offline log viewer logic — import/parse JSON, MD table, Discord clipboard formats, category switching, filtering, detail view                                             |
 | `versions.json`            | Version tracking file for update checks (extension, web, system, patch)                                                                                                   |
+| `build.js`                 | esbuild bundler script — bundles modular `src/` entry points into `dist/`, copies static files, syncs manifest version from `package.json`                                 |
+| `package.json`             | Node.js project config — defines `build`, `watch`, and `clean` scripts, extension version, esbuild dependency                                                              |
 
 ## Requirements
 
+- Node.js 18+ (for building)
 - Google Chrome (or Chromium-based browser)
 - An active [cor3.gg](https://cor3.gg) account
 

@@ -1,2 +1,4 @@
-# Local WS captures / exports
+node_modules/
+dist/
+RELEASE_NOTES.md
 cor3-ws-export.json
