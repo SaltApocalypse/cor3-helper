@@ -158,7 +158,7 @@ git push origin v1.8.1-salta.1
 npm run sync-versions
 ```
 
-You can also trigger `Sync game versions` from GitHub Actions (`workflow_dispatch`). The release workflow runs a `--check` and prints a warning if `versions.json` is stale; it does not block the release.
+There is no scheduled sync. The release workflow only runs a `--check` and prints a warning if `versions.json` is stale; it does not block the release.
 
 Check-only mode:
 
