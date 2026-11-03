@@ -3,6 +3,7 @@ import { _h, _noData, _clearEl } from './dom-helpers.js';
 import { getCor3Tab, formatTimeRemaining, showLastUpdated, waitForStorageKey } from './utils.js';
 import { state } from './state.js';
 import { savePinnedState, renderPinnedTimers } from './pinned-timers.js';
+import { t, onLangChange } from './i18n.js';
 
 const refreshDroneBtn = document.getElementById('refreshDroneBtn');
 const personalDroneContainer = document.getElementById('personalDroneContainer');
@@ -106,7 +107,7 @@ function populateDroneSelects() {
 function renderDrone() {
     if (!personalDroneContainer) return;
     if (!_droneData || !_droneData.drone) {
-        personalDroneContainer.replaceChildren(_noData('No drone data yet. Click 🔄 to refresh.'));
+        personalDroneContainer.replaceChildren(_noData(t('No drone data yet. Click 🔄 to refresh.', '暂无无人机数据，点击 🔄 刷新。')));
         return;
     }
     const drone = _droneData.drone;
@@ -116,10 +117,10 @@ function renderDrone() {
     const durColor = durPct > 60 ? 'var(--accent-green)' : durPct > 30 ? 'var(--accent-orange)' : 'var(--accent-red,#ff4444)';
     const battColor = battPct > 40 ? 'var(--accent-green)' : battPct > 15 ? 'var(--accent-orange)' : 'var(--accent-red,#ff4444)';
 
-    let statusText = 'Idle', statusColor = 'var(--accent-green)';
-    if (drone.isDestroyed) { statusText = 'DESTROYED'; statusColor = 'var(--accent-red,#ff4444)'; }
-    else if (drone.isRepairing) { statusText = 'Repairing…'; statusColor = 'var(--accent-orange)'; }
-    else if (_droneData.activeMissionId) { statusText = 'On mission'; statusColor = 'var(--accent-blue)'; }
+    let statusText = t('Idle', '空闲'), statusColor = 'var(--accent-green)';
+    if (drone.isDestroyed) { statusText = t('DESTROYED', '已摧毁'); statusColor = 'var(--accent-red,#ff4444)'; }
+    else if (drone.isRepairing) { statusText = t('Repairing…', '维修中…'); statusColor = 'var(--accent-orange)'; }
+    else if (_droneData.activeMissionId) { statusText = t('On mission', '执行任务中'); statusColor = 'var(--accent-blue)'; }
 
     const card = _h('div', { className: 'expedition-card' });
     const bar = (label, pct, color, right) => _h('div', { style: 'display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text-muted);margin-top:4px;' },
@@ -132,13 +133,13 @@ function renderDrone() {
         _h('span', { className: 'exp-title' }, `🛩️ ${drone.name || 'Drone'}`),
         _h('span', { className: 'exp-status', style: `color:${statusColor};` }, statusText)));
     const body = _h('div', { style: 'padding:4px 0;' });
-    body.appendChild(bar('Durability', durPct, durColor, `${drone.durability}/${drone.maxDurability}`));
-    body.appendChild(bar('Battery', battPct, battColor, `${battPct}%`));
+    body.appendChild(bar(t('Durability', '耐久'), durPct, durColor, `${drone.durability}/${drone.maxDurability}`));
+    body.appendChild(bar(t('Battery', '电量'), battPct, battColor, `${battPct}%`));
     if (drone.isRepairing && drone.repairSecondsRemaining != null) {
-        body.appendChild(_h('div', { className: 'detail-row' }, _h('span', { className: 'label' }, 'Repair:'), ` ${Math.ceil(drone.repairSecondsRemaining / 60)}m remaining`));
+        body.appendChild(_h('div', { className: 'detail-row' }, _h('span', { className: 'label' }, t('Repair:', '维修：')), ` ${Math.ceil(drone.repairSecondsRemaining / 60)}${t('m remaining', ' 分钟后完成')}`));
     }
     if (typeof battery.restoreSeconds === 'number' && battery.restoreSeconds > 0 && battery.current < battery.max) {
-        body.appendChild(_h('div', { className: 'detail-row' }, _h('span', { className: 'label' }, 'Full in:'), ` ${Math.floor(battery.restoreSeconds / 3600)}h ${Math.floor((battery.restoreSeconds % 3600) / 60)}m`));
+        body.appendChild(_h('div', { className: 'detail-row' }, _h('span', { className: 'label' }, t('Full in:', '充满还需：')), ` ${Math.floor(battery.restoreSeconds / 3600)}h ${Math.floor((battery.restoreSeconds % 3600) / 60)}m`));
     }
     card.appendChild(body);
     personalDroneContainer.replaceChildren(card);
@@ -149,20 +150,20 @@ function renderDroneActive() {
     const mission = _droneMissionData;
     const isRunning = mission && _droneData && _droneData.activeMissionId && mission.status === 'RUNNING';
     if (!isRunning) {
-        droneActiveContainer.replaceChildren(_noData('No active drone mission.'));
+        droneActiveContainer.replaceChildren(_noData(t('No active drone mission.', '没有进行中的无人机任务。')));
         return;
     }
     const loc = (mission.location && mission.location.name) || '';
     const mis = (mission.mission && mission.mission.name) || '';
     if (mission.endTime) state.expeditionEndTimes[mission.id] = mission.endTime;
     const timerSpan = _h('span', { className: 'exp-timer', dataset: { expId: mission.id } }, mission.endTime ? formatTimeRemaining(mission.endTime) : '--');
-    const pinBtn = _h('button', { className: 'refresh-btn-small pin-btn pin-exp-btn', dataset: { expId: mission.id }, title: 'Pin Expedition Timer' }, '📌');
+    const pinBtn = _h('button', { className: 'refresh-btn-small pin-btn pin-exp-btn', dataset: { expId: mission.id }, title: t('Pin Expedition Timer', '固定远征计时器') }, '📌');
     const card = _h('div', { className: 'expedition-card' },
         _h('div', { className: 'exp-header' },
             _h('span', { className: 'exp-title' }, `📍 ${loc} — ${mis}`),
             _h('span', { className: 'exp-status running' }, mission.status || 'RUNNING')),
-        _h('div', { className: 'detail-row' }, _h('span', { className: 'label' }, 'Risk:'), ` ${mission.finalRisk ?? '--'}`),
-        _h('div', { className: 'detail-row' }, _h('span', { className: 'label' }, 'Battery Cost:'), ` ${mission.batteryCost ?? '--'}`),
+        _h('div', { className: 'detail-row' }, _h('span', { className: 'label' }, t('Risk:', '风险：')), ` ${mission.finalRisk ?? '--'}`),
+        _h('div', { className: 'detail-row' }, _h('span', { className: 'label' }, t('Battery Cost:', '电量消耗：')), ` ${mission.batteryCost ?? '--'}`),
         mission.endTime ? _h('div', { className: 'exp-timer-row' },
             _h('span', { style: 'font-size:11px;color:var(--accent-orange);' }, '⏳ ', timerSpan), pinBtn) : null);
     droneActiveContainer.replaceChildren(card);
@@ -188,7 +189,7 @@ function renderDroneDecisions() {
     const decisions = events.filter(e => e.type === 'DECISION' || e.type === 'HAZARD');
     if (droneDecisionsCount) droneDecisionsCount.textContent = decisions.length ? `(${decisions.length})` : '';
     if (!isRunning || decisions.length === 0) {
-        droneDecisionsContainer.replaceChildren(_noData('No active mission decisions.'));
+        droneDecisionsContainer.replaceChildren(_noData(t('No active mission decisions.', '没有进行中的任务决策。')));
         return;
     }
     const frag = document.createDocumentFragment();
@@ -198,8 +199,8 @@ function renderDroneDecisions() {
         const statusColor = ev.isResolved ? 'var(--accent-green)' : 'var(--accent-orange)';
         const row = _h('div', { style: 'font-size:10px;color:var(--text-muted);padding:4px 0;border-bottom:1px solid var(--border);' },
             _h('div', { style: 'display:flex;justify-content:space-between;gap:6px;' },
-                _h('span', { style: `font-weight:bold;color:${ev.type === 'DECISION' ? 'var(--accent-cyan)' : 'var(--accent-red)'};` }, `${ev.type === 'DECISION' ? '🧭' : '⚠️'} ${ev.type}`),
-                _h('span', { style: `color:${statusColor};` }, ev.isResolved ? 'Resolved' : 'Pending')),
+                _h('span', { style: `font-weight:bold;color:${ev.type === 'DECISION' ? 'var(--accent-cyan)' : 'var(--accent-red)'};` }, `${ev.type === 'DECISION' ? '🧭' : '⚠️'} ${ev.type === 'DECISION' ? t('DECISION', '决策') : t('HAZARD', '危险')}`),
+                _h('span', { style: `color:${statusColor};` }, ev.isResolved ? t('Resolved', '已处理') : t('Pending', '待处理'))),
             _h('div', null, ev.message || ''),
             chosenLabel ? _h('div', { style: 'color:var(--accent-green);' }, `✔ ${chosenLabel}`) : null);
         frag.appendChild(row);
@@ -212,7 +213,7 @@ function renderDroneArchived(data) {
     let items = data;
     if (data && !Array.isArray(data) && data.items) items = data.items;
     if (!items || !Array.isArray(items) || items.length === 0) {
-        droneArchivedContainer.replaceChildren(_noData('No archived drone missions found.'));
+        droneArchivedContainer.replaceChildren(_noData(t('No archived drone missions found.', '没有已归档的无人机任务。')));
         return;
     }
     const frag = document.createDocumentFragment();
@@ -232,9 +233,9 @@ function renderDroneArchived(data) {
                 _h('br'),
                 m.startTime ? `🕐 ${new Date(m.startTime).toLocaleString()}` : '',
                 _h('br'),
-                `${m.finalRisk !== undefined ? '⚠️ Risk: ' + m.finalRisk + ' · ' : ''}${m.damageDealt !== undefined ? '💥 Dmg: ' + m.damageDealt : ''}`,
+                `${m.finalRisk !== undefined ? '⚠️ ' + t('Risk:', '风险：') + ' ' + m.finalRisk + ' · ' : ''}${m.damageDealt !== undefined ? '💥 ' + t('Dmg:', '伤害：') + ' ' + m.damageDealt : ''}`,
                 (m.loot && m.loot.length) ? _h('br') : null,
-                (m.loot && m.loot.length) ? `📦 Loot: ${m.loot.length} item(s)` : ''));
+                (m.loot && m.loot.length) ? `📦 ${t('Loot:', '战利品：')} ${m.loot.length} ${t('item(s)', '件')}` : ''));
         frag.appendChild(card);
     }
     droneArchivedContainer.replaceChildren(frag);
@@ -255,7 +256,7 @@ export async function loadDrone() {
 }
 
 async function requestDrone() {
-    if (personalDroneContainer) personalDroneContainer.replaceChildren(_noData('Requesting drone data...'));
+    if (personalDroneContainer) personalDroneContainer.replaceChildren(_noData(t('Requesting drone data...', '正在请求无人机数据...')));
     try {
         const tab = await getCor3Tab();
         if (tab) await chrome.tabs.sendMessage(tab.id, { action: 'requestDroneOptions' });
@@ -271,7 +272,7 @@ async function loadDroneArchived() {
 }
 
 async function requestDroneArchived() {
-    if (droneArchivedContainer) droneArchivedContainer.replaceChildren(_noData('Loading archived drone missions...'));
+    if (droneArchivedContainer) droneArchivedContainer.replaceChildren(_noData(t('Loading archived drone missions...', '正在加载已归档的无人机任务...')));
     try {
         const tab = await getCor3Tab();
         if (tab) await chrome.tabs.sendMessage(tab.id, { action: 'requestDroneArchived', cursor: null, limit: 20 });
@@ -357,6 +358,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
         if (autoDroneToggle) autoDroneToggle.checked = !!cfg.enabled;
         updateDroneWarning(cfg);
     }
+});
+
+onLangChange(() => {
+    loadDrone();
+    loadDroneArchived();
 });
 
 loadDrone();
