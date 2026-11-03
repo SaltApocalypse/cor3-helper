@@ -11,7 +11,8 @@
     "build": "node build.js",
     "watch": "node build.js --watch",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    "sync-versions": "node scripts/sync-versions.js"
+    "sync-versions": "node scripts/sync-versions.js",
+    "release:prepare": "npm run sync-versions && npm run build"
   },
   "devDependencies": {
     "esbuild": "^0.25.0"

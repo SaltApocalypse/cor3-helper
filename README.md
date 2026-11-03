@@ -134,12 +134,17 @@ Result:
 Release process:
 
 ```bash
-npm ci
-npm run build
+# 0. Update package.json version and create docs/releases/<tag>.md first
+npm run release:prepare   # sync versions.json + build
+git add versions.json     # only if it changed
+git commit -am "chore(release): v1.8.1-salta.1"
 git push origin main
-git tag -a v1.8.0-salta.1 -m "Salta fork release v1.8.0-salta.1"
-git push origin v1.8.0-salta.1
+
+git tag -a v1.8.1-salta.1 -m "Salta fork release v1.8.1-salta.1"
+git push origin v1.8.1-salta.1
 ```
+
+`release:prepare` refreshes `versions.json` and rebuilds. The release workflow also runs `npm run sync-versions` before building, so the release ZIP always carries the latest game versions; if the file changed, the workflow additionally commits it to `main` for the extension's update checks.
 
 > ⚠️ Do **not** run `git push --tags`: this repository also contains upstream tags, and each `v*` tag would trigger the release workflow.
 
