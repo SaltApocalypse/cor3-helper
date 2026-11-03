@@ -18,6 +18,7 @@ The use of automation tools may be detectable by the site's developers and could
 ## Features
 
 - **Theme Support** — Multiple color themes to match your preference, including an "Original" theme matching the game's native UI colors
+- **Language Selector** — Switch the popup UI between English and Simplified Chinese (titles, toggles, market labels, and common dynamic labels)
 - **Pop-up Window / Panel Support** — Exports the UI to pop-up window or side panel depending on your preference
 - **Refresh System** — Either by using "refresh all" button or by clicking "refresh" for each section, it refreshes related data available on the UI
 - **Pinned Timers** — Every timer except "RESTING" timer for mercenaries can be pinned to top of the UI for tracking
