@@ -530,11 +530,3 @@ window.__cor3OpenContainer = function (expeditionId) {
     wsSend(msg);
     return true;
 };
-
-// Collect all contents from an opened container
-window.__cor3CollectAll = function (expeditionId) {
-    console.log('[COR3 Helper] Collecting all from expedition:', expeditionId);
-    var msg = '42["event",{"event":{"name":"expeditions","action":"collect.all"},"data":{"expeditionId":"' + expeditionId + '"}}]';
-    wsSend(msg);
-    return true;
-};

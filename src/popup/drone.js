@@ -39,6 +39,18 @@ const refreshDroneArchivedBtn = document.getElementById('refreshDroneArchivedBtn
 const droneExpActiveToggle = document.getElementById('droneExpActiveToggle');
 const droneExpActiveBody = document.getElementById('droneExpActiveBody');
 
+function wireSection(toggleId, bodyId) {
+    const toggle = document.getElementById(toggleId);
+    const body = document.getElementById(bodyId);
+    if (!toggle || !body) return;
+    toggle.addEventListener('click', () => {
+        toggle.classList.toggle('open');
+        body.classList.toggle('open');
+    });
+}
+wireSection('droneDispatchToggle', 'droneDispatchBody');
+wireSection('droneAdvancedToggle', 'droneAdvancedBody');
+
 let _droneData = null;
 let _droneMissionData = null;
 let _droneArchivedLoaded = false;
@@ -339,6 +351,9 @@ chrome.storage.sync.get('autoDrone', (data) => {
     if (autoDroneRepairOnLowBatteryToggle) autoDroneRepairOnLowBatteryToggle.checked = !!cfg.repairOnLowBattery;
     if (droneLowBatteryThresholdInput) droneLowBatteryThresholdInput.value = cfg.lowBatteryThreshold ?? 30;
     if (autoDronePauseOnFailToggle) autoDronePauseOnFailToggle.checked = cfg.pauseOnRepairFail !== false;
+    if (cfg.autoClaim === undefined) {
+        chrome.storage.sync.set({ autoDrone: Object.assign({}, cfg, { autoClaim: true }) });
+    }
     updateDroneMissionSelectRow();
     updateDroneWarning(cfg);
 });

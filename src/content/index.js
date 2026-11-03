@@ -34,12 +34,12 @@ setTimeout(() => {
     });
 }, 5000);
 
-// Listen for autoSendMerc toggle changes to trigger auto-send check
+// Listen for autoSendMerc changes (dispatch or auto-claim) to re-check expeditions.
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'sync' || !changes.autoSendMerc) return;
-    const newVal = changes.autoSendMerc.newValue;
-    if (newVal && newVal.enabled) {
-        console.log('[COR3 Helper] Auto-send mercenary enabled — checking expedition data');
+    const newVal = changes.autoSendMerc.newValue || {};
+    if (newVal.enabled || newVal.autoClaim === true) {
+        console.log('[COR3 Helper] Auto-send settings changed — checking expedition data');
         chrome.storage.local.get('expeditionsData', (result) => {
             if (result.expeditionsData) {
                 checkAutoSendOnExpeditionData(result.expeditionsData);

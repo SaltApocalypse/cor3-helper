@@ -6,11 +6,11 @@ import { checkAutoChooseFromContent } from './auto-choose.js';
 import {
     checkAutoSendOnExpeditionData, proceedWithMerc, onExpeditionCollected,
     autoSendInProgress, autoSendExpeditionId, autoSendAwaitingMercenaries,
-    autoSendAwaitingUsolMercs, autoSendExpeditionBlocked, autoSendCollectRetries,
-    MAX_COLLECT_RETRIES, _autoSendUsolSkipped, _autoSendMercRetryCount, MAX_MERC_RETRIES,
-    autoSellCheapestItems, disableAutoSendDueToStashFull, isTransientBusyMessage,
+    autoSendAwaitingUsolMercs, autoSendExpeditionBlocked,
+    _autoSendUsolSkipped, _autoSendMercRetryCount, MAX_MERC_RETRIES,
+    isTransientBusyMessage,
     setAutoSendInProgress, setAutoSendExpeditionId, setAutoSendAwaitingMercenaries,
-    setAutoSendAwaitingUsolMercs, setAutoSendExpeditionBlocked, setAutoSendCollectRetries,
+    setAutoSendAwaitingUsolMercs, setAutoSendExpeditionBlocked,
     setAutoSendUsolSkipped, setAutoSendMercRetryCount, setInitialMercsReady
 } from './auto-send.js';
 import { setMarketRefreshInProgress, setAutoUpdateMarketsLastRefresh, setSeqRefreshRunning } from './auto-update-markets.js';
@@ -64,37 +64,6 @@ export function setupWsRelay() {
         }
         if (event.data && event.data.type === 'COR3_WS_STASH') {
             chrome.storage.local.set({ stashData: event.data.stash, stashDataUpdatedAt: now });
-
-            chrome.storage.sync.get('autoSendMerc', (settings) => {
-                if (settings.autoSendMerc &&
-                    settings.autoSendMerc.disabledReason === 'stash_full' &&
-                    !settings.autoSendMerc.enabled) {
-
-                    const stash = event.data.stash;
-                    let hasSpace = false;
-                    let spaceNeeded = 2;
-
-                    if (stash && stash.maxCapacity && stash.currentUsage !== undefined) {
-                        const availableSpace = stash.maxCapacity - stash.currentUsage;
-                        hasSpace = availableSpace >= spaceNeeded;
-                    }
-
-                    if (hasSpace) {
-                        console.log('[COR3 Helper] Stash has space again, re-enabling auto-send mercenary');
-                        chrome.storage.sync.set({
-                            autoSendMerc: {
-                                ...settings.autoSendMerc,
-                                enabled: true,
-                                disabledReason: null
-                            }
-                        });
-                        window.postMessage({
-                            type: 'COR3_AUTO_SEND_REENABLED',
-                            message: 'Stash space available. Auto-send mercenary re-enabled.'
-                        }, '*');
-                    }
-                }
-            });
         }
         if (event.data && event.data.type === 'COR3_WS_MARKET') {
             chrome.storage.local.set({ marketData: event.data.market, marketDataUpdatedAt: now });
@@ -386,43 +355,6 @@ export function setupWsRelay() {
                 window.postMessage({ type: 'COR3_CHECK_MAIL', source: 'EXPEDITION', sourceId: expId }, '*');
             }
         }
-        if (event.data && event.data.type === 'COR3_WS_STASH_FULL') {
-            setAutoSendCollectRetries(autoSendCollectRetries + 1);
-            console.log('[COR3 Helper] Stash full error detected (attempt', autoSendCollectRetries, '/', MAX_COLLECT_RETRIES, ')');
-            if (autoSendCollectRetries > MAX_COLLECT_RETRIES) {
-                console.log('[COR3 Helper] Max collect retries reached, giving up');
-                setAutoSendCollectRetries(0);
-                disableAutoSendDueToStashFull();
-                return;
-            }
-            chrome.storage.sync.get('autoSellCheapest', (sellData) => {
-                if (sellData.autoSellCheapest) {
-                    chrome.storage.local.get('stashData', (result) => {
-                        const stash = result.stashData;
-                        if (stash && stash.items) {
-                            console.log('[COR3 Helper] Auto-sell: selling cheapest items to free space after collect.all stash-full');
-                            autoSellCheapestItems(stash.items, 2, () => {
-                                window.postMessage({ type: 'COR3_REQUEST_STASH' }, '*');
-                                setTimeout(() => {
-                                    if (autoSendExpeditionId) {
-                                        console.log('[COR3 Helper] Auto-sell done, retrying collect all in 10s...');
-                                        setTimeout(() => {
-                                            window.postMessage({ type: 'COR3_COLLECT_ALL', expeditionId: autoSendExpeditionId }, '*');
-                                        }, 10000 + Math.floor(Math.random() * 500));
-                                    }
-                                }, 3000);
-                            });
-                        } else {
-                            setAutoSendCollectRetries(0);
-                            disableAutoSendDueToStashFull();
-                        }
-                    });
-                } else {
-                    setAutoSendCollectRetries(0);
-                    disableAutoSendDueToStashFull();
-                }
-            });
-        }
         if (event.data && event.data.type === 'COR3_WS_INSUFFICIENT_CREDITS') {
             console.log('[COR3 Helper] Insufficient credits for expedition launch, disabling auto-send mercenary');
             chrome.storage.sync.get('autoSendMerc', (settings) => {
@@ -447,36 +379,6 @@ export function setupWsRelay() {
             setAutoSendInProgress(false);
             _automationFinish('auto-send');
             setAutoSendExpeditionId(null);
-        }
-        if (event.data && event.data.type === 'COR3_WS_COLLECT_INSUFFICIENT_CREDITS') {
-            console.log('[COR3 Helper] Insufficient credits for collect.all, disabling auto-send mercenary');
-            chrome.storage.sync.get('autoSendMerc', (settings) => {
-                if (settings.autoSendMerc) {
-                    chrome.storage.sync.set({
-                        autoSendMerc: {
-                            ...settings.autoSendMerc,
-                            enabled: false,
-                            disabledReason: 'insufficient_credits'
-                        }
-                    });
-                }
-            });
-            chrome.storage.local.set({
-                expeditionLaunchError: {
-                    error: 'Insufficient credits to open reward container. Auto-send disabled.',
-                    retryAfter: 0,
-                    timestamp: Date.now(),
-                    noRetry: true
-                }
-            });
-            setAutoSendInProgress(false);
-            _automationFinish('auto-send');
-            setAutoSendExpeditionId(null);
-        }
-        if (event.data && event.data.type === 'COR3_WS_COLLECTED_ALL') {
-            // Legacy collect.all path (kept for older game versions).
-            const collectedId = event.data.data && event.data.data.id;
-            onExpeditionCollected(collectedId);
         }
         if (event.data && event.data.type === 'COR3_MAIL_CLAIMED' && event.data.source === 'EXPEDITION') {
             // New mailbox flow: all rewards for this expedition are in the stash.

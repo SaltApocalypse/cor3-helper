@@ -14,7 +14,6 @@
 // the items. We process messages serially so the response can be correlated
 // without relying on requestId.
 import { isContextValid } from './helpers.js';
-import { autoSellCheapestItems } from './auto-send.js';
 
 const CLAIM_TIMEOUT_MS = 15000;
 const CLAIM_GAP_MS = 650;
@@ -184,7 +183,7 @@ function tryItemFallback(msg) {
                         _fallbackActive = false;
                         markWarning('Mailbox: claim.item fallback failed: ' + res.error);
                         log('claim.item fallback failed:', res.error);
-                        resolve(true); // attempted; do not auto-sell on a partial result
+                        resolve(true); // attempted; leave the message queued for a later retry
                         return;
                     }
                 }
@@ -344,8 +343,11 @@ function maybeEnqueueAll() {
         if (stashIsBusy(local)) { _sorting = true; return; }
         _sorting = false;
         chrome.storage.sync.get(['autoSendMerc', 'autoDrone'], function (settings) {
-            var expEnabled = !!(settings.autoSendMerc && settings.autoSendMerc.enabled);
-            var droneEnabled = !!(settings.autoDrone && settings.autoDrone.enabled);
+            var merc = settings.autoSendMerc || {};
+            var drone = settings.autoDrone || {};
+            // autoClaim defaults to the old behaviour (enabled) when not set yet.
+            var expEnabled = merc.autoClaim !== undefined ? !!merc.autoClaim : !!merc.enabled;
+            var droneEnabled = drone.autoClaim !== undefined ? !!drone.autoClaim : !!drone.enabled;
             if (!expEnabled && !droneEnabled && _forcedSources.size === 0) return;
             var msgs = _mailData.messages || [];
             for (var i = 0; i < msgs.length; i++) {
@@ -430,7 +432,7 @@ function handleClaimFailure(errMsg, capacityOnly) {
     active.attempts = (active.attempts || 0) + 1;
 
     if (isCapacityError(msgText)) {
-        // Never sell or fallback while the sorting table is active.
+        // Never claim while the sorting table is active.
         chrome.storage.local.get(['stashSorting', 'stashData', 'gameplayData'], function (busyLocal) {
             if (stashIsBusy(busyLocal)) {
                 _sorting = true;
@@ -438,37 +440,14 @@ function handleClaimFailure(errMsg, capacityOnly) {
                 _queuedIds.add(active.msg.id);
                 return;
             }
-            // First try the exact-placement fallback (stash has enough free cells
-            // but claim.all could not find a contiguous spot).
+            // Try exact placement first (stash has enough free cells but claim.all
+            // could not find a contiguous spot). No automatic selling.
             tryItemFallback(active.msg).then(function (handled) {
                 if (handled) return;
-                chrome.storage.sync.get('autoSellCheapest', function (sellSettings) {
-                    chrome.storage.local.get('stashData', function (local) {
-                        var stash = local ? local.stashData : null;
-                        if (sellSettings.autoSellCheapest && stash && Array.isArray(stash.items)) {
-                            var needed = messageCells(active.msg);
-                            var available = (typeof stash.maxCapacity === 'number' && typeof stash.currentUsage === 'number')
-                                ? stash.maxCapacity - stash.currentUsage : 0;
-                            var shortfall = Math.max(1, needed - available);
-                            markWarning('Mailbox: stash full, selling ' + shortfall + ' item(s) to make room…');
-                            log('stash full, auto-selling', shortfall, 'item(s)');
-                            autoSellCheapestItems(stash.items, shortfall, function () {
-                                window.postMessage({ type: 'COR3_REQUEST_STASH' }, '*');
-                                setTimeout(function () {
-                                    _queue.unshift(active.msg);
-                                    _queuedIds.add(active.msg.id);
-                                    pump();
-                                }, 2000 + shortfall * 1500);
-                            });
-                            return;
-                        }
-                        markWarning('Mailbox: stash full. Clear stash space to claim rewards.');
-                        log('stash full and auto-sell unavailable — claim abandoned for now');
-                        // Try again later when stash data changes.
-                        _queue.unshift(active.msg);
-                        _queuedIds.add(active.msg.id);
-                    });
-                });
+                markWarning('Mailbox: stash full. Clear stash space to claim rewards.');
+                log('stash full — claim queued until space is available');
+                _queue.unshift(active.msg);
+                _queuedIds.add(active.msg.id);
             });
         });
         return;
@@ -584,6 +563,8 @@ if (isContextValid()) {
             setTimeout(maybeEnqueueAll, 1000);
         } else if (changes.stashData) {
             setTimeout(maybeEnqueueAll, 1200);
+        } else if (changes.autoSendMerc || changes.autoDrone) {
+            setTimeout(maybeEnqueueAll, 500);
         }
     });
 }

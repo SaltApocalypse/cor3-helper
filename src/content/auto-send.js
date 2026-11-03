@@ -10,8 +10,6 @@ export let autoSendAwaitingUsolMercs = false;
 export let initialMercsReady = false;
 export let autoSendDeferredWaiting = false;
 export let autoSendExpeditionBlocked = false;
-export let autoSendCollectRetries = 0;
-export const MAX_COLLECT_RETRIES = 3;
 export let _autoSendUsolSkipped = false;
 export let _autoSendMercRetryCount = 0;
 export const MAX_MERC_RETRIES = 3;
@@ -32,7 +30,6 @@ export function isTransientBusyMessage(msg) {
 // mailbox (new flow) or from the reward container (legacy flow).
 const _collectedExpeditionIds = new Set();
 export function onExpeditionCollected(collectedId) {
-    setAutoSendCollectRetries(0);
     if (!autoSendInProgress) return;
     if (collectedId) {
         if (autoSendExpeditionId && collectedId !== autoSendExpeditionId) return;
@@ -49,21 +46,34 @@ export function onExpeditionCollected(collectedId) {
         });
     }
 
-    console.log('[COR3 Helper] Auto-send: rewards collected — refreshing mercenaries (CORE + USOL)...');
     setAutoSendExpeditionId(null);
-    setTimeout(() => {
-        window.postMessage({ type: 'COR3_REQUEST_STASH' }, '*');
-    }, 500);
-    const mercDelay = 2500 + Math.floor(Math.random() * 1000);
-    setTimeout(() => {
-        if (!autoSendInProgress || (getAutomationActive() && getAutomationActive().type !== 'auto-send')) {
-            console.log('[COR3 Helper] Auto-send: merc refresh skipped (no longer active or another automation took over)');
+    chrome.storage.sync.get('autoSendMerc', (settings) => {
+        const merc = settings.autoSendMerc || {};
+        if (!merc.enabled) {
+            console.log('[COR3 Helper] Auto-send: rewards collected, auto-dispatch is off — stopping');
+            autoSendInProgress = false;
+            _automationFinish('auto-send');
+            setTimeout(() => {
+                window.postMessage({ type: 'COR3_REQUEST_STASH' }, '*');
+            }, 500);
             return;
         }
-        window.postMessage({ type: 'COR3_REQUEST_MERCENARIES' }, '*');
-    }, mercDelay);
-    setAutoSendAwaitingMercenaries(false);
-    setAutoSendAwaitingUsolMercs(true);
+
+        console.log('[COR3 Helper] Auto-send: rewards collected — refreshing mercenaries (CORE + USOL)...');
+        setTimeout(() => {
+            window.postMessage({ type: 'COR3_REQUEST_STASH' }, '*');
+        }, 500);
+        const mercDelay = 2500 + Math.floor(Math.random() * 1000);
+        setTimeout(() => {
+            if (!autoSendInProgress || (getAutomationActive() && getAutomationActive().type !== 'auto-send')) {
+                console.log('[COR3 Helper] Auto-send: merc refresh skipped (no longer active or another automation took over)');
+                return;
+            }
+            window.postMessage({ type: 'COR3_REQUEST_MERCENARIES' }, '*');
+        }, mercDelay);
+        setAutoSendAwaitingMercenaries(false);
+        setAutoSendAwaitingUsolMercs(true);
+    });
 }
 
 export function setInitialFetchDone(v) { _initialFetchDone = v; }
@@ -74,54 +84,8 @@ export function setAutoSendAwaitingUsolMercs(v) { autoSendAwaitingUsolMercs = v;
 export function setInitialMercsReady(v) { initialMercsReady = v; }
 export function setAutoSendDeferredWaiting(v) { autoSendDeferredWaiting = v; }
 export function setAutoSendExpeditionBlocked(v) { autoSendExpeditionBlocked = v; }
-export function setAutoSendCollectRetries(v) { autoSendCollectRetries = v; }
 export function setAutoSendUsolSkipped(v) { _autoSendUsolSkipped = v; }
 export function setAutoSendMercRetryCount(v) { _autoSendMercRetryCount = v; }
-
-// Helper: sell cheapest sellable items to free up `count` stash slots
-export function autoSellCheapestItems(items, count, callback) {
-    if (!items || count <= 0) { if (callback) callback(); return; }
-    const sellable = items
-        .filter(i => i.canSell && i.sellPrice && i.sellPrice > 0)
-        .sort((a, b) => a.sellPrice - b.sellPrice);
-    const toSell = sellable.slice(0, Math.max(count, 1));
-    if (toSell.length === 0) {
-        console.log('[COR3 Helper] Auto-sell: no sellable items found');
-        if (callback) callback();
-        return;
-    }
-    console.log('[COR3 Helper] Auto-sell: selling', toSell.length, 'item(s):', toSell.map(i => i.name + ' (' + i.sellPrice + ')').join(', '));
-    let idx = 0;
-    function sellNext() {
-        if (idx >= toSell.length) { if (callback) callback(); return; }
-        const item = toSell[idx++];
-        window.postMessage({ type: 'COR3_SELL_ITEM', itemId: item.id, quantity: 1, skipStashRefresh: true }, '*');
-        setTimeout(sellNext, 1200 + Math.floor(Math.random() * 300));
-    }
-    sellNext();
-}
-
-// Helper: disable auto-send mercenary due to full stash
-export function disableAutoSendDueToStashFull() {
-    chrome.storage.sync.get('autoSendMerc', (settings) => {
-        if (settings.autoSendMerc) {
-            chrome.storage.sync.set({
-                autoSendMerc: {
-                    ...settings.autoSendMerc,
-                    enabled: false,
-                    disabledReason: 'stash_full'
-                }
-            });
-        }
-    });
-    window.postMessage({
-        type: 'COR3_STASH_FULL_WARNING',
-        message: 'Stash is full. Clear stash before claiming more items. Auto-send mercenary disabled.'
-    }, '*');
-    autoSendInProgress = false;
-    _automationFinish('auto-send');
-    autoSendExpeditionId = null;
-}
 
 export function checkAutoSendOnExpeditionData(expeditions) {
     if (!expeditions || !Array.isArray(expeditions) || autoSendInProgress) return;
@@ -161,11 +125,15 @@ export function checkAutoSendOnExpeditionData(expeditions) {
         return;
     }
     chrome.storage.sync.get('autoSendMerc', (settings) => {
-        if (!settings.autoSendMerc || !settings.autoSendMerc.enabled) return;
-        if (!settings.autoSendMerc.mercenaryId && !settings.autoSendMerc.autoChooseMerc) return;
+        const merc = settings.autoSendMerc || {};
+        const dispatchEnabled = !!merc.enabled;
+        const claimEnabled = merc.autoClaim !== undefined ? !!merc.autoClaim : dispatchEnabled;
+        if (!dispatchEnabled && !claimEnabled) return;
 
         const hasActiveExpeditions = expeditions.length > 0;
         if (!hasActiveExpeditions) {
+            if (!dispatchEnabled) return; // claim-only: nothing to dispatch
+            if (!merc.mercenaryId && !merc.autoChooseMerc) return;
             if (!initialMercsReady) {
                 if (autoSendDeferredWaiting) {
                     console.log('[COR3 Helper] Auto-send: Already waiting for initial mercs — skipping duplicate deferral');
@@ -220,8 +188,7 @@ export function checkAutoSendOnExpeditionData(expeditions) {
         }
 
         // Look for a COMPLETED expedition whose rewards have not been claimed yet.
-        // New flow: pay (open.container) -> rewards go to the mailbox -> claim mail.
-        // Legacy flow (no containerOpenedAt/mail): collect.all is still supported.
+        // Flow: pay (open.container) -> rewards go to the mailbox -> claim mail.
         for (const exp of expeditions) {
             if (exp.status !== 'COMPLETED') continue;
             if (_collectedExpeditionIds.has(exp.id)) continue;
@@ -229,6 +196,16 @@ export function checkAutoSendOnExpeditionData(expeditions) {
             if (!getAutomationActive()) setAutomationActive({ type: 'auto-send', startedAt: Date.now() });
             _broadcastQueueStatus();
             autoSendExpeditionId = exp.id;
+
+            if (!claimEnabled) {
+                console.log('[COR3 Helper] Auto-send: completed expedition waiting for manual claim:', exp.id);
+                chrome.storage.local.set({ mercWarning: 'Mercenary rewards are pending. Enable Auto-claim & pay rewards or claim manually to continue.' });
+                autoSendInProgress = false;
+                autoSendExpeditionId = null;
+                _automationFinish('auto-send');
+                return;
+            }
+
             if (!exp.containerOpenedAt) {
                 console.log('[COR3 Helper] Auto-send: Detected COMPLETED expedition:', exp.id, '- opening container in 10s');
                 setTimeout(() => {
@@ -244,6 +221,12 @@ export function checkAutoSendOnExpeditionData(expeditions) {
 }
 
 export function proceedWithMerc(mercId, allMercs, settings, localData) {
+    if (!settings.autoSendMerc || !settings.autoSendMerc.enabled) {
+        console.log('[COR3 Helper] Auto-send: dispatch disabled before launch, aborting');
+        autoSendInProgress = false;
+        _automationFinish('auto-send');
+        return;
+    }
     if (!mercId) {
         console.log('[COR3 Helper] Auto-send: no mercenary selected, aborting');
         autoSendInProgress = false;

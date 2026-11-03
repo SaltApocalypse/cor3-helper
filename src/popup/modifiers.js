@@ -1,112 +1,70 @@
-// --- Modifier edit/save/cancel/toggle ---
-import { renderDecisions, checkAutoChoose, setModifiers, updateModifierDisplayValues } from './expeditions.js';
+// Decision automation settings.
+//
+// - Auto-resolve decisions: mercenary expeditions use autoSendMerc.autoResolveDecisions.
+// - Aggressive decisions: shared by mercenary and drone decisions.
+import { renderDecisions, checkAutoChoose } from './expeditions.js';
 
-const lootModInput = document.getElementById('lootModifier');
-const riskModInput = document.getElementById('riskModifier');
-const autoChooseCheckbox = document.getElementById('autoChooseCheckbox');
-const noWaitAutoChooseCheckbox = document.getElementById('noWaitAutoChooseCheckbox');
-const noWaitRow = document.getElementById('noWaitRow');
-const editModifiersBtn = document.getElementById('editModifiersBtn');
-const saveModifiersBtn = document.getElementById('saveModifiersBtn');
-const cancelModifiersBtn = document.getElementById('cancelModifiersBtn');
-const modifierEditRow = document.getElementById('modifierEditRow');
-const modifierDisplay = document.getElementById('modifierDisplay');
-const modifiersEnabledToggle = document.getElementById('modifiersEnabledToggle');
-const getRidOfVeteransToggle = document.getElementById('getRidOfVeteransToggle');
+const autoResolveMercToggle = document.getElementById('autoChooseCheckbox');
+const aggressiveMercToggle = document.getElementById('aggressiveDecisionsToggle');
+const aggressiveDroneToggle = document.getElementById('aggressiveDecisionsDroneToggle');
 
-let savedLootMod = 1;
-let savedRiskMod = -5;
-let modifiersEnabled = true;
-
-function syncModifiers() {
-    setModifiers(modifiersEnabled, savedLootMod, savedRiskMod);
-}
+let _aggressive = false;
 
 export function reRenderDecisions() {
     chrome.storage.local.get('expeditionDecisions', (result) => {
-        renderDecisions(result.expeditionDecisions || []);
+        const decisions = result.expeditionDecisions || [];
+        renderDecisions(decisions);
+        checkAutoChoose(decisions);
     });
 }
 
-function saveDecisionModifiers() {
-    chrome.storage.sync.set({
-        decisionModifiers: {
-            loot: savedLootMod,
-            risk: savedRiskMod,
-            enabled: modifiersEnabled,
-            autoChoose: autoChooseCheckbox.checked,
-            noWaitAutoChoose: noWaitAutoChooseCheckbox ? noWaitAutoChooseCheckbox.checked : false,
-            getRidOfVeterans: getRidOfVeteransToggle ? getRidOfVeteransToggle.checked : false
-        }
+function saveMercAutoResolve() {
+    if (!autoResolveMercToggle) return;
+    chrome.storage.sync.get('autoSendMerc', (data) => {
+        const existing = data.autoSendMerc || {};
+        chrome.storage.sync.set({
+            autoSendMerc: Object.assign({}, existing, {
+                autoResolveDecisions: !!autoResolveMercToggle.checked
+            })
+        });
     });
 }
 
-editModifiersBtn.addEventListener('click', () => {
-    lootModInput.value = savedLootMod;
-    riskModInput.value = savedRiskMod;
-    modifierEditRow.style.display = '';
-    modifierDisplay.style.display = 'none';
-});
-
-saveModifiersBtn.addEventListener('click', () => {
-    savedLootMod = parseInt(lootModInput.value) || 3;
-    savedRiskMod = parseInt(riskModInput.value) || -2;
-    modifierEditRow.style.display = 'none';
-    modifierDisplay.style.display = '';
-    syncModifiers();
-    updateModifierDisplayValues();
-    saveDecisionModifiers();
+function saveAggressive() {
+    _aggressive = !!(aggressiveMercToggle && aggressiveMercToggle.checked) ||
+        !!(aggressiveDroneToggle && aggressiveDroneToggle.checked);
+    chrome.storage.sync.set({ aggressiveDecisions: _aggressive });
+    if (aggressiveMercToggle) aggressiveMercToggle.checked = _aggressive;
+    if (aggressiveDroneToggle) aggressiveDroneToggle.checked = _aggressive;
     reRenderDecisions();
-});
-
-cancelModifiersBtn.addEventListener('click', () => {
-    modifierEditRow.style.display = 'none';
-    modifierDisplay.style.display = '';
-});
-
-modifiersEnabledToggle.addEventListener('change', () => {
-    modifiersEnabled = modifiersEnabledToggle.checked;
-    syncModifiers();
-    saveDecisionModifiers();
-    reRenderDecisions();
-});
-
-autoChooseCheckbox.addEventListener('change', () => {
-    if (noWaitRow) noWaitRow.style.display = autoChooseCheckbox.checked ? '' : 'none';
-    saveDecisionModifiers();
-    reRenderDecisions();
-});
-
-if (noWaitAutoChooseCheckbox) {
-    noWaitAutoChooseCheckbox.addEventListener('change', () => {
-        saveDecisionModifiers();
-        if (autoChooseCheckbox.checked && noWaitAutoChooseCheckbox.checked) {
-            chrome.storage.local.get('expeditionDecisions', (result) => {
-                checkAutoChoose(result.expeditionDecisions || []);
-            });
-        }
-    });
 }
 
-if (getRidOfVeteransToggle) {
-    getRidOfVeteransToggle.addEventListener('change', () => {
-        saveDecisionModifiers();
+if (autoResolveMercToggle) {
+    autoResolveMercToggle.addEventListener('change', () => {
+        saveMercAutoResolve();
         reRenderDecisions();
     });
 }
+if (aggressiveMercToggle) aggressiveMercToggle.addEventListener('change', saveAggressive);
+if (aggressiveDroneToggle) aggressiveDroneToggle.addEventListener('change', saveAggressive);
 
-chrome.storage.sync.get('decisionModifiers', (data) => {
-    if (data.decisionModifiers) {
-        savedLootMod = data.decisionModifiers.loot ?? 1;
-        savedRiskMod = data.decisionModifiers.risk ?? -5;
-        modifiersEnabled = data.decisionModifiers.enabled !== false;
-        autoChooseCheckbox.checked = !!data.decisionModifiers.autoChoose;
-        if (noWaitAutoChooseCheckbox) noWaitAutoChooseCheckbox.checked = !!data.decisionModifiers.noWaitAutoChoose;
-        if (getRidOfVeteransToggle) getRidOfVeteransToggle.checked = !!data.decisionModifiers.getRidOfVeterans;
-        if (noWaitRow) noWaitRow.style.display = autoChooseCheckbox.checked ? '' : 'none';
-    }
-    modifiersEnabledToggle.checked = modifiersEnabled;
-    syncModifiers();
-    updateModifierDisplayValues();
-    reRenderDecisions();
+function applySettings() {
+    chrome.storage.sync.get(['autoSendMerc', 'aggressiveDecisions', 'decisionModifiers'], (data) => {
+        const merc = data.autoSendMerc || {};
+        const enabled = merc.autoResolveDecisions !== undefined
+            ? !!merc.autoResolveDecisions
+            : !!(data.decisionModifiers && data.decisionModifiers.autoChoose);
+        if (autoResolveMercToggle) autoResolveMercToggle.checked = enabled;
+
+        _aggressive = !!data.aggressiveDecisions;
+        if (aggressiveMercToggle) aggressiveMercToggle.checked = _aggressive;
+        if (aggressiveDroneToggle) aggressiveDroneToggle.checked = _aggressive;
+    });
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'sync') return;
+    if (changes.autoSendMerc || changes.aggressiveDecisions) applySettings();
 });
+
+applySettings();

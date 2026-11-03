@@ -1,6 +1,7 @@
 // Drone missions (Personal Drone Assembling) — linear automation pipeline.
 // Mirrors the mercenary auto-send flow: claim completed -> repair if needed -> launch.
 import { isContextValid } from './helpers.js';
+import { pickBestOption } from '../shared/decision-policy.js';
 
 let autoDroneInProgress = false;
 let autoDroneClaimedMissionId = null;
@@ -90,7 +91,7 @@ function checkAutoDrone() {
             // New mailbox flow: drone loot is delivered directly to the mailbox.
             // Ask the mailbox module to claim messages for this mission; it will
             // emit COR3_MAIL_CLAIMED when the mission's rewards are collected.
-            if (options && options.drone && completed && completed.missionId &&
+            if (cfg.autoClaim !== false && options && options.drone && completed && completed.missionId &&
                 (Array.isArray(completed.loot) ? completed.loot.some(i => !i.claimed) : true)) {
                 if (autoDroneClaimedMissionId !== completed.missionId) {
                     autoDroneClaimedMissionId = completed.missionId;
@@ -156,10 +157,10 @@ function checkAutoDrone() {
     });
 }
 
-// Auto-resolve in-mission DECISION/HAZARD events (reward loot, penalize risk;
-// avoid options that require a module we may not have).
+// Auto-resolve in-mission DECISION/HAZARD events using the shared decision policy.
+// Prefer options that do not require a module we may not have.
 function checkAutoDroneDecide(eventData) {
-    chrome.storage.sync.get('autoDrone', (settings) => {
+    chrome.storage.sync.get(['autoDrone', 'aggressiveDecisions'], (settings) => {
         const cfg = settings.autoDrone || {};
         if (!cfg.enabled || !cfg.autoDecide) return;
         const ev = eventData && eventData.event;
@@ -167,21 +168,14 @@ function checkAutoDroneDecide(eventData) {
         if (!Array.isArray(ev.options) || ev.options.length === 0) return;
         if (autoDroneResolvedEvents.has(ev.eventId)) return;
 
-        let best = null;
-        for (const opt of ev.options) {
-            if (!best) { best = opt; continue; }
-            const r = (opt.effect && opt.effect.riskDelta) || 0;
-            const l = (opt.effect && opt.effect.lootDelta) || 0;
-            const br = (best.effect && best.effect.riskDelta) || 0;
-            const bl = (best.effect && best.effect.lootDelta) || 0;
-            const score = l * 3 - r * 2;
-            const bScore = bl * 3 - br * 2;
-            if (score !== bScore) { if (score > bScore) best = opt; continue; }
-            if (!opt.requiredModuleId && best.requiredModuleId) best = opt;
-        }
+        const aggressive = !!settings.aggressiveDecisions;
+        const usable = ev.options.filter(o => o && !o.requiredModuleId);
+        const pool = usable.length > 0 ? usable : ev.options;
+        const best = pickBestOption(pool, aggressive);
         if (!best) return;
+
         autoDroneResolvedEvents.add(ev.eventId);
-        console.log('[COR3 Helper] Auto-drone: resolving event', ev.type, '->', best.label);
+        console.log('[COR3 Helper] Auto-drone: resolving event', ev.type, '->', best.label, '(' + (aggressive ? 'aggressive' : 'normal') + ')');
         window.postMessage({ type: 'COR3_RESOLVE_DRONE_EVENT', missionId: eventData.missionId, eventId: ev.eventId, optionId: best.id }, '*');
     });
 }
@@ -244,9 +238,6 @@ function handleDroneError(action, error) {
                 console.log('[COR3 Helper] Auto-drone: pausing after repair failure');
                 chrome.storage.sync.set({ autoDrone: Object.assign({}, cfg, { paused: true }) });
             }
-        } else if (action === 'claim') {
-            autoDroneClaimedMissionId = null;
-            chrome.storage.local.set({ droneWarning: 'Drone claim failed: ' + msg });
         } else {
             chrome.storage.local.set({ droneWarning: 'Drone ' + action + ' failed: ' + msg });
         }
@@ -287,11 +278,6 @@ window.addEventListener('message', (event) => {
         _clearDronePending();
         chrome.storage.local.remove('droneCompleted');
         autoDroneClaimedMissionId = null;
-    } else if (type === 'COR3_WS_DRONE_CLAIMED') {
-        console.log('[COR3 Helper] Auto-drone: mission claimed');
-        _clearDronePending();
-        chrome.storage.local.remove('droneCompleted');
-        scheduleDroneOptionsRefresh(1500);
     } else if (type === 'COR3_WS_DRONE_COMPLETED') {
         const completedData = event.data.data || {};
         chrome.storage.local.set({ droneCompleted: completedData, droneCompletedUpdatedAt: now });

@@ -411,9 +411,10 @@ Internal content event:
 | `droneCompleted` / `droneCompletedUpdatedAt` | local | Last drone completion push |
 | `droneWarning` | local | Human-readable drone warning/status |
 | `mailWarning` | local | Human-readable mailbox claim warning/status |
-| `autoDrone` | sync | Drone automation settings (`enabled`, `paused`, repair rules, …) |
-| `autoSendMerc` | sync | Mercenary auto-send settings |
-| `autoSellCheapest` | sync | Whether to sell the cheapest items when the stash is full |
+| `autoDrone` | sync | Drone settings (`enabled`, `autoClaim`, `autoDecide`, repair rules, …) |
+| `autoSendMerc` | sync | Mercenary settings (`enabled`, `autoClaim`, `autoResolveDecisions`, …) |
+| `aggressiveDecisions` | sync | Shared decision policy: `true` = aggressive, `false` = normal |
+
 
 ---
 
@@ -443,7 +444,7 @@ Behavior:
 
 - `Insufficient stash capacity`, `stash.error.insufficient_capacity`, `stash full`, or any `capacity` message.
 - Mail auto-claim checks `maxCapacity - currentUsage` against the message footprint before claiming.
-- If space is insufficient and `autoSellCheapest` is on, the helper sells the cheapest sellable items, then retries.
+- If space is insufficient, the claim stays queued and a warning is shown until stash space is freed.
 
 ---
 

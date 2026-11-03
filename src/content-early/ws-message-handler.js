@@ -240,38 +240,7 @@ export function handleWsMessage(rawData, socket) {
         return;
     }
 
-    // Intercept collect.all response
-    if (eventName === 'expeditions' && payload && payload.event && payload.event.action === 'collect.all') {
-        // Check for stash full error
-        if (payload.error && (payload.error.message === 'Insufficient stash capacity' || payload.error.message === 'stash.error.insufficient_capacity')) {
-            window.postMessage({
-                type: 'COR3_WS_STASH_FULL',
-                error: payload.error.message,
-                requestId: payload.requestId
-            }, '*');
-        } else if (payload.error && payload.error.message === 'insufficient-credits') {
-            console.log('[COR3 Helper] collect.all failed: insufficient credits');
-            window.postMessage({
-                type: 'COR3_WS_COLLECT_INSUFFICIENT_CREDITS',
-                error: payload.error.message
-            }, '*');
-        } else if (payload.error) {
-            console.log('[COR3 Helper] collect.all failed with unexpected error:', payload.error.message);
-            window.postMessage({
-                type: 'COR3_WS_STASH_FULL',
-                error: payload.error.message,
-                requestId: payload.requestId
-            }, '*');
-        } else {
-            window.postMessage({
-                type: 'COR3_WS_COLLECTED_ALL',
-                data: payload.data
-            }, '*');
-        }
-        return;
-    }
-
-    // Intercept insert.archive response (expedition fully archived after collect.all)
+    // Intercept insert.archive response (expedition fully archived after rewards are claimed)
     if (eventName === 'expeditions' && payload && payload.event && payload.event.action === 'insert.archive') {
         window.postMessage({
             type: 'COR3_WS_EXPEDITION_ARCHIVED',

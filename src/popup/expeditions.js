@@ -5,24 +5,22 @@ import { updateExpeditionAlarmOptions } from './alarms.js';
 import { refreshAllTimestamps } from './timestamps.js';
 import { state } from './state.js';
 import { savePinnedState, renderPinnedTimers } from './pinned-timers.js';
+import { pickBestOption } from '../shared/decision-policy.js';
 
 const expeditionInfoContainer = document.getElementById('expeditionInfoContainer');
 const decisionsContainer = document.getElementById('decisionsContainer');
 const decisionsSectionToggle = document.getElementById('decisionsSectionToggle');
 const decisionsSectionBody = document.getElementById('decisionsSectionBody');
-const getRidOfVeteransToggle = document.getElementById('getRidOfVeteransToggle');
-
-let modifiersEnabled = true;
-let savedLootMod = 1;
-let savedRiskMod = -5;
 
 const personalDroneSectionToggle = document.getElementById('personalDroneSectionToggle');
 const personalDroneSectionBody = document.getElementById('personalDroneSectionBody');
 
-personalDroneSectionToggle.addEventListener('click', async () => {
-    personalDroneSectionToggle.classList.toggle('open');
-    personalDroneSectionBody.classList.toggle('open');
-});
+if (personalDroneSectionToggle && personalDroneSectionBody) {
+    personalDroneSectionToggle.addEventListener('click', async () => {
+        personalDroneSectionToggle.classList.toggle('open');
+        personalDroneSectionBody.classList.toggle('open');
+    });
+}
 
 decisionsSectionToggle.addEventListener('click', () => {
     decisionsSectionToggle.classList.toggle('open');
@@ -31,48 +29,6 @@ decisionsSectionToggle.addEventListener('click', () => {
 
 // On popup open: load cached expeditions (no WS requests)
 loadExpeditions();
-
-export function setModifiers(enabled, loot, risk) {
-    modifiersEnabled = enabled;
-    savedLootMod = loot;
-    savedRiskMod = risk;
-}
-
-export function getLootModifier() {
-    return modifiersEnabled ? savedLootMod : 1;
-}
-export function getRiskModifier() {
-    return modifiersEnabled ? savedRiskMod : -1;
-}
-export function calcOptionScore(opt, expeditionRiskScore, veteranOverride) {
-    const lootMod = veteranOverride ? 1 : getLootModifier();
-    const riskMod = veteranOverride ? 10 : getRiskModifier();
-    return Math.round((opt.lootModifier * lootMod) + ((opt.riskModifier * riskMod) * (((expeditionRiskScore + Math.abs(opt.riskModifier)) / 10) || 1)));
-}
-
-let _cachedExpeditionsForVeteranCheck = null;
-chrome.storage.local.get('expeditionsData', (data) => { _cachedExpeditionsForVeteranCheck = data.expeditionsData || null; });
-chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && changes.expeditionsData) _cachedExpeditionsForVeteranCheck = changes.expeditionsData.newValue || null;
-});
-
-export function isVeteranExpedition(expeditionId) {
-    if (!getRidOfVeteransToggle || !getRidOfVeteransToggle.checked) return false;
-    if (!_cachedExpeditionsForVeteranCheck || !expeditionId) return false;
-    const exps = Array.isArray(_cachedExpeditionsForVeteranCheck) ? _cachedExpeditionsForVeteranCheck : (_cachedExpeditionsForVeteranCheck.expeditions || []);
-    const exp = exps.find(e => e.id === expeditionId);
-    if (exp && exp.mercenary && (exp.mercenary.rank || '').toUpperCase() === 'VETERAN') return true;
-    return false;
-}
-
-export function updateModifierDisplayValues() {
-    const lootDisp = document.getElementById('modLootDisplay');
-    const riskDisp = document.getElementById('modRiskDisplay');
-    const defaultsNote = document.getElementById('modDefaultsNote');
-    if (lootDisp) lootDisp.textContent = savedLootMod;
-    if (riskDisp) riskDisp.textContent = savedRiskMod;
-    if (defaultsNote) defaultsNote.style.display = (savedLootMod === 1 && savedRiskMod === -5) ? '' : 'none';
-}
 
 function renderExpeditionError(error) {
     const now = Date.now();
@@ -234,7 +190,6 @@ export function renderDecisions(decisions) {
     const pending = decisions.filter(d => !d.isResolved);
     if (countEl) countEl.textContent = pending.length > 0 ? `(${pending.length} pending)` : '';
 
-    let baseRisk = decisions[0].riskScore;
     let activeConfirmEl = null;
     let confirmTimeout = null;
 
@@ -275,18 +230,11 @@ export function renderDecisions(decisions) {
         // Options
         const canClick = !d.isResolved && !isExpired;
         if (Array.isArray(d.decisionOptions)) {
-            if (d.isResolved && d.selectedOption) {
-                const selectedOpt = d.decisionOptions.find(o => o.id === d.selectedOption);
-                if (selectedOpt) baseRisk -= selectedOpt.riskModifier;
-            }
-
             for (const opt of d.decisionOptions) {
                 const isSelected = d.selectedOption === opt.id;
                 const isDefault = (d.isAutoResolved && d.selectedOption === opt.id);
                 const riskSign = opt.riskModifier > 0 ? '+' : '';
                 const lootSign = opt.lootModifier > 0 ? '+' : '';
-                const vetOverride = isVeteranExpedition(d.expeditionId);
-                const score = calcOptionScore(opt, d.isResolved ? baseRisk : d.riskScore, vetOverride);
                 const selectedLabel = isSelected ? (isDefault ? " (⏳Expired⏳)" : ' ✓') : '';
 
                 const optRow = el('div', {
@@ -296,8 +244,7 @@ export function renderDecisions(decisions) {
                     el('span', { className: 'option-label' }, opt.label + selectedLabel),
                     el('span', { className: 'option-stats' },
                         el('span', { className: 'stat-risk' }, `Risk: ${riskSign}${opt.riskModifier}`),
-                        el('span', { className: 'stat-loot' }, `Loot: ${lootSign}${opt.lootModifier}`),
-                        el('span', { className: 'option-score' }, `${vetOverride ? '🎖️ ' : ''}Score: ${score >= 0 ? '+' : ''}${score}`)
+                        el('span', { className: 'stat-loot' }, `Loot: ${lootSign}${opt.lootModifier}`)
                     )
                 );
 
@@ -350,48 +297,38 @@ export function renderDecisions(decisions) {
 }
 
 const autoChosenDecisions = new Set();
-var counter = 0;
 export async function checkAutoChoose(decisions) {
-    const autoChoose = document.getElementById('autoChooseCheckbox');
-    if (!autoChoose || !autoChoose.checked) return;
     if (!decisions || decisions.length === 0) return;
 
-    for (const d of decisions) {
-        if (d.isResolved || !d.decisionDeadline || !Array.isArray(d.decisionOptions)) continue;
-        if (autoChosenDecisions.has(d.messageId)) continue;
-        const dl = new Date(d.decisionDeadline);
-        const remaining = dl - Date.now();
-        chrome.storage.local.set({ popupConsoleLog: "remaining time for decision -> " + remaining + " Counter: " + counter });
-        if (remaining <= 0) continue;
-        const noWaitCb = document.getElementById('noWaitAutoChooseCheckbox');
-        const noWait = noWaitCb && noWaitCb.checked;
-        if (!noWait && remaining > 60000) continue;
+    const settings = await chrome.storage.sync.get(['autoSendMerc', 'aggressiveDecisions', 'decisionModifiers']);
+    const merc = settings.autoSendMerc || {};
+    const enabled = merc.autoResolveDecisions !== undefined
+        ? !!merc.autoResolveDecisions
+        : !!(settings.decisionModifiers && settings.decisionModifiers.autoChoose);
+    if (!enabled) return;
+    const aggressive = !!settings.aggressiveDecisions;
 
-        const vetOverride = isVeteranExpedition(d.expeditionId);
-        let bestOpt = null;
-        let bestScore = -Infinity;
-        for (const opt of d.decisionOptions) {
-            const score = calcOptionScore(opt, d.riskScore, vetOverride);
-            if (score > bestScore) {
-                bestScore = score;
-                bestOpt = opt;
+    for (const d of decisions) {
+        if (!d || d.isResolved || !Array.isArray(d.decisionOptions)) continue;
+        if (autoChosenDecisions.has(d.messageId)) continue;
+        if (d.decisionDeadline && new Date(d.decisionDeadline).getTime() <= Date.now()) continue;
+
+        const bestOpt = pickBestOption(d.decisionOptions, aggressive);
+        if (!bestOpt) continue;
+
+        autoChosenDecisions.add(d.messageId);
+        try {
+            const tab = await getCor3Tab();
+            if (tab) {
+                await chrome.tabs.sendMessage(tab.id, {
+                    action: 'respondDecision',
+                    expeditionId: d.expeditionId,
+                    messageId: d.messageId,
+                    selectedOption: bestOpt.id
+                });
+                console.log(`[COR3 Helper] Auto-resolved "${bestOpt.label}" (${aggressive ? 'aggressive' : 'normal'})`);
             }
-        }
-        if (bestOpt) {
-            autoChosenDecisions.add(d.messageId);
-            try {
-                const tab = await getCor3Tab();
-                if (tab) {
-                    await chrome.tabs.sendMessage(tab.id, {
-                        action: 'respondDecision',
-                        expeditionId: d.expeditionId,
-                        messageId: d.messageId,
-                        selectedOption: bestOpt.id
-                    });
-                    console.log(`[COR3 Helper] Auto-chose "${bestOpt.label}" (score: ${bestScore})`);
-                }
-            } catch (e) { /* silent */ }
-        }
+        } catch (e) { /* silent */ }
     }
 }
 

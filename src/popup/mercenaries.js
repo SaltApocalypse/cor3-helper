@@ -11,6 +11,7 @@ const mercenariesSectionBody = document.getElementById('mercenariesSectionBody')
 const mercenariesContainer = document.getElementById('mercenariesContainer');
 const refreshMercenariesBtn = document.getElementById('refreshMercenariesBtn');
 const autoSendMercenaryToggle = document.getElementById('autoSendMercenaryToggle');
+const autoClaimMercToggle = document.getElementById('autoClaimMercToggle');
 const autoChooseMercToggle = document.getElementById('autoChooseMercToggle');
 const autoChooseUsolFirstToggle = document.getElementById('autoChooseUsolFirstToggle');
 const ignoreEliteMercToggle = document.getElementById('ignoreEliteMercToggle');
@@ -22,10 +23,21 @@ const mercCostEditRow = document.getElementById('mercCostEditRow');
 const editMercCostBtn = document.getElementById('editMercCostBtn');
 const saveMercCostBtn = document.getElementById('saveMercCostBtn');
 const cancelMercCostBtn = document.getElementById('cancelMercCostBtn');
-const getRidOfVeteransToggle = document.getElementById('getRidOfVeteransToggle');
 const mercenaryConfigRow = document.getElementById('mercenaryConfigRow');
 const selectedMercenaryName = document.getElementById('selectedMercenaryName');
 const mercWarning = document.getElementById('mercWarning');
+
+function wireSection(toggleId, bodyId) {
+    const toggle = document.getElementById(toggleId);
+    const body = document.getElementById(bodyId);
+    if (!toggle || !body) return;
+    toggle.addEventListener('click', () => {
+        toggle.classList.toggle('open');
+        body.classList.toggle('open');
+    });
+}
+wireSection('mercDispatchToggle', 'mercDispatchBody');
+wireSection('mercAdvancedToggle', 'mercAdvancedBody');
 
 let selectedMercenaryId = null;
 let mercRestTimers = {};
@@ -78,6 +90,7 @@ if (refreshMercenariesBtn) {
 chrome.storage.sync.get('autoSendMerc', (data) => {
     if (data.autoSendMerc) {
         autoSendMercenaryToggle.checked = !!data.autoSendMerc.enabled;
+        if (autoClaimMercToggle) autoClaimMercToggle.checked = data.autoSendMerc.autoClaim !== false;
         if (autoChooseMercToggle) autoChooseMercToggle.checked = !!data.autoSendMerc.autoChooseMerc;
         if (autoChooseUsolFirstToggle) autoChooseUsolFirstToggle.checked = !!data.autoSendMerc.autoChooseUsolFirst;
         if (ignoreEliteMercToggle) ignoreEliteMercToggle.checked = !!data.autoSendMerc.ignoreEliteMerc;
@@ -88,6 +101,9 @@ chrome.storage.sync.get('autoSendMerc', (data) => {
         if (selectedMercenaryId && mercenaryConfigRow) {
             mercenaryConfigRow.style.display = '';
             if (selectedMercenaryName) selectedMercenaryName.textContent = data.autoSendMerc.mercenaryName || selectedMercenaryId;
+        }
+        if (data.autoSendMerc.autoClaim === undefined) {
+            chrome.storage.sync.set({ autoSendMerc: Object.assign({}, data.autoSendMerc, { autoClaim: true }) });
         }
         updateMercWarning(data.autoSendMerc);
     }
@@ -107,10 +123,10 @@ function saveAutoSendMercSettings() {
         chrome.storage.sync.get('autoSendMerc', (data) => {
             const existing = data.autoSendMerc || {};
             const isEnabling = autoSendMercenaryToggle.checked;
-            console.log("saveAutoSendMercSettings: " + autoChooseMercToggle.checked);
             chrome.storage.sync.set({
-                autoSendMerc: {
+                autoSendMerc: Object.assign({}, existing, {
                     enabled: isEnabling,
+                    autoClaim: autoClaimMercToggle ? autoClaimMercToggle.checked : (existing.autoClaim !== false),
                     autoChooseMerc: autoChooseMercToggle ? autoChooseMercToggle.checked : false,
                     autoChooseUsolFirst: autoChooseUsolFirstToggle ? autoChooseUsolFirstToggle.checked : false,
                     ignoreEliteMerc: ignoreEliteMercToggle ? ignoreEliteMercToggle.checked : false,
@@ -119,7 +135,7 @@ function saveAutoSendMercSettings() {
                     mercenaryId: selectedMercenaryId,
                     mercenaryName: selectedMercenaryName ? selectedMercenaryName.textContent : '',
                     disabledReason: isEnabling ? null : (existing.disabledReason || null)
-                }
+                })
             });
         });
     }
@@ -134,6 +150,12 @@ autoSendMercenaryToggle.addEventListener('change', () => {
     }
 });
 
+if (autoClaimMercToggle) {
+    autoClaimMercToggle.addEventListener('change', () => {
+        saveAutoSendMercSettings();
+        loadExpeditions();
+    });
+}
 if (autoChooseMercToggle) {
     autoChooseMercToggle.addEventListener('change', () => {
         saveAutoSendMercSettings();
@@ -180,17 +202,6 @@ if (cancelMercCostBtn) {
     cancelMercCostBtn.addEventListener('click', () => {
         if (mercCostEditRow) mercCostEditRow.style.display = 'none';
         if (mercCostDisplay) mercCostDisplay.style.display = '';
-    });
-}
-
-// Auto-sell cheapest items toggle
-const autoSellCheapestToggle = document.getElementById('autoSellCheapestToggle');
-if (autoSellCheapestToggle) {
-    chrome.storage.sync.get('autoSellCheapest', (data) => {
-        autoSellCheapestToggle.checked = !!data.autoSellCheapest;
-    });
-    autoSellCheapestToggle.addEventListener('change', () => {
-        chrome.storage.sync.set({ autoSellCheapest: autoSellCheapestToggle.checked });
     });
 }
 

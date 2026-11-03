@@ -242,9 +242,6 @@ export function setupMessageListener() {
         } else if (request.action === "openContainer") {
             window.postMessage({ type: 'COR3_OPEN_CONTAINER', expeditionId: request.expeditionId }, '*');
             sendResponse({ success: true });
-        } else if (request.action === "collectAll") {
-            window.postMessage({ type: 'COR3_COLLECT_ALL', expeditionId: request.expeditionId }, '*');
-            sendResponse({ success: true });
         } else if (request.action === "fetchDailyOps") {
             chrome.storage.local.get('bearerToken', (result) => {
                 const token = result.bearerToken;

@@ -19,8 +19,7 @@ export async function applyHelperMode(helper, mode) {
 
     const automationKeys = [
         'autoRefresh', 'autoJobSolverEnabled', 'autoFinishAllJobsEnabled',
-        'autoJobsDebugConsoleEnabled', 'autoUpdateMarkets', 'decisionModifiers', 'autoSendMerc',
-        'autoSellCheapest'
+        'autoJobsDebugConsoleEnabled', 'autoUpdateMarkets', 'autoSendMerc', 'autoDrone'
     ];
 
     if (mode === 'update') {
@@ -39,13 +38,29 @@ export async function applyHelperMode(helper, mode) {
                 value = state.isHelper ? disabledValue : (oldValues[key] ?? disabledValue);
                 chrome.storage.sync.set({ [key]: value });
             } else if (key === 'autoSendMerc') {
-                disabledValue = {"autoChooseMerc":false,"autoChooseUsolFirst":false,"ignoreEliteMerc":false,"applyMercCostLimiter":false,"maxMercCost":15000,"disabledReason":null,"enabled":false,"mercenaryId":"","mercenaryName":""};
+                disabledValue = Object.assign({}, oldValues[key] || {}, {
+                    enabled: false,
+                    autoClaim: false,
+                    autoResolveDecisions: false,
+                    autoChooseMerc: false,
+                    autoChooseUsolFirst: false,
+                    ignoreEliteMerc: false,
+                    applyMercCostLimiter: false,
+                    maxMercCost: 15000,
+                    disabledReason: null,
+                    mercenaryId: "",
+                    mercenaryName: ""
+                });
                 value = state.isHelper ? disabledValue : (oldValues[key] ?? disabledValue);
                 chrome.storage.sync.set({ [key]: value });
-            } else if (key === 'decisionModifiers') {
-                let loot = oldValues[key] ? (oldValues[key]).loot : 1;
-                let risk = oldValues[key] ? (oldValues[key]).risk : -5;
-                disabledValue = {"autoChoose":false,"enabled":false,"getRidOfVeterans":false,"loot":loot,"noWaitAutoChoose":false,"risk":risk};
+            } else if (key === 'autoDrone') {
+                disabledValue = Object.assign({}, oldValues[key] || {}, {
+                    enabled: false,
+                    paused: true,
+                    autoClaim: false,
+                    autoDecide: false,
+                    autoChooseLocation: false
+                });
                 value = state.isHelper ? disabledValue : (oldValues[key] ?? disabledValue);
                 chrome.storage.sync.set({ [key]: value });
             } else {
@@ -59,7 +74,7 @@ export async function applyHelperMode(helper, mode) {
 
         let toggles = {};
         try {
-            toggles = await chrome.storage.sync.get(['autoRefresh', 'autoJobSolverEnabled', 'autoUpdateMarkets', 'autoFinishAllJobsEnabled', 'autoJobsDebugConsoleEnabled', 'decisionModifiers', 'autoSendMerc', 'autoSellCheapest']);
+            toggles = await chrome.storage.sync.get(['autoRefresh', 'autoJobSolverEnabled', 'autoUpdateMarkets', 'autoFinishAllJobsEnabled', 'autoJobsDebugConsoleEnabled', 'autoSendMerc', 'autoDrone', 'aggressiveDecisions']);
         } catch (err) {
             console.log("Couldn't find the related item on storage -> " + err);
         }
@@ -68,10 +83,15 @@ export async function applyHelperMode(helper, mode) {
 
         // Pinned Auto Refresh Timers
 
-        (document.getElementById('autoRefreshCore')).checked = !!toggles.autoRefresh.home_jobs ?? false;
-        (document.getElementById('autoRefreshDark')).checked = !!toggles.autoRefresh.dark_jobs ?? false;
-        (document.getElementById('autoRefreshSoyuz')).checked = !!toggles.autoRefresh.soyuz_jobs ?? false;
-        (document.getElementById('autoRefreshUsol')).checked = !!toggles.autoRefresh.usol_jobs ?? false;
+        const setPinnedAutoRefresh = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.checked = !!value;
+        };
+        const autoRefresh = toggles.autoRefresh || {};
+        setPinnedAutoRefresh('autoRefreshCore', autoRefresh.home_jobs);
+        setPinnedAutoRefresh('autoRefreshDark', autoRefresh.dark_jobs);
+        setPinnedAutoRefresh('autoRefreshSoyuz', autoRefresh.soyuz_jobs);
+        setPinnedAutoRefresh('autoRefreshUsol', autoRefresh.usol_jobs);
 
         loadPinnedState()
 
@@ -96,20 +116,34 @@ export async function applyHelperMode(helper, mode) {
 
         updateAutoUpdateMarketsStatus();
 
-        // Auto Decisions and Auto Mercs
+        // Auto Decisions / Mercenaries / Drone
 
-        (document.getElementById('autoChooseCheckbox')).checked = !!toggles.decisionModifiers.autoChoose ?? false;
-        (document.getElementById('noWaitAutoChooseCheckbox')).checked = !!toggles.decisionModifiers.noWaitAutoChoose ?? false;
-        (document.getElementById('getRidOfVeteransToggle')).checked = !!toggles.decisionModifiers.getRidOfVeterans ?? false;
+        const merc = toggles.autoSendMerc || {};
+        (document.getElementById('autoChooseCheckbox')).checked = !!merc.autoResolveDecisions;
+        (document.getElementById('autoSendMercenaryToggle')).checked = !!merc.enabled;
+        (document.getElementById('autoClaimMercToggle')).checked = merc.autoClaim !== false;
+        (document.getElementById('autoChooseMercToggle')).checked = !!merc.autoChooseMerc;
+        (document.getElementById('autoChooseUsolFirstToggle')).checked = !!merc.autoChooseUsolFirst;
+        (document.getElementById('ignoreEliteMercToggle')).checked = !!merc.ignoreEliteMerc;
+        (document.getElementById('applyMercCostLimiterToggle')).checked = !!merc.applyMercCostLimiter;
+        (document.getElementById('maxMercCostInput')).value = merc.maxMercCost ?? 15000;
+        (document.getElementById('mercCostDisplayValue')).textContent = merc.maxMercCost ?? 15000;
 
-        (document.getElementById('autoSendMercenaryToggle')).checked = !!toggles.autoSendMerc.enabled ?? false;
-        (document.getElementById('autoChooseMercToggle')).checked = !!toggles.autoSendMerc.autoChooseMerc ?? false;
-        (document.getElementById('autoChooseUsolFirstToggle')).checked = !!toggles.autoSendMerc.autoChooseUsolFirst ?? false;
-        (document.getElementById('ignoreEliteMercToggle')).checked = !!toggles.autoSendMerc.ignoreEliteMerc ?? false;
-        (document.getElementById('applyMercCostLimiterToggle')).checked = !!toggles.autoSendMerc.applyMercCostLimiter ?? false;
-        (document.getElementById('maxMercCostInput')).value = toggles.autoSendMerc.maxMercCost ?? 15000;
-        (document.getElementById('mercCostDisplayValue')).textContent = toggles.autoSendMerc.maxMercCost ?? 15000;
-        (document.getElementById('autoSellCheapestToggle')).checked = !!toggles.autoSellCheapest ?? false;
+        const drone = toggles.autoDrone || {};
+        (document.getElementById('autoDroneToggle')).checked = !!drone.enabled;
+        (document.getElementById('autoDroneClaimToggle')).checked = drone.autoClaim !== false;
+        (document.getElementById('autoDroneDecideToggle')).checked = drone.autoDecide !== false;
+        (document.getElementById('autoChooseDroneLocationToggle')).checked = !!drone.autoChooseLocation;
+        (document.getElementById('autoDroneFullChargeToggle')).checked = !!drone.fullChargeBeforeLaunch;
+        (document.getElementById('autoDroneRepairToggle')).checked = !!drone.repairEnabled;
+        (document.getElementById('autoDroneRepairOnLowBatteryToggle')).checked = !!drone.repairOnLowBattery;
+        (document.getElementById('autoDronePauseOnFailToggle')).checked = drone.pauseOnRepairFail !== false;
+        (document.getElementById('droneRepairThresholdInput')).value = drone.repairThreshold ?? 60;
+        (document.getElementById('droneLowBatteryThresholdInput')).value = drone.lowBatteryThreshold ?? 30;
+
+        const aggressive = !!toggles.aggressiveDecisions;
+        (document.getElementById('aggressiveDecisionsToggle')).checked = aggressive;
+        (document.getElementById('aggressiveDecisionsDroneToggle')).checked = aggressive;
 
     }
 
@@ -129,8 +163,22 @@ export async function applyHelperMode(helper, mode) {
 
     // Auto Decisions and Auto Mercs
 
-    ['noWaitAutoChooseCheckbox', 'autoChooseCheckbox', 'autoSellCheapestToggle', 'autoChooseMercToggle', 'autoChooseUsolFirstToggle', 'ignoreEliteMercToggle', 'applyMercCostLimiterToggle', 'getRidOfVeteransToggle', 'autoSendMercenaryToggle'].forEach(key => {
-        ((document.getElementById(key)).closest('.auto-choose-row')).style.display = state.isHelper ? 'none' : 'flex';
+    [
+        'autoChooseCheckbox', 'autoChooseMercToggle', 'autoChooseUsolFirstToggle',
+        'ignoreEliteMercToggle', 'applyMercCostLimiterToggle', 'autoSendMercenaryToggle',
+        'autoClaimMercToggle', 'autoDroneToggle', 'autoDroneClaimToggle',
+        'autoDroneDecideToggle', 'autoChooseDroneLocationToggle', 'autoDroneFullChargeToggle',
+        'autoDroneRepairToggle', 'autoDroneRepairOnLowBatteryToggle', 'autoDronePauseOnFailToggle',
+        'aggressiveDecisionsToggle', 'aggressiveDecisionsDroneToggle'
+    ].forEach(key => {
+        const el = document.getElementById(key);
+        const row = el && el.closest('.auto-choose-row');
+        if (row) row.style.display = state.isHelper ? 'none' : 'flex';
+    });
+
+    ['mercAdvancedBody', 'droneAdvancedBody'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = state.isHelper ? 'none' : '';
     });
 
     // Hide merc cost display/edit rows in helper mode

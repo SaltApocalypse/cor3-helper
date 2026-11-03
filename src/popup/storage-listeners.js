@@ -14,7 +14,7 @@ const mercWarning = document.getElementById('mercWarning');
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
 
-    // Expedition data (not handled by expeditions.js — it only caches for veteran check)
+    // Expedition data changes
     if (changes.expeditionsData) {
         loadExpeditions();
         refreshAllTimestamps();

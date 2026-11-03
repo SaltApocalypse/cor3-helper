@@ -1,9 +1,6 @@
 export const state = {
     isHelper: false,
     expeditionEndTimes: {},
-    modifiersEnabled: true,
-    savedLootMod: 1,
-    savedRiskMod: -5,
     dailyNextTaskTime: null,
     coreMarketName: null,
     darkMarketName: null,
@@ -31,7 +28,6 @@ export const state = {
     valuableSearchRunning: false,
     valuableSellerRunning: false,
     valuableDebugLogs: [],
-    _cachedExpeditionsForVeteranCheck: null,
     autoChosenDecisions: new Set(),
     _specialistTimerInterval: null,
     _renderDebugJobsId: 0,

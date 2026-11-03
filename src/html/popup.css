@@ -538,12 +538,6 @@
             color: var(--accent-green);
             font-weight: normal;
         }
-        .option-score {
-            font-size: 10px;
-            color: var(--accent-light-cyan);
-            font-weight: bold;
-            white-space: nowrap;
-        }
         .no-decisions {
             text-align: center;
             color: var(--text-dim);

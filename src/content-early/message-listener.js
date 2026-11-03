@@ -701,9 +701,6 @@ export function installMessageListener() {
         if (event.data && event.data.type === 'COR3_OPEN_CONTAINER') {
             window.__cor3OpenContainer(event.data.expeditionId);
         }
-        if (event.data && event.data.type === 'COR3_COLLECT_ALL') {
-            window.__cor3CollectAll(event.data.expeditionId);
-        }
         if (event.data && event.data.type === 'COR3_STOP_DECRYPT_SOLVER') {
             window.__solverAbort = true;
         }
