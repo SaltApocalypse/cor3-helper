@@ -1,4 +1,6 @@
 node_modules/
 dist/
 RELEASE_NOTES.md
-cor3-ws-export.json
+cor3-ws-export*.json
+Task.md
+*.zip
