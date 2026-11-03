@@ -16,6 +16,56 @@ export let _autoSendUsolSkipped = false;
 export let _autoSendMercRetryCount = 0;
 export const MAX_MERC_RETRIES = 3;
 
+// Errors that mean "another action is still being processed". These are
+// transient and must never disable/pause automation.
+export function isTransientBusyMessage(msg) {
+    const m = String(msg || '').toLowerCase();
+    const keys = [
+        'already', 'in progress', 'in-progress', 'processing', 'busy',
+        'operation', 'pending', 'cooldown',
+        '正在', '已在', '操作中', '进行中', '处理中', '冷却'
+    ];
+    return keys.some(k => m.indexOf(k) !== -1);
+}
+
+// Called after all rewards for one expedition have been claimed from the
+// mailbox (new flow) or from the reward container (legacy flow).
+const _collectedExpeditionIds = new Set();
+export function onExpeditionCollected(collectedId) {
+    setAutoSendCollectRetries(0);
+    if (!autoSendInProgress) return;
+    if (collectedId) {
+        if (autoSendExpeditionId && collectedId !== autoSendExpeditionId) return;
+        if (_collectedExpeditionIds.has(collectedId)) return;
+        _collectedExpeditionIds.add(collectedId);
+        if (_collectedExpeditionIds.size > 100) {
+            const first = _collectedExpeditionIds.values().next().value;
+            _collectedExpeditionIds.delete(first);
+        }
+        chrome.storage.local.get('expeditionsData', (result) => {
+            const exps = result.expeditionsData || [];
+            const filtered = exps.filter(e => e.id !== collectedId);
+            chrome.storage.local.set({ expeditionsData: filtered, expeditionsDataUpdatedAt: Date.now() });
+        });
+    }
+
+    console.log('[COR3 Helper] Auto-send: rewards collected — refreshing mercenaries (CORE + USOL)...');
+    setAutoSendExpeditionId(null);
+    setTimeout(() => {
+        window.postMessage({ type: 'COR3_REQUEST_STASH' }, '*');
+    }, 500);
+    const mercDelay = 2500 + Math.floor(Math.random() * 1000);
+    setTimeout(() => {
+        if (!autoSendInProgress || (getAutomationActive() && getAutomationActive().type !== 'auto-send')) {
+            console.log('[COR3 Helper] Auto-send: merc refresh skipped (no longer active or another automation took over)');
+            return;
+        }
+        window.postMessage({ type: 'COR3_REQUEST_MERCENARIES' }, '*');
+    }, mercDelay);
+    setAutoSendAwaitingMercenaries(false);
+    setAutoSendAwaitingUsolMercs(true);
+}
+
 export function setInitialFetchDone(v) { _initialFetchDone = v; }
 export function setAutoSendInProgress(v) { autoSendInProgress = v; }
 export function setAutoSendExpeditionId(v) { autoSendExpeditionId = v; }
@@ -169,26 +219,26 @@ export function checkAutoSendOnExpeditionData(expeditions) {
             return;
         }
 
-        // Look for a COMPLETED expedition that hasn't been fully collected yet
+        // Look for a COMPLETED expedition whose rewards have not been claimed yet.
+        // New flow: pay (open.container) -> rewards go to the mailbox -> claim mail.
+        // Legacy flow (no containerOpenedAt/mail): collect.all is still supported.
         for (const exp of expeditions) {
-            if (exp.status === 'COMPLETED' && !exp.completedAt) {
-                autoSendInProgress = true;
-                if (!getAutomationActive()) setAutomationActive({ type: 'auto-send', startedAt: Date.now() });
-                _broadcastQueueStatus();
-                autoSendExpeditionId = exp.id;
-                if (!exp.containerOpenedAt) {
-                    console.log('[COR3 Helper] Auto-send: Detected COMPLETED expedition:', exp.id, '- opening container in 10s');
-                    setTimeout(() => {
-                        window.postMessage({ type: 'COR3_OPEN_CONTAINER', expeditionId: exp.id }, '*');
-                    }, 10000 + Math.floor(Math.random() * 500));
-                } else {
-                    console.log('[COR3 Helper] Auto-send: Detected COMPLETED expedition:', exp.id, '- container already open, collecting in 10s');
-                    setTimeout(() => {
-                        window.postMessage({ type: 'COR3_COLLECT_ALL', expeditionId: exp.id }, '*');
-                    }, 10000 + Math.floor(Math.random() * 500));
-                }
-                return; // process one at a time
+            if (exp.status !== 'COMPLETED') continue;
+            if (_collectedExpeditionIds.has(exp.id)) continue;
+            autoSendInProgress = true;
+            if (!getAutomationActive()) setAutomationActive({ type: 'auto-send', startedAt: Date.now() });
+            _broadcastQueueStatus();
+            autoSendExpeditionId = exp.id;
+            if (!exp.containerOpenedAt) {
+                console.log('[COR3 Helper] Auto-send: Detected COMPLETED expedition:', exp.id, '- opening container in 10s');
+                setTimeout(() => {
+                    window.postMessage({ type: 'COR3_OPEN_CONTAINER', expeditionId: exp.id }, '*');
+                }, 10000 + Math.floor(Math.random() * 500));
+            } else {
+                console.log('[COR3 Helper] Auto-send: expedition', exp.id, 'already paid — claiming mailbox rewards');
+                window.postMessage({ type: 'COR3_CHECK_MAIL', source: 'EXPEDITION', sourceId: exp.id }, '*');
             }
+            return; // process one at a time
         }
     });
 }

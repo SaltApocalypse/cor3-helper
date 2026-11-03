@@ -865,8 +865,10 @@
         .badge-craft { background: var(--accent-green); color: var(--bg-primary); }
         .badge-use { background: var(--accent-light-cyan); color: var(--bg-primary); }
         .badge-no { background: var(--border); color: var(--text-dim); }
+        .badge-qty { background: rgba(255, 79, 163, 0.18); color: #ff8fc4; border: 1px solid rgba(255, 79, 163, 0.45); }
         .tier-common { border-left: 3px solid #a0a0a0; }
         .tier-rare { border-left: 3px solid var(--accent-cyan); }
+        .tier-superrare { border-left: 3px solid #ff4fa3; }
         .tier-epic { border-left: 3px solid var(--accent-purple); }
         .tier-legendary { border-left: 3px solid var(--accent-yellow); }
         .tier-quest { border-left: 3px solid var(--accent-orange); }
@@ -879,9 +881,47 @@
         }
         .tier-tag-common { background: #a0a0a0; color: var(--bg-primary); }
         .tier-tag-rare { background: var(--accent-cyan); color: var(--bg-primary); }
+        .tier-tag-superrare { background: #ff4fa3; color: var(--bg-primary); }
         .tier-tag-epic { background: var(--accent-purple); color: var(--bg-primary); }
         .tier-tag-legendary { background: var(--accent-yellow); color: var(--bg-primary); }
         .tier-tag-quest { background: var(--accent-orange); color: var(--bg-primary); }
+        .inv-sort-bar {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-bottom: 6px;
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+        .inv-sort-btn {
+            font-size: 10px !important;
+            padding: 4px 8px !important;
+            background: var(--btn-small-bg);
+            border: 1px solid var(--border);
+            color: var(--accent-cyan);
+            border-radius: 4px;
+            cursor: pointer;
+            line-height: 1;
+        }
+        .inv-sort-btn:hover { background: var(--btn-small-hover); }
+        .inv-sort-btn:disabled { cursor: not-allowed; }
+        .inv-sort-btn.inv-sort-confirm {
+            background: rgba(255, 165, 0, 0.18);
+            border-color: var(--accent-orange);
+            color: var(--accent-orange);
+        }
+        .inv-sort-status { margin-left: auto; color: var(--accent-cyan); }
+        .inv-sort-warning {
+            font-size: 10px;
+            color: var(--accent-orange);
+            background: rgba(255, 165, 0, 0.08);
+            border: 1px solid rgba(255, 165, 0, 0.35);
+            border-radius: 4px;
+            padding: 4px 6px;
+            margin-bottom: 8px;
+            line-height: 1.35;
+        }
         .item-price {
             font-size: 11px;
             color: var(--accent-green);

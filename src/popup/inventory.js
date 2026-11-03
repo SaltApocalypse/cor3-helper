@@ -199,25 +199,45 @@ function renderInventory(data) {
     const max = data.maxCapacity || '?';
     spaceInfo.textContent = `${used} / ${max}`;
 
-    let totalSellValue = 0;
+    // Merge duplicate item types: one card per itemConfigId, with a quantity badge.
+    const groups = new Map();
     for (const item of data.items) {
-        if (item.canSell && item.sellPrice) totalSellValue += item.sellPrice;
+        const key = item.itemConfigId || ((item.name || '') + '|' + (item.tier || '') + '|' + (item.canCraft ? '1' : '0'));
+        let g = groups.get(key);
+        if (!g) {
+            g = { first: item, count: 0, totalQty: 0, totalValue: 0 };
+            groups.set(key, g);
+        }
+        g.count++;
+        g.totalQty += item.quantity || 1;
+        if (item.canSell && item.sellPrice) g.totalValue += item.sellPrice * (item.quantity || 1);
     }
+
+    let totalSellValue = 0;
+    for (const g of groups.values()) totalSellValue += g.totalValue;
     const totalValueEl = document.getElementById('totalValue');
     if (totalValueEl) totalValueEl.textContent = totalSellValue > 0 ? `(💰 ${totalSellValue.toLocaleString()})` : '';
 
-    const RARITY_ORDER = { legendary: 0, quest: 1, epic: 2, rare: 3, common: 4 };
-    const sortedItems = [...data.items].sort((a, b) => {
-        const ra = RARITY_ORDER[(a.tier || 'common').toLowerCase()] ?? 5;
-        const rb = RARITY_ORDER[(b.tier || 'common').toLowerCase()] ?? 5;
+    // QUEST is a value of the game's `tier` field (quest items), not a separate tag.
+    // Requested order: QUEST > LEGENDARY > EPIC > SUPERRARE > RARE > COMMON.
+    const RARITY_ORDER = { quest: 0, legendary: 1, epic: 2, superrare: 3, rare: 4, common: 5 };
+    const sortedGroups = [...groups.values()].sort((a, b) => {
+        const ia = a.first, ib = b.first;
+        const ra = RARITY_ORDER[(ia.tier || 'common').toLowerCase()] ?? 6;
+        const rb = RARITY_ORDER[(ib.tier || 'common').toLowerCase()] ?? 6;
         if (ra !== rb) return ra - rb;
-        const pa = (a.canSell && a.sellPrice) ? a.sellPrice : 0;
-        const pb = (b.canSell && b.sellPrice) ? b.sellPrice : 0;
+        const na = String(ia.name || ia.shortName || '');
+        const nb = String(ib.name || ib.shortName || '');
+        const byName = na.localeCompare(nb, undefined, { sensitivity: 'base' });
+        if (byName !== 0) return byName;
+        const pa = (ia.canSell && ia.sellPrice) ? ia.sellPrice : 0;
+        const pb = (ib.canSell && ib.sellPrice) ? ib.sellPrice : 0;
         return pb - pa;
     });
 
     var invItemMap = [];
-    for (const item of sortedItems) {
+    for (const g of sortedGroups) {
+        const item = g.first;
         const card = document.createElement('div');
         const tierClass = 'tier-' + (item.tier || 'common').toLowerCase();
         card.className = 'item-card ' + tierClass;
@@ -227,6 +247,7 @@ function renderInventory(data) {
         const badgesEl = _h('div', {className: 'item-badges'}, _h('span', {className: tierTagClass}, item.tier || 'COMMON'));
         if (item.canCraft) badgesEl.appendChild(_h('span', {className: 'badge badge-craft'}, 'CRAFT'));
         if (item.canUse) badgesEl.appendChild(_h('span', {className: 'badge badge-use'}, 'USE'));
+        if (g.totalQty > 1) badgesEl.appendChild(_h('span', {className: 'badge badge-qty'}, 'x' + g.totalQty));
 
         const invIdx = invItemMap.length;
         invItemMap.push(item);

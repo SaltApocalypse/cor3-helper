@@ -16,6 +16,7 @@ import './ui-toggles.js';
 import './info-panels.js';
 import './inventory.js';
 import './inventory-batch.js';
+import './inventory-sort.js';
 import './loadout.js';
 import './mercenaries.js';
 import './archived-expeditions.js';

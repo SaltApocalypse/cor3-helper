@@ -4,16 +4,18 @@
 import { isContextValid, _automationFinish, _broadcastQueueStatus, getAutomationActive, setAutomationActive } from './helpers.js';
 import { checkAutoChooseFromContent } from './auto-choose.js';
 import {
-    checkAutoSendOnExpeditionData, proceedWithMerc,
+    checkAutoSendOnExpeditionData, proceedWithMerc, onExpeditionCollected,
     autoSendInProgress, autoSendExpeditionId, autoSendAwaitingMercenaries,
     autoSendAwaitingUsolMercs, autoSendExpeditionBlocked, autoSendCollectRetries,
     MAX_COLLECT_RETRIES, _autoSendUsolSkipped, _autoSendMercRetryCount, MAX_MERC_RETRIES,
-    autoSellCheapestItems, disableAutoSendDueToStashFull,
+    autoSellCheapestItems, disableAutoSendDueToStashFull, isTransientBusyMessage,
     setAutoSendInProgress, setAutoSendExpeditionId, setAutoSendAwaitingMercenaries,
     setAutoSendAwaitingUsolMercs, setAutoSendExpeditionBlocked, setAutoSendCollectRetries,
     setAutoSendUsolSkipped, setAutoSendMercRetryCount, setInitialMercsReady
 } from './auto-send.js';
 import { setMarketRefreshInProgress, setAutoUpdateMarketsLastRefresh, setSeqRefreshRunning } from './auto-update-markets.js';
+
+let _containerOpenRetries = 0;
 
 function fetchDailyRewards(token) {
     fetch('https://svc-corie.cor3.gg/api/user-daily-claim/rewards', {
@@ -325,68 +327,63 @@ export function setupWsRelay() {
             chrome.storage.local.set({ usolExpeditionConfigData: event.data.data });
         }
         if (event.data && event.data.type === 'COR3_WS_CONTAINER_OPENED') {
-            if (autoSendInProgress && autoSendExpeditionId) {
-                console.log('[COR3 Helper] Auto-send: Container opened, checking inventory space...');
-                const containerData = event.data.data;
-
-                let spaceNeeded = 2;
-                if (containerData && containerData.items && Array.isArray(containerData.items)) {
-                    spaceNeeded = containerData.items.length;
-                    console.log('[COR3 Helper] Container contains', spaceNeeded, 'items');
-                } else if (containerData && containerData.containerItems && Array.isArray(containerData.containerItems)) {
-                    spaceNeeded = containerData.containerItems.length;
-                    console.log('[COR3 Helper] Container contains', spaceNeeded, 'items (containerItems)');
+            const expId = autoSendExpeditionId;
+            if (event.data.error) {
+                const msg = event.data.error.message || JSON.stringify(event.data.error);
+                console.log('[COR3 Helper] Auto-send: open.container failed:', msg);
+                if (msg === 'insufficient-credits') {
+                    chrome.storage.sync.get('autoSendMerc', (settings) => {
+                        if (settings.autoSendMerc) {
+                            chrome.storage.sync.set({
+                                autoSendMerc: {
+                                    ...settings.autoSendMerc,
+                                    enabled: false,
+                                    disabledReason: 'insufficient_credits'
+                                }
+                            });
+                        }
+                    });
+                    chrome.storage.local.set({
+                        expeditionLaunchError: {
+                            error: 'Insufficient credits to open reward container. Auto-send disabled.',
+                            retryAfter: 0,
+                            timestamp: Date.now(),
+                            noRetry: true
+                        }
+                    });
+                    setAutoSendInProgress(false);
+                    setAutoSendExpeditionId(null);
+                    _automationFinish('auto-send');
+                    return;
                 }
-
-                chrome.storage.local.get('stashData', (result) => {
-                    const stash = result.stashData;
-                    let hasSpace = true;
-
-                    if (stash && stash.maxCapacity && stash.currentUsage !== undefined) {
-                        const availableSpace = stash.maxCapacity - stash.currentUsage;
-                        hasSpace = availableSpace >= spaceNeeded;
-                        console.log('[COR3 Helper] Inventory check:', availableSpace, 'available, need', spaceNeeded);
-                    }
-
-                    if (hasSpace) {
-                        console.log('[COR3 Helper] Auto-send: Sufficient space, collecting all in 10s...');
+                // Transient busy error: retry the payment a few times.
+                if (isTransientBusyMessage(msg) && expId) {
+                    _containerOpenRetries++;
+                    if (_containerOpenRetries <= 3) {
+                        const delay = 4000 * _containerOpenRetries;
+                        console.log('[COR3 Helper] Auto-send: container busy — retrying payment in', delay + 'ms');
                         setTimeout(() => {
-                            window.postMessage({ type: 'COR3_COLLECT_ALL', expeditionId: autoSendExpeditionId }, '*');
-                        }, 10000 + Math.floor(Math.random() * 500));
-                    } else {
-                        chrome.storage.sync.get('autoSellCheapest', (sellData) => {
-                            if (sellData.autoSellCheapest && stash && stash.items) {
-                                const availableSpace2 = stash.maxCapacity - stash.currentUsage;
-                                const shortfall = spaceNeeded - availableSpace2;
-                                console.log('[COR3 Helper] Auto-sell: need', shortfall, 'more slot(s), selling cheapest items');
-                                autoSellCheapestItems(stash.items, shortfall, () => {
-                                    window.postMessage({ type: 'COR3_REQUEST_STASH' }, '*');
-                                    setTimeout(() => {
-                                        console.log('[COR3 Helper] Auto-sell done, collecting all in 10s...');
-                                        setTimeout(() => {
-                                            window.postMessage({ type: 'COR3_COLLECT_ALL', expeditionId: autoSendExpeditionId }, '*');
-                                        }, 10000 + Math.floor(Math.random() * 500));
-                                    }, 3000);
-                                });
-                            } else {
-                                console.log('[COR3 Helper] Auto-send: Insufficient space, disabling auto-container-claim');
-                                chrome.storage.sync.get('autoSendMerc', (settings) => {
-                                    if (settings.autoSendMerc) {
-                                        chrome.storage.sync.set({
-                                            autoSendMerc: {
-                                                ...settings.autoSendMerc,
-                                                enabled: false,
-                                                disabledReason: 'stash_full'
-                                            }
-                                        });
-                                    }
-                                });
-                                setAutoSendInProgress(false);
-                                _automationFinish('auto-send');
+                            if (autoSendInProgress && autoSendExpeditionId === expId) {
+                                window.postMessage({ type: 'COR3_OPEN_CONTAINER', expeditionId: expId }, '*');
                             }
-                        });
+                        }, delay);
+                        return;
                     }
-                });
+                }
+                chrome.storage.local.set({ mercWarning: 'Failed to open reward container: ' + msg });
+                setAutoSendInProgress(false);
+                setAutoSendExpeditionId(null);
+                _automationFinish('auto-send');
+                return;
+            }
+
+            if (autoSendInProgress && expId) {
+                _containerOpenRetries = 0;
+                console.log('[COR3 Helper] Auto-send: container paid — rewards are in the mailbox, claiming…');
+                // New flow: open.container moves the loot to mail; claim the
+                // matching PENDING message(s). auto-send continues when the
+                // mailbox module emits COR3_MAIL_CLAIMED.
+                window.postMessage({ type: 'COR3_CHECK_MAIL', source: 'EXPEDITION', sourceId: expId }, '*');
             }
         }
         if (event.data && event.data.type === 'COR3_WS_STASH_FULL') {
@@ -477,32 +474,22 @@ export function setupWsRelay() {
             setAutoSendExpeditionId(null);
         }
         if (event.data && event.data.type === 'COR3_WS_COLLECTED_ALL') {
-            setAutoSendCollectRetries(0);
+            // Legacy collect.all path (kept for older game versions).
             const collectedId = event.data.data && event.data.data.id;
-            if (collectedId) {
-                chrome.storage.local.get('expeditionsData', (result) => {
-                    const exps = result.expeditionsData || [];
-                    const filtered = exps.filter(e => e.id !== collectedId);
-                    chrome.storage.local.set({ expeditionsData: filtered, expeditionsDataUpdatedAt: now });
-                });
+            onExpeditionCollected(collectedId);
+        }
+        if (event.data && event.data.type === 'COR3_MAIL_CLAIMED' && event.data.source === 'EXPEDITION') {
+            // New mailbox flow: all rewards for this expedition are in the stash.
+            // Only the expedition currently being processed may advance auto-send;
+            // ignore stale mailbox messages for older expeditions.
+            if (autoSendExpeditionId && event.data.sourceId === autoSendExpeditionId) {
+                onExpeditionCollected(event.data.sourceId);
+            } else {
+                console.log('[COR3 Helper] Auto-send: ignoring stale expedition mail', event.data.sourceId);
             }
-            if (autoSendInProgress && autoSendExpeditionId) {
-                console.log('[COR3 Helper] Auto-send: All collected, refreshing mercenaries (CORE + USOL)...');
-                setAutoSendExpeditionId(null);
-                setTimeout(() => {
-                    window.postMessage({ type: 'COR3_REQUEST_STASH' }, '*');
-                }, 500);
-                var mercDelay = 2500 + Math.floor(Math.random() * 1000);
-                setTimeout(() => {
-                    if (!autoSendInProgress || (getAutomationActive() && getAutomationActive().type !== 'auto-send')) {
-                        console.log('[COR3 Helper] Auto-send: merc refresh skipped (no longer active or another automation took over)');
-                        return;
-                    }
-                    window.postMessage({ type: 'COR3_REQUEST_MERCENARIES' }, '*');
-                }, mercDelay);
-                setAutoSendAwaitingMercenaries(false);
-                setAutoSendAwaitingUsolMercs(true);
-            }
+        }
+        if (event.data && event.data.type === 'COR3_WS_GAMEPLAY') {
+            chrome.storage.local.set({ gameplayData: event.data.data, gameplayDataUpdatedAt: now });
         }
         if (event.data && event.data.type === 'COR3_WS_MERC_NOT_AVAILABLE') {
             setAutoSendMercRetryCount(_autoSendMercRetryCount + 1);
@@ -540,6 +527,20 @@ export function setupWsRelay() {
                 setAutoSendInProgress(false);
                 _automationFinish('auto-send');
                 setAutoSendExpeditionId(null);
+            } else if (event.data.transient || isTransientBusyMessage(event.data.error)) {
+                // The game is still processing another action. Do not disable or
+                // record a permanent error — just wait for the expedition state
+                // to settle, then let auto-send evaluate again.
+                console.log('[COR3 Helper] Expedition action still in progress — will retry after state refresh');
+                chrome.storage.local.set({ mercWarning: 'Expedition action still in progress — retrying shortly…' });
+                setAutoSendExpeditionBlocked(true);
+                chrome.storage.local.set({ autoSendExpeditionBlocked: true });
+                setAutoSendInProgress(false);
+                _automationFinish('auto-send');
+                setAutoSendExpeditionId(null);
+                setTimeout(() => {
+                    window.postMessage({ type: 'COR3_REQUEST_EXPEDITIONS' }, '*');
+                }, 8000);
             } else {
                 chrome.storage.local.set({
                     expeditionLaunchError: {

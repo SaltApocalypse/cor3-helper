@@ -22,6 +22,37 @@ window.__cor3SellItem = function (itemId, quantity, skipStashRefresh) {
     return true;
 };
 
+// Move an item inside the stash grid or to/from the sorting table.
+// location: 'stash' | 'sorting_table'
+window.__cor3StashMoveItem = function (itemId, location, x, y, rotated) {
+    var data = {
+        itemId: itemId,
+        location: location || 'stash',
+        x: x || 0,
+        y: y || 0,
+        rotated: !!rotated
+    };
+    console.log('[COR3 Helper] Moving stash item:', data);
+    wsSend('42["event",{"event":{"name":"stash","action":"move.item"},"data":' + JSON.stringify(data) + '}]');
+    return true;
+};
+
+// --- Mailbox (mail) WS send functions ---
+// Claim every attachment of a single mailbox message.
+window.__cor3MailClaimAll = function (messageId) {
+    console.log('[COR3 Helper] Mail claim.all:', messageId);
+    wsSend('42["event",{"event":{"name":"mail","action":"claim.all"},"data":{"messageId":"' + messageId + '"}}]');
+    return true;
+};
+
+// Claim a single mailbox attachment into a specific stash cell.
+window.__cor3MailClaimItem = function (attachmentId, x, y, rotated) {
+    var placement = { x: x || 0, y: y || 0, rotated: !!rotated };
+    console.log('[COR3 Helper] Mail claim.item:', attachmentId, placement);
+    wsSend('42["event",{"event":{"name":"mail","action":"claim.item"},"data":{"attachmentId":"' + attachmentId + '","placement":' + JSON.stringify(placement) + '}}]');
+    return true;
+};
+
 // --- Specialists WS send functions ---
 window.__cor3RequestSpecialists = function () {
     console.log('[COR3 Helper] Requesting specialists data');

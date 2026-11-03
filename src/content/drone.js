@@ -6,6 +6,37 @@ let autoDroneInProgress = false;
 let autoDroneClaimedMissionId = null;
 const autoDroneResolvedEvents = new Set();
 
+// Serialize WS actions: until the server confirms the previous action, do not
+// send another repair/launch/claim. This prevents duplicate requests that the
+// game rejects with "already in progress" errors.
+let _dronePendingAction = null; // { action, at }
+const DRONE_PENDING_TIMEOUT_MS = 20000;
+
+function _setDronePending(action) {
+    _dronePendingAction = { action: action, at: Date.now() };
+}
+function _clearDronePending() {
+    _dronePendingAction = null;
+}
+function _droneActionBlocked() {
+    if (!_dronePendingAction) return false;
+    if (Date.now() - _dronePendingAction.at > DRONE_PENDING_TIMEOUT_MS) {
+        _dronePendingAction = null;
+        return false;
+    }
+    return true;
+}
+
+function isDroneBusyError(msg) {
+    const m = String(msg || '').toLowerCase();
+    const keys = [
+        'already', 'in progress', 'in-progress', 'processing', 'busy',
+        'operation', 'pending', 'cooldown',
+        '正在', '已在', '操作中', '进行中', '处理中', '冷却'
+    ];
+    return keys.some(k => m.indexOf(k) !== -1);
+}
+
 let _droneOptionsRefreshTimer = null;
 function scheduleDroneOptionsRefresh(delayMs) {
     if (_droneOptionsRefreshTimer) clearTimeout(_droneOptionsRefreshTimer);
@@ -50,16 +81,21 @@ function checkAutoDrone() {
         const cfg = settings.autoDrone || {};
         if (!cfg.enabled) { finish(); return; }
         if (cfg.paused) { finish(); return; }
+        if (_droneActionBlocked()) { finish(); return; }
 
         chrome.storage.local.get(['droneData', 'droneCompleted'], (local) => {
             const options = local.droneData;
             const completed = local.droneCompleted;
 
-            if (options && options.drone && completed && completed.missionId && Array.isArray(completed.loot) && completed.loot.some(i => !i.claimed)) {
+            // New mailbox flow: drone loot is delivered directly to the mailbox.
+            // Ask the mailbox module to claim messages for this mission; it will
+            // emit COR3_MAIL_CLAIMED when the mission's rewards are collected.
+            if (options && options.drone && completed && completed.missionId &&
+                (Array.isArray(completed.loot) ? completed.loot.some(i => !i.claimed) : true)) {
                 if (autoDroneClaimedMissionId !== completed.missionId) {
                     autoDroneClaimedMissionId = completed.missionId;
-                    console.log('[COR3 Helper] Auto-drone: claiming completed mission', completed.missionId);
-                    window.postMessage({ type: 'COR3_CLAIM_DRONE', missionId: completed.missionId }, '*');
+                    console.log('[COR3 Helper] Auto-drone: claiming completed mission via mailbox', completed.missionId);
+                    window.postMessage({ type: 'COR3_CHECK_MAIL', source: 'DRONE_MISSION', sourceId: completed.missionId }, '*');
                 }
                 finish();
                 return;
@@ -68,8 +104,8 @@ function checkAutoDrone() {
             if (!options || !options.drone) { finish(); return; }
             const drone = options.drone;
 
-            if (options.activeMissionId) { finish(); return; }
-            if (drone.isRepairing) { finish(); return; }
+            if (options.activeMissionId) { _clearDronePending(); finish(); return; }
+            if (drone.isRepairing) { _clearDronePending(); finish(); return; }
             if (drone.isDestroyed) {
                 console.log('[COR3 Helper] Auto-drone: drone destroyed — pausing');
                 chrome.storage.sync.set({ autoDrone: Object.assign({}, cfg, { paused: true }) });
@@ -87,6 +123,7 @@ function checkAutoDrone() {
                 const needsLowBatteryRepair = !!cfg.repairOnLowBattery && battCur < lowBattThreshold && drone.durability < drone.maxDurability;
                 if (needsDurabilityRepair || needsLowBatteryRepair) {
                     console.log('[COR3 Helper] Auto-drone: repairing (durability', drone.durability, ', battery', battCur + ')');
+                    _setDronePending('repair');
                     window.postMessage({ type: 'COR3_REPAIR_DRONE', targetDurability: 100 }, '*');
                     finish();
                     return;
@@ -112,6 +149,7 @@ function checkAutoDrone() {
                 return;
             }
             console.log('[COR3 Helper] Auto-drone: launching mission', mission.name, '(' + mission.locationConfigId + ')');
+            _setDronePending('launch');
             window.postMessage({ type: 'COR3_LAUNCH_DRONE', locationConfigId: mission.locationConfigId, missionConfigId: mission.id }, '*');
             finish();
         });
@@ -182,9 +220,19 @@ function handleDroneRateLimited(action, msg) {
 function handleDroneError(action, error) {
     const msg = error && (error.message || JSON.stringify(error)) || 'unknown error';
     console.log('[COR3 Helper] Auto-drone error (' + action + '):', msg);
+    _clearDronePending();
 
     if (isDroneRateLimited(msg)) {
         handleDroneRateLimited(action, msg);
+        return;
+    }
+
+    // "Already in progress" / "operation pending" is a transient state, not a
+    // real failure. Never pause the automation for it — just re-check shortly.
+    if (isDroneBusyError(msg)) {
+        console.log('[COR3 Helper] Auto-drone: transient busy error — will retry');
+        chrome.storage.local.set({ droneWarning: 'Drone ' + action + ' deferred (' + msg + ') — retrying…' });
+        scheduleDroneOptionsRefresh(2500 + Math.floor(Math.random() * 1500));
         return;
     }
 
@@ -214,22 +262,56 @@ window.addEventListener('message', (event) => {
 
     if (type === 'COR3_WS_DRONE_OPTIONS') {
         _droneRateLimitRetries = 0;
+        _clearDronePending();
         chrome.storage.local.set({ droneData: event.data.data, droneDataUpdatedAt: now });
         checkAutoDrone();
     } else if (type === 'COR3_WS_DRONE_MISSION') {
+        _clearDronePending();
         chrome.storage.local.set({ droneMissionData: event.data.data, droneMissionUpdatedAt: now });
         scheduleDroneOptionsRefresh(2000);
+    } else if (type === 'COR3_WS_DRONE_UPDATE') {
+        // { droneId, durability, repaired } push after repair/durability changes.
+        const upd = event.data.data || {};
+        chrome.storage.local.get('droneData', (local) => {
+            const options = local.droneData;
+            if (options && options.drone) {
+                if (typeof upd.durability === 'number') options.drone.durability = upd.durability;
+                if (upd.repaired) options.drone.isRepairing = false;
+                chrome.storage.local.set({ droneData: options, droneDataUpdatedAt: now });
+            }
+            _clearDronePending();
+            scheduleDroneOptionsRefresh(1500);
+        });
     } else if (type === 'COR3_WS_DRONE_LAUNCHED') {
         console.log('[COR3 Helper] Auto-drone: mission launched');
+        _clearDronePending();
         chrome.storage.local.remove('droneCompleted');
         autoDroneClaimedMissionId = null;
     } else if (type === 'COR3_WS_DRONE_CLAIMED') {
         console.log('[COR3 Helper] Auto-drone: mission claimed');
+        _clearDronePending();
         chrome.storage.local.remove('droneCompleted');
         scheduleDroneOptionsRefresh(1500);
     } else if (type === 'COR3_WS_DRONE_COMPLETED') {
-        chrome.storage.local.set({ droneCompleted: event.data.data, droneCompletedUpdatedAt: now });
+        const completedData = event.data.data || {};
+        chrome.storage.local.set({ droneCompleted: completedData, droneCompletedUpdatedAt: now });
+        // Loot is in the mailbox in the new flow; ask the mailbox module to claim it.
+        if (completedData.missionId) {
+            window.postMessage({ type: 'COR3_CHECK_MAIL', source: 'DRONE_MISSION', sourceId: completedData.missionId }, '*');
+        }
         checkAutoDrone();
+    } else if (type === 'COR3_MAIL_CLAIMED' && event.data.source === 'DRONE_MISSION') {
+        console.log('[COR3 Helper] Auto-drone: mailbox rewards claimed for', event.data.sourceId);
+        _clearDronePending();
+        chrome.storage.local.get('droneCompleted', (local) => {
+            const completed = local.droneCompleted;
+            // Ignore claims for older drone missions; only clear the current one.
+            if (!completed || !completed.missionId || completed.missionId === event.data.sourceId) {
+                chrome.storage.local.remove('droneCompleted');
+                autoDroneClaimedMissionId = null;
+            }
+            scheduleDroneOptionsRefresh(1500);
+        });
     } else if (type === 'COR3_WS_DRONE_EVENT') {
         checkAutoDroneDecide(event.data.data);
     } else if (type === 'COR3_WS_DRONE_REPAIR') {
@@ -262,7 +344,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         window.postMessage({ type: 'COR3_LAUNCH_DRONE', locationConfigId: request.locationConfigId, missionConfigId: request.missionConfigId }, '*');
         sendResponse({ success: true });
     } else if (request.action === 'claimDrone') {
-        window.postMessage({ type: 'COR3_CLAIM_DRONE', missionId: request.missionId }, '*');
+        // Rewards now arrive in the mailbox; claim the matching message even if
+        // auto-drone is currently disabled.
+        window.postMessage({ type: 'COR3_CHECK_MAIL', source: 'DRONE_MISSION', sourceId: request.missionId, forceManual: true }, '*');
         sendResponse({ success: true });
     } else if (request.action === 'repairDrone') {
         window.postMessage({ type: 'COR3_REPAIR_DRONE', targetDurability: request.targetDurability }, '*');

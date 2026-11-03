@@ -754,6 +754,7 @@
                 <select id="invBatchRarity" style="width:auto;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:2px 4px;">
                     <option value="COMMON" selected>COMMON</option>
                     <option value="RARE">RARE</option>
+                    <option value="SUPERRARE">SUPERRARE</option>
                     <option value="EPIC">EPIC</option>
                 </select>
                 <span>Tag</span>
@@ -764,6 +765,14 @@
                 <span id="invBatchCount" style="color:var(--text-dim);">-</span>
                 <button id="invBatchSellBtn" class="refresh-btn-small" style="margin-left:auto;padding:4px 10px !important;font-size:11px;border:1px solid var(--accent-green);color:var(--accent-green);">Sell</button>
             </div>
+            <!-- Warehouse sorting (server-driven, slow) -->
+            <div class="inv-sort-bar">
+                <span>Sort</span>
+                <button id="invSortDefaultBtn" class="inv-sort-btn">Default Sort</button>
+                <button id="invSortHorizontalBtn" class="inv-sort-btn">Horizontal Sort</button>
+                <span id="invSortStatus" class="inv-sort-status" style="display:none;"></span>
+            </div>
+            <div id="invSortHint" class="inv-sort-warning" style="display:none;">Sorting may take a long time. Do not refresh or close the page. Mailbox auto-collect is paused while sorting.</div>
             <div id="inventoryContainer"><div class="no-decisions">Loading inventory...</div></div>
             <div class="loadout-hw-info-overlay" id="inventoryInfoOverlay"></div>
             <div class="loadout-hw-info-popup" id="inventoryInfoPopup"></div>

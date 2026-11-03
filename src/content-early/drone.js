@@ -34,6 +34,9 @@ export function handleDroneMessage(eventName, payload) {
         window.postMessage({ type: 'COR3_WS_DRONE_EVENT', data: payload.data }, '*');
     } else if (dmAction === 'completed') {
         window.postMessage({ type: 'COR3_WS_DRONE_COMPLETED', data: payload.data }, '*');
+    } else if (dmAction === 'update') {
+        // Push after a repair or durability change: { droneId, durability, repaired }
+        window.postMessage({ type: 'COR3_WS_DRONE_UPDATE', data: payload.data }, '*');
     } else if (dmAction === 'get.archived') {
         window.postMessage({ type: 'COR3_WS_DRONE_ARCHIVED', data: payload.data }, '*');
     }

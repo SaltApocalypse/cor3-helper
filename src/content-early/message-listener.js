@@ -659,6 +659,15 @@ export function installMessageListener() {
         if (event.data && event.data.type === 'COR3_SELL_ITEM') {
             window.__cor3SellItem(event.data.itemId, event.data.quantity || 1, event.data.skipStashRefresh);
         }
+        if (event.data && event.data.type === 'COR3_MAIL_CLAIM_ALL') {
+            window.__cor3MailClaimAll(event.data.messageId);
+        }
+        if (event.data && event.data.type === 'COR3_MAIL_CLAIM_ITEM') {
+            window.__cor3MailClaimItem(event.data.attachmentId, event.data.x, event.data.y, event.data.rotated);
+        }
+        if (event.data && event.data.type === 'COR3_STASH_MOVE_ITEM') {
+            window.__cor3StashMoveItem(event.data.itemId, event.data.location, event.data.x, event.data.y, event.data.rotated);
+        }
         // Decision response from popup
         if (event.data && event.data.type === 'COR3_RESPOND_DECISION') {
             window.__cor3RespondDecision(event.data.expeditionId, event.data.messageId, event.data.selectedOption);

@@ -11,6 +11,21 @@ import { handleDroneMessage } from './drone.js';
 let __cor3PostUnreachable = null;
 export function setPostUnreachable(fn) { __cor3PostUnreachable = fn; }
 
+// Errors that mean "another action is still being processed" are transient.
+// They must not pause/disable automation; the caller should retry after a short delay.
+export function isTransientBusyMessage(msg) {
+    var m = String(msg || '').toLowerCase();
+    var keys = [
+        'already', 'in progress', 'in-progress', 'processing', 'busy',
+        'operation', 'pending', 'cooldown', 'rate limit', 'too many requests',
+        '正在', '已在', '操作中', '进行中', '处理中', '冷却'
+    ];
+    for (var i = 0; i < keys.length; i++) {
+        if (m.indexOf(keys[i]) !== -1) return true;
+    }
+    return false;
+}
+
 export function handleWsMessage(rawData, socket) {
     if (typeof rawData !== 'string') return;
 
@@ -80,6 +95,41 @@ export function handleWsMessage(rawData, socket) {
             type: 'COR3_WS_STASH',
             stash: payload.data
         }, '*');
+    }
+
+    // Intercept stash move.item responses (used by the warehouse sorter).
+    // The full state is also relayed above as COR3_WS_STASH.
+    if (eventName === 'stash' && payload && payload.event && payload.event.action === 'move.item') {
+        window.postMessage({
+            type: 'COR3_WS_STASH_MOVE',
+            data: payload.data || null,
+            error: payload.error || null,
+            requestId: payload.requestId || null
+        }, '*');
+    }
+
+    // Intercept mailbox (mail) responses and pushes.
+    // update.state is a server push; claim.all / claim.item are command results.
+    if (eventName === 'mail' && payload) {
+        window.postMessage({
+            type: 'COR3_WS_MAIL',
+            action: payload.event ? payload.event.action : null,
+            data: payload.data || null,
+            error: payload.error || null,
+            requestId: payload.requestId || null
+        }, '*');
+        return;
+    }
+
+    // Gameplay blocks (e.g. gameplayBlockReason: 'stash-sorting') while the
+    // sorting table is in use. Used by the warehouse sorter to know when the
+    // game considers the stash busy.
+    if (eventName === 'gameplay' && payload && payload.event && payload.event.action === 'update.state') {
+        window.postMessage({
+            type: 'COR3_WS_GAMEPLAY',
+            data: payload.data || null
+        }, '*');
+        return;
     }
 
     // Intercept loadout responses
@@ -165,6 +215,17 @@ export function handleWsMessage(rawData, socket) {
 
     // Intercept open.container response
     if (eventName === 'expeditions' && payload && payload.event && payload.event.action === 'open.container') {
+        if (payload.error) {
+            var openErrMsg = payload.error.message || JSON.stringify(payload.error);
+            console.log('[COR3 Helper] open.container failed:', openErrMsg);
+            window.postMessage({
+                type: 'COR3_WS_CONTAINER_OPENED',
+                data: null,
+                error: payload.error,
+                requestId: payload.requestId || null
+            }, '*');
+            return;
+        }
         window.postMessage({
             type: 'COR3_WS_CONTAINER_OPENED',
             data: payload.data
@@ -255,6 +316,22 @@ export function handleWsMessage(rawData, socket) {
             window.postMessage({
                 type: 'COR3_WS_INSUFFICIENT_CREDITS',
                 error: payload.error.message
+            }, '*');
+            return;
+        }
+
+        // Any other error must NOT be treated as a successful launch.
+        // Mark transient "already in progress"-style errors so automation can retry
+        // instead of disabling itself.
+        if (payload.error) {
+            var genericErrMsg = payload.error.message || JSON.stringify(payload.error);
+            var transient = isTransientBusyMessage(genericErrMsg);
+            console.log('[COR3 Helper] Expedition launch failed:', genericErrMsg, '(transient:', transient + ')');
+            window.postMessage({
+                type: 'COR3_WS_EXPEDITION_LAUNCH_ERROR',
+                error: genericErrMsg,
+                transient: transient,
+                requestId: payload.requestId || null
             }, '*');
             return;
         }
