@@ -3,22 +3,23 @@
 // must stay open; the content script keeps running even if it is closed.
 import { getCor3Tab } from './utils.js';
 
-const defaultBtn = document.getElementById('invSortDefaultBtn');
-const horizontalBtn = document.getElementById('invSortHorizontalBtn');
+const smartBtn = document.getElementById('invSortSmartBtn');
+const compactBtn = document.getElementById('invSortCompactBtn');
 const statusEl = document.getElementById('invSortStatus');
 const hintEl = document.getElementById('invSortHint');
+const noticeEl = document.getElementById('invSortNotice');
 
 let _sorting = false;
 let _confirmMode = null;
 let _confirmTimer = null;
 
 const LABELS = {
-    default: 'Default Sort',
-    horizontal: 'Horizontal Sort'
+    smart: 'Smart Sort',
+    compact: 'Compact Sort'
 };
 
 function setButtonsEnabled(enabled) {
-    [defaultBtn, horizontalBtn].forEach(btn => {
+    [smartBtn, compactBtn].forEach(btn => {
         if (!btn) return;
         btn.disabled = !enabled;
         btn.style.opacity = enabled ? '' : '0.45';
@@ -28,17 +29,26 @@ function setButtonsEnabled(enabled) {
 function resetConfirm() {
     if (_confirmTimer) { clearTimeout(_confirmTimer); _confirmTimer = null; }
     _confirmMode = null;
-    if (defaultBtn) {
-        defaultBtn.classList.remove('inv-sort-confirm');
-        defaultBtn.textContent = LABELS.default;
-    }
-    if (horizontalBtn) {
-        horizontalBtn.classList.remove('inv-sort-confirm');
-        horizontalBtn.textContent = LABELS.horizontal;
+    [smartBtn, compactBtn].forEach(btn => {
+        if (!btn) return;
+        btn.classList.remove('inv-sort-confirm');
+        const mode = btn === smartBtn ? 'smart' : 'compact';
+        btn.textContent = LABELS[mode];
+    });
+}
+
+function showNotice(text) {
+    if (!noticeEl) return;
+    if (text) {
+        noticeEl.textContent = text;
+        noticeEl.style.display = '';
+    } else {
+        noticeEl.textContent = '';
+        noticeEl.style.display = 'none';
     }
 }
 
-function render(progress, sorting) {
+function render(progress, sorting, notice) {
     _sorting = !!sorting;
     setButtonsEnabled(!_sorting);
     if (hintEl) hintEl.style.display = _sorting ? '' : 'none';
@@ -56,12 +66,13 @@ function render(progress, sorting) {
             statusEl.style.display = 'none';
         }
     }
+    showNotice(notice || null);
     if (!_sorting) resetConfirm();
 }
 
 async function startSort(mode) {
     if (_sorting) return;
-    const btn = mode === 'horizontal' ? horizontalBtn : defaultBtn;
+    const btn = mode === 'smart' ? smartBtn : compactBtn;
     if (!btn) return;
 
     if (_confirmMode !== mode) {
@@ -76,6 +87,7 @@ async function startSort(mode) {
     resetConfirm();
     _sorting = true;
     setButtonsEnabled(false);
+    showNotice(null);
     if (statusEl) {
         statusEl.textContent = 'Starting sort…';
         statusEl.style.display = '';
@@ -96,6 +108,9 @@ async function startSort(mode) {
                 statusEl.style.display = '';
             }
             if (hintEl) hintEl.style.display = 'none';
+            if (res && res.notice) showNotice(res.notice);
+        } else if (res.notice) {
+            showNotice(res.notice);
         }
     } catch (err) {
         _sorting = false;
@@ -109,24 +124,24 @@ async function startSort(mode) {
     }
 }
 
-if (defaultBtn) {
-    defaultBtn.addEventListener('click', (e) => { e.stopPropagation(); startSort('default'); });
+if (smartBtn) {
+    smartBtn.addEventListener('click', (e) => { e.stopPropagation(); startSort('smart'); });
 }
-if (horizontalBtn) {
-    horizontalBtn.addEventListener('click', (e) => { e.stopPropagation(); startSort('horizontal'); });
+if (compactBtn) {
+    compactBtn.addEventListener('click', (e) => { e.stopPropagation(); startSort('compact'); });
 }
 
 function loadState() {
-    chrome.storage.local.get(['stashSortProgress', 'stashSorting'], (data) => {
-        render(data.stashSortProgress || null, !!data.stashSorting);
+    chrome.storage.local.get(['stashSortProgress', 'stashSorting', 'stashSortNotice'], (data) => {
+        render(data.stashSortProgress || null, !!data.stashSorting, data.stashSortNotice || null);
     });
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (changes.stashSortProgress || changes.stashSorting) {
-        chrome.storage.local.get(['stashSortProgress', 'stashSorting'], (data) => {
-            render(data.stashSortProgress || null, !!data.stashSorting);
+    if (changes.stashSortProgress || changes.stashSorting || changes.stashSortNotice) {
+        chrome.storage.local.get(['stashSortProgress', 'stashSorting', 'stashSortNotice'], (data) => {
+            render(data.stashSortProgress || null, !!data.stashSorting, data.stashSortNotice || null);
         });
     }
 });

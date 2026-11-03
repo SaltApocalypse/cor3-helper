@@ -52,7 +52,7 @@ The use of automation tools may be detectable by the site's developers and could
 - **Auto Sell Cheapest Items** — Enable "auto sell" toggle for extension to sell two cheapest items from inventory automatically when there is not enough space to pickup expedition container items.
 - **Inventory Batch Sell** — In the Inventory section, filter stash items by rarity (COMMON/RARE/SUPERRARE/EPIC) and craft tag (NONE/CRAFT), then sell all matching items in one action. Both filters must be chosen; a second confirmation click is required before selling.
 - **Inventory Merge & Quantity** — Duplicate item types are merged into a single card with an `xN` quantity badge, while keeping the existing compact list layout.
-- **Warehouse Sorting** — The new 12-wide warehouse grid is supported. Default sort orders by rarity then item name (row-major packing); Horizontal sort gives each item type its own row band. Both layouts are precomputed and rejected if the required rows exceed the warehouse capacity. Sorting uses the in-game sorting table only for blocking items, skips already-correct items, shows progress, and temporarily pauses mailbox auto-claim.
+- **Warehouse Sorting** — The new 12-wide warehouse grid is supported. **Smart Sort** groups by rarity, then by item height (tallest first), keeps identical item types together, and packs multiple types onto the same shelf. **Compact Sort** is a first-fit fallback for nearly full warehouses. If Smart needs more rows than the warehouse has, it automatically falls back to Compact and shows a notice. Layouts are precomputed, already-correct items are skipped, the in-game sorting table is used only for blocking items, progress is shown, and mailbox auto-claim is paused while sorting.
 - **SUPERRARE Rarity** — Registered between RARE and EPIC (final display order: QUEST > LEGENDARY > EPIC > SUPERRARE > RARE > COMMON).
 - **Mailbox Auto-Claim** — Mercenary expedition and personal drone rewards are now delivered to the stash mailbox. The helper claims all pending EXPEDITION / DRONE_MISSION mail automatically, with stash-capacity checks, cheapest-item auto-sell, and a `claim.item` fallback for fragmented warehouse layouts.
 - **Personal Drone Automation** — Fully automated drone missions (Personal Drone Assembling): auto-dispatch, auto-claim rewards via the mailbox, auto-resolve in-mission decisions, and custom repair rules (durability threshold, low-battery top-up, pause on repair failure, launch only when fully charged). Transient “already in progress” errors are retried instead of pausing the automation. Includes rate-limit retry with backoff that auto-disables on repeated failures. Active drone mission, its decisions, and archived drone missions are shown in the Expeditions panel, with the active mission pin-able like mercenary expeditions.
@@ -112,23 +112,23 @@ The use of automation tools may be detectable by the site's developers and could
 
 ## Fork Releases & Versioning
 
-- **Base version** (Chrome `manifest.version`): `1.8.0`
-- **Display version** (Chrome `manifest.version_name`): `1.8.0-salta.1`
-- **GitHub tag**: `v1.8.0-salta.1`
+- **Base version** (Chrome `manifest.version`): `1.8.1`
+- **Display version** (Chrome `manifest.version_name`): `1.8.1-salta.1`
+- **GitHub tag**: `v1.8.1-salta.1`
 - Fork releases are published as **pre-releases** to distinguish them from upstream stable releases.
 
 Chrome only accepts 1–4 dot-separated integers in `manifest.version`, so the `-salta.1` suffix lives in `version_name` (display-only) and the GitHub tag. `build.js` generates both from `package.json`:
 
 ```json
-"version": "1.8.0",
+"version": "1.8.1",
 "cor3Fork": { "label": "salta", "build": 1 }
 ```
 
 Result:
 
 ```json
-"version": "1.8.0",
-"version_name": "1.8.0-salta.1"
+"version": "1.8.1",
+"version_name": "1.8.1-salta.1"
 ```
 
 Release process:

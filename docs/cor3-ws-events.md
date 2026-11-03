@@ -465,7 +465,10 @@ Notes:
 ## 10. Warehouse sorting notes / limitations
 
 - If `sortingTable.items` is non-empty, the sorter refuses to start (close the warehouse window to let the game return those items first).
-- The sorter computes the full target layout before sending any command, and rejects the sort if the required rows exceed `usableRows`.
+- **Smart Sort** groups by rarity, then by item height (tallest first), keeps identical item types together, and packs multiple types onto the same shelf. Items stay upright unless their base width exceeds the grid.
+- **Compact Sort** is the old first-fit layout, kept as a fallback for nearly full warehouses.
+- If Smart Sort exceeds `usableRows`, the sorter automatically falls back to Compact Sort and stores a notice in `stashSortNotice`.
+- The sorter computes the full target layout before sending any command. If both layouts exceed the row limit, the sort is rejected.
 - Already-correct items are skipped.
 - Only items blocking a target are parked in the sorting table; they are moved back to their targets afterwards.
 - Every move is serialized and waits for the `stash move.item` response (9 s timeout, ~220 ms gap).

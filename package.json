@@ -1,6 +1,6 @@
 {
   "name": "cor3-helper",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "private": true,
   "description": "COR3 Helper Chrome Extension (Salta fork)",
   "cor3Fork": {

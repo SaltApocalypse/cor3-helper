@@ -14,11 +14,12 @@
 // flag, which content/mail.js checks before each claim.
 //
 // Two layouts are supported:
-//   - default:    rarity (QUEST > LEGENDARY > EPIC > SUPERRARE > RARE > COMMON),
-//                 then name; row-major first-fit packing.
-//   - horizontal: same ordering, but every distinct item type starts a new row
-//                 band; copies of the same type fill the band left-to-right and
-//                 wrap down inside that band.
+//   - smart:   rarity sections (QUEST > LEGENDARY > EPIC > SUPERRARE > RARE > COMMON),
+//              then height bands (tallest first). Within a band, identical item
+//              types stay together and multiple types share the same shelf.
+//              Items are kept upright unless their base width exceeds the grid.
+//   - compact: rarity + name first-fit packing (old default layout). Used as an
+//              automatic fallback when the smart layout needs too many rows.
 import { isContextValid } from './helpers.js';
 
 const RARITY_ORDER = {
@@ -80,6 +81,15 @@ function dimsForRotation(item, rotated) {
     return rotated ? { w: b.h, h: b.w } : { w: b.w, h: b.h };
 }
 
+// Smart layout keeps items in their base (upright) orientation. Only rotate when
+// the upright footprint is wider than the warehouse grid.
+function canonicalDims(item, gw) {
+    const b = baseDims(item);
+    if (b.w <= gw) return { w: b.w, h: b.h, rotated: false };
+    if (item.canRotate && b.h <= gw) return { w: b.h, h: b.w, rotated: true };
+    return null;
+}
+
 function makeGrid(w, h) {
     const rows = [];
     for (let y = 0; y < h; y++) rows.push(new Array(w).fill(null));
@@ -110,7 +120,7 @@ function clearRect(grid, x, y, w, h, id) {
     }
 }
 
-function layoutDefault(items, gw, gh) {
+function layoutCompact(items, gw, gh) {
     const grid = makeGrid(gw, gh);
     const result = [];
     const sorted = items.slice().sort(compareItems);
@@ -139,7 +149,7 @@ function layoutDefault(items, gw, gh) {
             }
         }
         if (!placement) {
-            return { ok: false, reason: 'Not enough warehouse rows for the default layout (item: ' + (item.name || item.id) + ').' };
+            return { ok: false, reason: 'Not enough warehouse rows for the compact layout (item: ' + (item.name || item.id) + ').' };
         }
         place(grid, placement.x, placement.y, placement.w, placement.h, item.id);
         result.push({ id: item.id, x: placement.x, y: placement.y, w: placement.w, h: placement.h, rotated: placement.rotated });
@@ -147,57 +157,83 @@ function layoutDefault(items, gw, gh) {
     return { ok: true, items: result };
 }
 
-function layoutHorizontal(items, gw, gh) {
-    // Group identical item types together.
-    const groups = new Map();
+function layoutSmart(items, gw, gh) {
+    // rarity -> height -> groupKey -> { items, w, h, rotated }
+    const byRarity = new Map();
+
     for (const item of items) {
-        const key = item.itemConfigId || ((item.name || '') + '|' + (item.tier || ''));
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(item);
+        const d = canonicalDims(item, gw);
+        if (!d) {
+            return { ok: false, reason: 'Item "' + (item.name || item.id) + '" cannot fit in the warehouse grid.' };
+        }
+        const tier = String(item.tier || 'COMMON').toUpperCase();
+        const typeKey = item.itemConfigId || ((item.name || '') + '|' + tier);
+        const groupKey = typeKey + '|' + d.w + 'x' + d.h;
+
+        if (!byRarity.has(tier)) byRarity.set(tier, new Map());
+        const byHeight = byRarity.get(tier);
+        if (!byHeight.has(d.h)) byHeight.set(d.h, new Map());
+        const byGroup = byHeight.get(d.h);
+        let group = byGroup.get(groupKey);
+        if (!group) {
+            group = {
+                items: [],
+                w: d.w,
+                h: d.h,
+                rotated: d.rotated,
+                name: item.name || item.shortName || '',
+                key: groupKey
+            };
+            byGroup.set(groupKey, group);
+        }
+        group.items.push(item);
     }
-    const orderedGroups = Array.from(groups.values()).sort((a, b) => compareItems(a[0], b[0]));
 
     const result = [];
+    const rarityKeys = Array.from(byRarity.keys()).sort((a, b) => rarityRank(a) - rarityRank(b));
     let y = 0;
 
-    for (const group of orderedGroups) {
-        group.sort(compareItems);
-        let x = 0;
-        let rowH = 0;
+    for (const tier of rarityKeys) {
+        const byHeight = byRarity.get(tier);
+        // Tall items first: large blocks anchor each rarity section.
+        const heights = Array.from(byHeight.keys()).sort((a, b) => b - a);
 
-        for (const item of group) {
-            const b = baseDims(item);
-            let w = b.w, h = b.h, rotated = false;
-            if (w > gw) {
-                if (!item.canRotate) {
-                    return { ok: false, reason: 'Item "' + (item.name || item.id) + '" is wider than the warehouse grid.' };
+        for (const height of heights) {
+            const groups = Array.from(byHeight.get(height).values());
+            groups.sort((a, b) => compareItems(a.items[0], b.items[0]));
+
+            let x = 0;
+            for (const group of groups) {
+                group.items.sort(compareItems);
+                for (const item of group.items) {
+                    if (x + group.w > gw) {
+                        y += height;
+                        x = 0;
+                    }
+                    if (y + height > gh) {
+                        return {
+                            ok: false,
+                            reason: 'Not enough warehouse rows for the smart layout. Required more than ' + gh + ' rows.',
+                            requiredRows: y + height
+                        };
+                    }
+                    result.push({
+                        id: item.id,
+                        x: x,
+                        y: y,
+                        w: group.w,
+                        h: group.h,
+                        rotated: group.rotated
+                    });
+                    x += group.w;
                 }
-                w = b.h; h = b.w; rotated = true;
-                if (w > gw) {
-                    return { ok: false, reason: 'Item "' + (item.name || item.id) + '" cannot fit in the warehouse grid.' };
-                }
             }
-            // Wrap inside this item type's band.
-            if (x + w > gw) {
-                y += rowH;
-                x = 0;
-                rowH = 0;
-            }
-            if (y + h > gh) {
-                return { ok: false, reason: 'Not enough warehouse rows for the horizontal layout. Required more than ' + gh + ' rows.' };
-            }
-            result.push({ id: item.id, x: x, y: y, w: w, h: h, rotated: rotated });
-            x += w;
-            if (h > rowH) rowH = h;
-        }
-        // Next item type always starts on a fresh row band.
-        y += rowH;
-        if (y > gh) {
-            return { ok: false, reason: 'Not enough warehouse rows for the horizontal layout. Required ' + y + ' rows, available ' + gh + '.' };
+            // Close this height band; the next band starts on a fresh row.
+            y += height;
         }
     }
 
-    return { ok: true, items: result };
+    return { ok: true, items: result, usedRows: y };
 }
 
 function computeMoves(stash, layoutItems) {
@@ -396,6 +432,7 @@ async function executeMoves(mode, moves, stagedEver) {
 }
 
 async function startStashSort(mode) {
+    const requestedMode = mode === 'smart' ? 'smart' : 'compact';
     if (_sorting) return { ok: false, error: 'A sort is already running.' };
 
     const local = await new Promise(r => chrome.storage.local.get(['stashData', 'stashSorting'], r));
@@ -415,58 +452,92 @@ async function startStashSort(mode) {
 
     _sorting = true;
     chrome.storage.local.set({ stashSorting: true });
-    setProgress({ mode: mode, phase: 'planning', done: 0, total: 0, text: 'Planning layout…', startedAt: Date.now() });
+    chrome.storage.local.remove('stashSortNotice');
+    setProgress({ mode: requestedMode, phase: 'planning', done: 0, total: 0, text: 'Planning layout…', startedAt: Date.now() });
 
     try {
-        const layout = mode === 'horizontal'
-            ? layoutHorizontal(items, gw, gh)
-            : layoutDefault(items, gw, gh);
-        if (!layout.ok) {
-            log('layout rejected:', layout.reason);
-            finishProgress({ mode: mode, phase: 'error', done: 0, total: 0, text: layout.reason, error: layout.reason, startedAt: Date.now() });
-            _sorting = false;
-            return layout;
+        let layout;
+        let fallback = false;
+        let notice = null;
+
+        if (requestedMode === 'smart') {
+            layout = layoutSmart(items, gw, gh);
+            if (!layout.ok) {
+                const smartReason = layout.reason;
+                const smartRows = layout.requiredRows;
+                const compactLayout = layoutCompact(items, gw, gh);
+                if (compactLayout.ok) {
+                    layout = compactLayout;
+                    fallback = true;
+                    notice = smartRows
+                        ? 'Smart layout needs at least ' + smartRows + ' rows (max ' + gh + ') — used Compact layout instead.'
+                        : 'Smart layout could not fit (' + smartReason + ') — used Compact layout instead.';
+                    log('smart layout rejected; falling back to compact:', notice);
+                } else {
+                    const msg = smartRows
+                        ? 'Smart layout needs at least ' + smartRows + ' rows (max ' + gh + '), and the compact fallback also does not fit.'
+                        : smartReason + ' The compact fallback also does not fit.';
+                    log('layout rejected:', msg);
+                    finishProgress({ mode: requestedMode, phase: 'error', done: 0, total: 0, text: msg, error: msg, startedAt: Date.now() });
+                    _sorting = false;
+                    return { ok: false, error: msg };
+                }
+            }
+        } else {
+            layout = layoutCompact(items, gw, gh);
+            if (!layout.ok) {
+                log('layout rejected:', layout.reason);
+                finishProgress({ mode: requestedMode, phase: 'error', done: 0, total: 0, text: layout.reason, error: layout.reason, startedAt: Date.now() });
+                _sorting = false;
+                return layout;
+            }
+        }
+
+        if (notice) {
+            chrome.storage.local.set({ stashSortNotice: notice });
         }
 
         const plan = computeMoves(stash, layout.items);
         if (!plan.ok) {
-            finishProgress({ mode: mode, phase: 'error', done: 0, total: 0, text: plan.reason, error: plan.reason, startedAt: Date.now() });
+            finishProgress({ mode: requestedMode, phase: 'error', done: 0, total: 0, text: plan.reason, error: plan.reason, startedAt: Date.now() });
             _sorting = false;
             return plan;
         }
 
+        const fallbackSuffix = fallback ? ' (Compact fallback)' : '';
+
         if (plan.moves.length === 0) {
-            finishProgress({ mode: mode, phase: 'done', done: 0, total: 0, text: 'Warehouse is already sorted.', startedAt: Date.now() });
+            finishProgress({ mode: requestedMode, phase: 'done', done: 0, total: 0, text: 'Warehouse is already sorted.' + fallbackSuffix, startedAt: Date.now() });
             _sorting = false;
             window.postMessage({ type: 'COR3_REQUEST_STASH' }, '*');
-            return { ok: true, moves: 0 };
+            return { ok: true, moves: 0, fallback: fallback, notice: notice };
         }
 
-        log('plans', plan.moves.length, 'move(s) for', mode, 'layout');
+        log('plans', plan.moves.length, 'move(s) for', requestedMode, 'layout', fallback ? '(compact fallback)' : '');
         // Execute in the background so the popup gets an immediate response.
         // Progress/completion is published through storage.
-        executeMoves(mode, plan.moves, plan.stagedEver).then((result) => {
+        executeMoves(requestedMode, plan.moves, plan.stagedEver).then((result) => {
             _sorting = false;
             if (!result.ok) {
-                finishProgress({ mode: mode, phase: 'error', done: 0, total: plan.moves.length, text: 'Sorting failed: ' + result.error, error: result.error, startedAt: Date.now() });
+                finishProgress({ mode: requestedMode, phase: 'error', done: 0, total: plan.moves.length, text: 'Sorting failed: ' + result.error + fallbackSuffix, error: result.error, startedAt: Date.now() });
                 log('sort failed:', result.error);
             } else {
-                finishProgress({ mode: mode, phase: 'done', done: plan.moves.length, total: plan.moves.length, text: 'Sorted ' + items.length + ' item(s) in ' + plan.moves.length + ' move(s).', startedAt: Date.now() });
+                finishProgress({ mode: requestedMode, phase: 'done', done: plan.moves.length, total: plan.moves.length, text: 'Sorted ' + items.length + ' item(s) in ' + plan.moves.length + ' move(s).' + fallbackSuffix, startedAt: Date.now() });
                 log('sort complete');
             }
             window.postMessage({ type: 'COR3_REQUEST_STASH' }, '*');
         }).catch((e) => {
             _sorting = false;
             const msg = e && e.message ? e.message : String(e);
-            finishProgress({ mode: mode, phase: 'error', done: 0, total: plan.moves.length, text: 'Sorting failed: ' + msg, error: msg, startedAt: Date.now() });
+            finishProgress({ mode: requestedMode, phase: 'error', done: 0, total: plan.moves.length, text: 'Sorting failed: ' + msg + fallbackSuffix, error: msg, startedAt: Date.now() });
             log('sort exception:', msg);
             window.postMessage({ type: 'COR3_REQUEST_STASH' }, '*');
         });
-        return { ok: true, moves: plan.moves.length };
+        return { ok: true, moves: plan.moves.length, fallback: fallback, notice: notice };
     } catch (e) {
         _sorting = false;
         const msg = e && e.message ? e.message : String(e);
-        finishProgress({ mode: mode, phase: 'error', done: 0, total: 0, text: 'Sorting failed: ' + msg, error: msg, startedAt: Date.now() });
+        finishProgress({ mode: requestedMode, phase: 'error', done: 0, total: 0, text: 'Sorting failed: ' + msg, error: msg, startedAt: Date.now() });
         log('sort exception:', msg);
         window.postMessage({ type: 'COR3_REQUEST_STASH' }, '*');
         return { ok: false, error: msg };
@@ -476,7 +547,7 @@ async function startStashSort(mode) {
 if (isContextValid()) {
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (request && request.action === 'sortStash') {
-            const mode = request.mode === 'horizontal' ? 'horizontal' : 'default';
+            const mode = request.mode === 'smart' ? 'smart' : 'compact';
             startStashSort(mode).then((res) => {
                 try { sendResponse(res); } catch (e) { /* popup closed */ }
             });
@@ -486,5 +557,5 @@ if (isContextValid()) {
 }
 
 window.__cor3StartStashSort = function (mode) {
-    return startStashSort(mode === 'horizontal' ? 'horizontal' : 'default');
+    return startStashSort(mode === 'smart' ? 'smart' : 'compact');
 };
