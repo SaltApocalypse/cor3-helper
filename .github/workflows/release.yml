@@ -56,15 +56,23 @@ jobs:
       - name: Update main with release versions.json
         if: steps.versions.outputs.changed == 'true'
         run: |
-          git fetch origin main
-          git checkout -B versions-sync origin/main
-          cp "$RUNNER_TEMP/versions.json" versions.json
-          if git diff --quiet -- versions.json; then
-            echo "main already has the latest versions.json"
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add versions.json
-          git commit -m "chore: sync game versions for ${{ github.ref_name }}"
-          git push origin versions-sync:main
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git checkout -B versions-sync origin/main
+            cp "$RUNNER_TEMP/versions.json" versions.json
+            if git diff --quiet -- versions.json; then
+              echo "main already has the latest versions.json"
+              exit 0
+            fi
+            git add versions.json
+            git commit -m "chore: sync game versions for ${{ github.ref_name }}"
+            if git push origin versions-sync:main; then
+              exit 0
+            fi
+            echo "main update failed (attempt ${attempt}/3), retrying..."
+            sleep 3
+          done
+          echo "Could not update main with versions.json" >&2
+          exit 1
