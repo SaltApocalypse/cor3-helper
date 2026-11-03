@@ -1,5 +1,7 @@
 name: Release
 
+# Fork release workflow. Push ONLY the specific fork tag, never `git push --tags`:
+# the repository also carries all upstream tags, and each would trigger a release.
 on:
   push:
     tags: ['v*']
@@ -27,5 +29,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ github.ref_name }} — Salta fork
+          body_path: docs/releases/${{ github.ref_name }}.md
           files: cor3-helper-${{ github.ref_name }}.zip
-          generate_release_notes: true
+          prerelease: true

@@ -74,7 +74,9 @@ function cleanDist() {
 }
 
 function copyStaticFiles() {
-    const pkgVersion = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version;
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+    const pkgVersion = pkg.version;
+    const fork = pkg.cor3Fork || null;
 
     for (const file of staticFiles) {
         const src = path.join(__dirname, file);
@@ -85,6 +87,11 @@ function copyStaticFiles() {
         if (path.basename(file) === 'manifest.json') {
             const manifest = JSON.parse(fs.readFileSync(src, 'utf8'));
             manifest.version = pkgVersion;
+            if (fork && fork.label) {
+                manifest.version_name = `${pkgVersion}-${fork.label}.${fork.build || 1}`;
+            } else {
+                delete manifest.version_name;
+            }
             delete manifest._version_note;
             fs.writeFileSync(dest, JSON.stringify(manifest, null, 2) + '\n');
         } else {

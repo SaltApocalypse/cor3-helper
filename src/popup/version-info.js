@@ -1,5 +1,13 @@
 import { _safeSetHtml } from './dom-helpers.js';
 import { getCor3Tab } from './utils.js';
+import {
+    FORK_REPO,
+    FORK_REPO_URL,
+    FORK_RELEASES_URL,
+    FORK_DISPLAY_NAME,
+    UPSTREAM_REPO,
+    UPSTREAM_URL
+} from './fork-config.js';
 
 const checkUpdateBtn = document.getElementById('checkUpdateBtn');
 const updateResult = document.getElementById('updateResult');
@@ -43,14 +51,15 @@ checkUpdateBtn.addEventListener('click', async () => {
     try {
         const localManifest = chrome.runtime.getManifest();
         const localExtVersion = localManifest.version;
+        const localExtVersionName = localManifest.version_name || localExtVersion;
 
-        const versionsResp = await fetch('https://raw.githubusercontent.com/Femtoce11/cor3-helper/main/versions.json', { cache: 'no-store' });
+        const versionsResp = await fetch(`https://raw.githubusercontent.com/${FORK_REPO}/main/versions.json`, { cache: 'no-store' });
         if (!versionsResp.ok) throw new Error('Failed to fetch remote versions');
         const remote = await versionsResp.json();
 
         let remoteExtVersion = null;
         try {
-            const pkgResp = await fetch('https://raw.githubusercontent.com/Femtoce11/cor3-helper/main/package.json', { cache: 'no-store' });
+            const pkgResp = await fetch(`https://raw.githubusercontent.com/${FORK_REPO}/main/package.json`, { cache: 'no-store' });
             if (pkgResp.ok) {
                 const remotePkg = await pkgResp.json();
                 remoteExtVersion = remotePkg.version || null;
@@ -63,21 +72,22 @@ checkUpdateBtn.addEventListener('click', async () => {
         let extBehind = false;
 
         if (remoteExtVersion && compareVersions(localExtVersion, remoteExtVersion) < 0) {
-            messages.push(`Extension: <b>v${localExtVersion}</b> → <b>v${remoteExtVersion}</b>`);
+            messages.push(`Extension: <b>v${localExtVersionName}</b> → <b>v${remoteExtVersion}</b>`);
             extBehind = true;
         }
 
         if (messages.length > 0) {
             let html = `Updates detected:<br>${messages.join('<br>')}`;
             if (extBehind) {
-                html += `<br><a href="https://github.com/Femtoce11/cor3-helper/releases" target="_blank" style="color:var(--accent-cyan);">Download from GitHub</a><br><span style="font-size:9px;color:var(--text-muted);">Download ZIP, extract, and reload on chrome://extensions</span>`;
+                html += `<br><a href="${FORK_RELEASES_URL}" target="_blank" style="color:var(--accent-cyan);">Download from ${FORK_DISPLAY_NAME}</a><br><span style="font-size:9px;color:var(--text-muted);">Download ZIP, extract, and reload on chrome://extensions</span>`;
             }
+            html += `<br><span style="font-size:9px;color:var(--text-muted);">Salta fork · Upstream: <a href="${UPSTREAM_URL}" target="_blank" style="color:var(--accent-cyan);">${UPSTREAM_REPO}</a></span>`;
             _safeSetHtml(updateResult, html);
             updateResult.style.color = 'var(--accent-orange)';
         } else {
             const localWeb = webVersion || null;
             const localSys = systemVersion || null;
-            updateResult.textContent = `You're up to date!`;
+            updateResult.textContent = `You're up to date! (${FORK_DISPLAY_NAME})`;
             updateResult.style.color = 'var(--accent-green)';
         }
     } catch (e) {
@@ -92,7 +102,9 @@ async function displayVersionInfo(retryCount) {
     retryCount = retryCount || 0;
     const versionSection = document.getElementById('versionInfoSection');
     if (!versionSection) return;
-    const extVersion = chrome.runtime.getManifest().version;
+    const manifest = chrome.runtime.getManifest();
+    const extVersion = manifest.version;
+    const extVersionName = manifest.version_name || extVersion;
     const { webVersion, systemVersion, patchVersion } = await chrome.storage.local.get(['webVersion', 'systemVersion', 'patchVersion']);
 
     let finalWebVersion = webVersion;
@@ -124,11 +136,13 @@ async function displayVersionInfo(retryCount) {
         }
     }
 
-    let parts = [`Extension: v${extVersion}`];
+    let parts = [`Extension: v${extVersionName} <span style="color:var(--accent-cyan);">(${FORK_DISPLAY_NAME})</span>`];
     if (finalWebVersion) parts.push(`Web: ${finalWebVersion}`);
     if (finalSystemVersion) parts.push(`System: ${finalSystemVersion}`);
     if (finalPatchVersion) parts.push(`Patch: ${finalPatchVersion}`);
-    versionSection.textContent = parts.join(' · ');
+    let html = parts.join(' · ');
+    html += `<br><span style="font-size:9px;color:var(--text-muted);">Fork: <a href="${FORK_REPO_URL}" target="_blank" style="color:var(--accent-cyan);">${FORK_REPO}</a> · Upstream: <a href="${UPSTREAM_URL}" target="_blank" style="color:var(--accent-cyan);">${UPSTREAM_REPO}</a></span>`;
+    _safeSetHtml(versionSection, html);
     versionSection.style.display = 'block';
 
     if ((!finalWebVersion || !finalSystemVersion || !finalPatchVersion) && retryCount < 5) {
@@ -146,7 +160,7 @@ async function autoCheckWebsiteUpdated() {
     const patchVersionData = document.getElementById('patchVersionData');
     if (!webVersionNotice || !webVersionData || !systemVersionNotice || !systemVersionData) return;
     try {
-        const resp = await fetch('https://raw.githubusercontent.com/Femtoce11/cor3-helper/main/versions.json', { cache: 'no-store' });
+        const resp = await fetch(`https://raw.githubusercontent.com/${FORK_REPO}/main/versions.json`, { cache: 'no-store' });
         if (!resp.ok) return;
         const remote = await resp.json();
         const { webVersion, systemVersion, patchVersion } = await chrome.storage.local.get(['webVersion', 'systemVersion', 'patchVersion']);

@@ -1,12 +1,17 @@
 {
   "name": "cor3-helper",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "private": true,
-  "description": "COR3 Helper Chrome Extension",
+  "description": "COR3 Helper Chrome Extension (Salta fork)",
+  "cor3Fork": {
+    "label": "salta",
+    "build": 1
+  },
   "scripts": {
     "build": "node build.js",
     "watch": "node build.js --watch",
-    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "sync-versions": "node scripts/sync-versions.js"
   },
   "devDependencies": {
     "esbuild": "^0.25.0"

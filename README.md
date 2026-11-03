@@ -1,6 +1,13 @@
-# COR3 Helper
+# COR3 Helper — Salta Fork
 
 A Chrome extension that enhances the [cor3.gg](https://cor3.gg) experience by monitoring markets, expeditions, daily ops, and providing timer alerts — all from a compact popup UI.
+
+> **Personal fork:** This is [SaltApocalypse/cor3-helper](https://github.com/SaltApocalypse/cor3-helper), a self-maintained fork of [Femtoce11/cor3-helper](https://github.com/Femtoce11/cor3-helper). It is **not** an official upstream release.
+>
+> - Fork releases: [SaltApocalypse/cor3-helper/releases](https://github.com/SaltApocalypse/cor3-helper/releases)
+> - Upstream project and original author: [Femtoce11/cor3-helper](https://github.com/Femtoce11/cor3-helper)
+>
+> The extension's update checks point at this fork. Game-version data (`versions.json`) is mirrored from upstream and can also be synced manually with `npm run sync-versions`.
 
 ## Affiliation & Disclaimer
 
@@ -43,8 +50,12 @@ The use of automation tools may be detectable by the site's developers and could
 - **Apply Merc Cost Limiter** — When enabled, mercenaries with costs above the configured "Maximum merc cost limit" are excluded from auto-choose selection. Default limit is 15,000.
 - **Get rid of Veterans** — When enabled, overrides loot/risk modifiers for veteran mercenary expeditions with loot=1 and risk=10, making decisions favor high-risk options to have higher chance on getting rid of veteran mercs. Located in the Decisions section.
 - **Auto Sell Cheapest Items** — Enable "auto sell" toggle for extension to sell two cheapest items from inventory automatically when there is not enough space to pickup expedition container items.
-- **Inventory Batch Sell** — In the Inventory section, filter stash items by rarity (COMMON/RARE/EPIC) and craft tag (NONE/CRAFT), then sell all matching items in one action. Both filters must be chosen; a second confirmation click is required before selling.
-- **Personal Drone Automation** — Fully automated drone missions (Personal Drone Assembling): auto-dispatch, auto-claim rewards, auto-resolve in-mission decisions, and custom repair rules (durability threshold, low-battery top-up, pause on repair failure, launch only when fully charged). Includes rate-limit retry with backoff that auto-disables on repeated failures. Active drone mission, its decisions, and archived drone missions are shown in the Expeditions panel, with the active mission pin-able like mercenary expeditions.
+- **Inventory Batch Sell** — In the Inventory section, filter stash items by rarity (COMMON/RARE/SUPERRARE/EPIC) and craft tag (NONE/CRAFT), then sell all matching items in one action. Both filters must be chosen; a second confirmation click is required before selling.
+- **Inventory Merge & Quantity** — Duplicate item types are merged into a single card with an `xN` quantity badge, while keeping the existing compact list layout.
+- **Warehouse Sorting** — The new 12-wide warehouse grid is supported. Default sort orders by rarity then item name (row-major packing); Horizontal sort gives each item type its own row band. Both layouts are precomputed and rejected if the required rows exceed the warehouse capacity. Sorting uses the in-game sorting table only for blocking items, skips already-correct items, shows progress, and temporarily pauses mailbox auto-claim.
+- **SUPERRARE Rarity** — Registered between RARE and EPIC (final display order: QUEST > LEGENDARY > EPIC > SUPERRARE > RARE > COMMON).
+- **Mailbox Auto-Claim** — Mercenary expedition and personal drone rewards are now delivered to the stash mailbox. The helper claims all pending EXPEDITION / DRONE_MISSION mail automatically, with stash-capacity checks, cheapest-item auto-sell, and a `claim.item` fallback for fragmented warehouse layouts.
+- **Personal Drone Automation** — Fully automated drone missions (Personal Drone Assembling): auto-dispatch, auto-claim rewards via the mailbox, auto-resolve in-mission decisions, and custom repair rules (durability threshold, low-battery top-up, pause on repair failure, launch only when fully charged). Transient “already in progress” errors are retried instead of pausing the automation. Includes rate-limit retry with backoff that auto-disables on repeated failures. Active drone mission, its decisions, and archived drone missions are shown in the Expeditions panel, with the active mission pin-able like mercenary expeditions.
 - **Archived Expeditions** — View past expeditions with outcome, cost, risk, location, loot container details and item images. Auto-loaded on startup
 - **Multi-Alarm System** — Create multiple configurable alarms for any timer (daily ops, market job resets, expeditions). Each alarm has its own threshold, volume, continuous mode, and on/off toggle
 - **Move Notifications** — Option to move in-game notification toasts and history panel from the right side to the left side of the screen
@@ -52,7 +63,7 @@ The use of automation tools may be detectable by the site's developers and could
 - **Helper-Only Mode** — Toggle to hide all automation features, converting the extension to a pure info/helper tool
 - **Auto Update Markets** — Toggle to automatically refresh market data when WebSocket events arrive
 - **Version Tracking** — Displays extension, web, system, and patch versions
-- **Check for Updates** — Compare your installed extension, web, and system versions against the latest on GitHub. It lets user know if an update is required for extension or if web/system versions are different from what's stored.
+- **Check for Updates** — Compare your installed extension, web, and system versions against the latest on this fork's GitHub repository. It lets user know if an update is required for extension or if web/system versions are different from what's stored.
 - **Cache-First Design** — Data loads instantly from cache on popup open. Use the "Refresh All" button or per-section refresh buttons to fetch fresh data
 - **Real-Time Updates** — WebSocket listeners auto-update daily ops, markets, expeditions, decisions, inventory, mercenaries, loadout, and archived expeditions live when data arrives — even if the popup is opened before data is ready
 - **DevTools WS Inspector** — Built-in Chrome DevTools panel for real-time WebSocket message inspection and multicategory log viewer. Features include: category selector (WS Messages, Auto Job Solver, Auto Valuable Seller, Error Logs, Page Console Logs, Extension Console Logs), direction/event/action/server column filtering for WS messages, level/message columns for log categories, format dropdown (Raw / JSON-pretty / Interactive Tree View with inline object/array previews), search with highlight & navigation inside message detail (including tree view traversal with auto-expand), export filtered data as JSON or Markdown table, paginated log display (1000 entries per page) with section selector, IndexedDB-backed storage with 24-hour auto-cleanup, per-category clear, and resizable columns/detail pane. Includes an offline popout log viewer that imports exported log files (JSON, MD, Discord clipboard format) for offline analysis
@@ -62,15 +73,15 @@ The use of automation tools may be detectable by the site's developers and could
 
 ### Option A: Pre-built Release (recommended)
 
-1. **Download** — Go to [GitHub Releases](https://github.com/Femtoce11/cor3-helper/releases) and download the latest `dist.zip` asset.
+1. **Download** — Go to [Salta fork Releases](https://github.com/SaltApocalypse/cor3-helper/releases) and download the latest `cor3-helper-v*.zip` asset (pre-release builds are expected).
 
-2. **Extract** — Unzip `dist.zip` to a folder on your computer.
+2. **Extract** — Unzip the downloaded archive to a folder on your computer.
 
 3. **Open Chrome Extensions** — Navigate to `chrome://extensions/` in your browser.
 
 4. **Enable Developer Mode** — Toggle the **Developer mode** switch in the top-right corner.
 
-5. **Load the Extension** — Click **Load unpacked** and select the extracted `dist/` folder (containing `manifest.json`).
+5. **Load the Extension** — Click **Load unpacked** and select the extracted folder (containing `manifest.json`).
 
 6. **Navigate to cor3.gg** — Open [https://cor3.gg](https://cor3.gg) and log in. The extension will automatically start intercepting game data.
 
@@ -80,7 +91,7 @@ The use of automation tools may be detectable by the site's developers and could
 
 1. **Clone** — Clone the repository:
    ```
-   git clone https://github.com/Femtoce11/cor3-helper.git
+   git clone https://github.com/SaltApocalypse/cor3-helper.git
    ```
 
 2. **Install Dependencies** — From the project root, run:
@@ -98,6 +109,72 @@ The use of automation tools may be detectable by the site's developers and could
    ```
 
 4. Follow steps 3–7 from **Option A** above to load the `dist/` folder in Chrome.
+
+## Fork Releases & Versioning
+
+- **Base version** (Chrome `manifest.version`): `1.8.0`
+- **Display version** (Chrome `manifest.version_name`): `1.8.0-salta.1`
+- **GitHub tag**: `v1.8.0-salta.1`
+- Fork releases are published as **pre-releases** to distinguish them from upstream stable releases.
+
+Chrome only accepts 1–4 dot-separated integers in `manifest.version`, so the `-salta.1` suffix lives in `version_name` (display-only) and the GitHub tag. `build.js` generates both from `package.json`:
+
+```json
+"version": "1.8.0",
+"cor3Fork": { "label": "salta", "build": 1 }
+```
+
+Result:
+
+```json
+"version": "1.8.0",
+"version_name": "1.8.0-salta.1"
+```
+
+Release process:
+
+```bash
+npm ci
+npm run build
+git push origin main
+git tag -a v1.8.0-salta.1 -m "Salta fork release v1.8.0-salta.1"
+git push origin v1.8.0-salta.1
+```
+
+> ⚠️ Do **not** run `git push --tags`: this repository also contains upstream tags, and each `v*` tag would trigger the release workflow.
+
+## Game Version Tracking
+
+`versions.json` tracks the live game's web/system/patch versions. The extension displays them in the popup footer (`Web`, `System`, `Patch`) and uses them for “website updated” notices.
+
+The fork's `versions.json` is kept fresh automatically by `.github/workflows/sync-versions.yml` (daily schedule), and can be updated manually:
+
+```bash
+npm run sync-versions
+```
+
+To read the live values yourself:
+
+1. Open [cor3.gg](https://cor3.gg) with the extension loaded.
+2. Open the extension popup and read the version footer.
+3. Or open the popup DevTools console and run:
+   ```js
+   chrome.storage.local.get(['webVersion', 'systemVersion', 'patchVersion'])
+   ```
+4. Update `versions.json` manually if needed:
+   ```json
+   {
+     "web": "v1.25.31",
+     "system": "3.05",
+     "patch": "3.95.5"
+   }
+   ```
+
+Where the values come from:
+
+- `web` — `translation.json?v=...` request query parameter
+- `system` — `api/users/me` response `systemVersion`
+- `patch` — `updater get.patches` response `selectedVersion`
 
 ## Usage
 
@@ -119,7 +196,7 @@ The use of automation tools may be detectable by the site's developers and could
 - **Get rid of Veterans** — Enable in the Decisions section to override loot/risk modifiers (loot=1, risk=10) for veteran mercenary expeditions, making auto-choose favor high-risk options.
 - **Secret Link/Server Finder** — Toggle the switch to enable. It scans all known server IPs by connecting to each one, then compares the network map before and after to discover any new hidden connections or servers. The toggle auto-disables when the scan completes.
 - **Alarms** — Click ➕ in the Alarms section to create a new alarm. Choose a timer source, set a threshold, and configure volume/continuous beeping. Toggle alarms on/off or edit/delete them anytime.
-- **Check for Updates** — Click the button at the bottom of the popup to see if a new version of extension is available on GitHub. It also shows if web/system versions are changed recently.
+- **Check for Updates** — Click the button at the bottom of the popup to see if a new version of the extension is available on this fork's GitHub releases. It also shows if web/system versions are changed recently.
 - **DevTools WS Inspector** — Open Chrome DevTools (F12) and navigate to the "COR3 Helper" tab. Use the category selector to switch between WS Messages, Auto Job Solver logs, Auto Valuable Seller logs, Error Logs, Page Console Logs, and Extension Console Logs. Use the page selector to browse log history (1000 entries per page). Use the filter inputs, format dropdown, search bar, and export buttons to analyze data. Toggle Live mode to see only new entries from the activation point onward. Click the ⧉ popout button to open an offline log viewer in a new window where you can import previously exported log files.
 
 ## Files
@@ -150,9 +227,12 @@ The use of automation tools may be detectable by the site's developers and could
 | `devtools-panel.js`        | DevTools panel logic — multi-category viewing (incl. console logs), filtering, raw/json-pretty/tree-view, search, export, live mode, paginated IndexedDB loading, WS send |
 | `devtools-log-viewer.html` | Offline log viewer UI — standalone popout window for importing and viewing exported logs                                                                                  |
 | `devtools-log-viewer.js`   | Offline log viewer logic — import/parse JSON, MD table, Discord clipboard formats, category switching, filtering, detail view                                             |
-| `versions.json`            | Version tracking file for update checks (extension, web, system, patch)                                                                                                   |
-| `build.js`                 | esbuild bundler script — bundles modular `src/` entry points into `dist/`, copies static files, syncs manifest version from `package.json`                                 |
-| `package.json`             | Node.js project config — defines `build`, `watch`, and `clean` scripts, extension version, esbuild dependency                                                              |
+| `versions.json`            | Game-version tracking file (web/system/patch), mirrored from upstream and served by this fork                                                                              |
+| `build.js`                 | esbuild bundler script — bundles modular `src/` entry points into `dist/`, copies static files, syncs manifest version and fork `version_name` from `package.json`         |
+| `scripts/sync-versions.js` | Fetches upstream `versions.json` and updates the fork's copy (`npm run sync-versions`)                                                                                      |
+| `docs/cor3-ws-events.md`   | Mailbox, stash/grid, expedition, drone and gameplay WS protocol notes                                                                                                      |
+| `docs/releases/`           | Per-release notes used by the fork release workflow                                                                                                                        |
+| `package.json`             | Node.js project config — build/watch/clean/sync-versions scripts, base version, fork version metadata, esbuild dependency                                                  |
 
 ## Requirements
 
