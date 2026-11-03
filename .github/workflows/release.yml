@@ -14,28 +14,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - run: npm ci
-
-      # Refresh game versions at release time so the artifact always carries
-      # the latest versions.json. If it changed, save it for the main-branch
-      # update step below.
-      - name: Refresh versions.json
-        id: versions
+      - name: Check versions.json freshness
         run: |
-          npm run sync-versions
-          if git diff --quiet -- versions.json; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            cp versions.json "$RUNNER_TEMP/versions.json"
+          set +e
+          node scripts/sync-versions.js --check
+          status=$?
+          if [ "$status" -eq 2 ]; then
+            echo "::warning::versions.json is stale — run 'npm run sync-versions' and commit it before tagging."
+          elif [ "$status" -ne 0 ]; then
+            echo "::warning::versions.json freshness check failed (network/upstream error); continuing with the tagged file."
           fi
+          exit 0
+
+      - run: npm ci
 
       - run: npm run build
 
@@ -49,30 +45,3 @@ jobs:
           body_path: docs/releases/${{ github.ref_name }}.md
           files: cor3-helper-${{ github.ref_name }}.zip
           prerelease: true
-
-      # Keep the branch used by the extension's update checks in sync. This is
-      # a safety net; running `npm run release:prepare` locally before tagging
-      # keeps the tag itself consistent as well.
-      - name: Update main with release versions.json
-        if: steps.versions.outputs.changed == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for attempt in 1 2 3; do
-            git fetch origin main
-            git checkout -B versions-sync origin/main
-            cp "$RUNNER_TEMP/versions.json" versions.json
-            if git diff --quiet -- versions.json; then
-              echo "main already has the latest versions.json"
-              exit 0
-            fi
-            git add versions.json
-            git commit -m "chore: sync game versions for ${{ github.ref_name }}"
-            if git push origin versions-sync:main; then
-              exit 0
-            fi
-            echo "main update failed (attempt ${attempt}/3), retrying..."
-            sleep 3
-          done
-          echo "Could not update main with versions.json" >&2
-          exit 1

@@ -5,15 +5,17 @@
 // the fork needs a fresh versions.json. Upstream already maintains that file for
 // the live game; this script mirrors it. Run manually with:
 //
-//   npm run sync-versions
+//   npm run sync-versions          # update the file
+//   npm run sync-versions:check    # check only; exits 2 when stale
 //
-// or let .github/workflows/sync-versions.yml do it on a schedule.
+// The release workflow runs --check and warns (but does not block) when stale.
 const fs = require('fs');
 const path = require('path');
 
 const UPSTREAM_REPO = 'Femtoce11/cor3-helper';
 const UPSTREAM_URL = `https://raw.githubusercontent.com/${UPSTREAM_REPO}/main/versions.json`;
 const TARGET = path.join(__dirname, '..', 'versions.json');
+const CHECK_ONLY = process.argv.includes('--check');
 
 async function main() {
     const res = await fetch(UPSTREAM_URL, {
@@ -44,6 +46,15 @@ async function main() {
         current.system === remote.system && current.patch === remote.patch;
     if (same) {
         console.log('versions.json is already up to date:', remote);
+        return;
+    }
+
+    if (CHECK_ONLY) {
+        console.error('versions.json is stale.');
+        if (current) console.error('  local:   ', current);
+        console.error('  upstream:', remote);
+        console.error("Run 'npm run sync-versions' to update it before releasing.");
+        process.exitCode = 2;
         return;
     }
 

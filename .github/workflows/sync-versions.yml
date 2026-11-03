@@ -1,10 +1,10 @@
 name: Sync game versions
 
-# The extension points its version checks at this fork, so keep the fork's
-# versions.json fresh. Upstream maintains this file for the live game.
+# The extension points its version checks at this fork. Game-version sync is
+# manual-only: run `npm run sync-versions` locally before a release, or trigger
+# this workflow from the Actions UI. The release workflow warns (but does not
+# block) when versions.json is stale.
 on:
-  schedule:
-    - cron: '17 3 * * *'
   workflow_dispatch:
 
 permissions:

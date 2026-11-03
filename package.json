@@ -12,6 +12,7 @@
     "watch": "node build.js --watch",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "sync-versions": "node scripts/sync-versions.js",
+    "sync-versions:check": "node scripts/sync-versions.js --check",
     "release:prepare": "npm run sync-versions && npm run build"
   },
   "devDependencies": {

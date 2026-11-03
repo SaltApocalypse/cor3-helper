@@ -144,7 +144,7 @@ git tag -a v1.8.1-salta.1 -m "Salta fork release v1.8.1-salta.1"
 git push origin v1.8.1-salta.1
 ```
 
-`release:prepare` refreshes `versions.json` and rebuilds. The release workflow also runs `npm run sync-versions` before building, so the release ZIP always carries the latest game versions; if the file changed, the workflow additionally commits it to `main` for the extension's update checks.
+`release:prepare` refreshes `versions.json` and rebuilds. The release workflow only checks `versions.json` and prints a warning if it is stale; it does not modify the file or commit to `main`.
 
 > ⚠️ Do **not** run `git push --tags`: this repository also contains upstream tags, and each `v*` tag would trigger the release workflow.
 
@@ -152,10 +152,18 @@ git push origin v1.8.1-salta.1
 
 `versions.json` tracks the live game's web/system/patch versions. The extension displays them in the popup footer (`Web`, `System`, `Patch`) and uses them for “website updated” notices.
 
-The fork's `versions.json` is kept fresh automatically by `.github/workflows/sync-versions.yml` (daily schedule), and can be updated manually:
+`versions.json` is updated **manually**. Run the sync script before a release:
 
 ```bash
 npm run sync-versions
+```
+
+You can also trigger `Sync game versions` from GitHub Actions (`workflow_dispatch`). The release workflow runs a `--check` and prints a warning if `versions.json` is stale; it does not block the release.
+
+Check-only mode:
+
+```bash
+npm run sync-versions:check
 ```
 
 To read the live values yourself:
