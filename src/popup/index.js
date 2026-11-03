@@ -1,3 +1,4 @@
+import './i18n.js';
 import './state.js';
 import './theme.js';
 import './panel-controls.js';

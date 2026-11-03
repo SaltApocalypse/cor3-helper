@@ -22,6 +22,8 @@ chrome.storage.sync.get('selectedTheme', (data) => {
 
 themeToggleBtn.addEventListener('click', (e) => {
     e.stopPropagation();
+    const langDropdown = document.getElementById('langDropdown');
+    if (langDropdown) langDropdown.classList.remove('open');
     themeDropdown.classList.toggle('open');
 });
 
