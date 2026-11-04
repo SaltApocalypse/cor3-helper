@@ -273,6 +273,37 @@ Important fields:
 - `containerData`: array of reward slots; after payment each entry has `isCollected: true`.
 - `status`: `PREPARING` → `IN_PROGRESS` → `COMPLETED` (or `FAILED`).
 
+### 4.1.1 Insurance
+
+Mercenary expeditions only. `hasInsurance` is sent in **both** `configure` and `launch` requests:
+
+```json
+42["event",{"event":{"name":"expeditions","action":"configure"},"data":{
+  "mercenaryId":"...",
+  "marketId":"...",
+  "locationConfigId":"...",
+  "zoneConfigId":"...",
+  "goalId":"...",
+  "hasInsurance":true
+}}]
+```
+
+The `configure` response includes:
+
+- `isInsuranceAvailable`: whether insurance can be selected for this expedition.
+- `insuranceCost`: insurance premium (0 when `hasInsurance` is false).
+- `totalCost`, `prepaymentAmount`, `remainingAmount`: reflect the selected insurance.
+- `riskScore`, `riskLevel`, `riskBreakdown`, `outcomeChances`, `duration`.
+
+The `launch` response includes `hasInsurance` and `insuranceRefundAmount`.
+In the capture, the insured launch returned `insuranceRefundAmount` equal to
+`prepaymentAmount`.
+
+The helper stores the setting as `autoSendMerc.hasInsurance` and exposes a
+**Mercenary Insurance** toggle in the Mercenaries settings. The setting is
+relayed to the page world so `configure` quotes and the actual `launch` use the
+same value.
+
 ### 4.2 Open reward container
 
 ```json
@@ -412,7 +443,7 @@ Internal content event:
 | `droneWarning` | local | Human-readable drone warning/status |
 | `mailWarning` | local | Human-readable mailbox claim warning/status |
 | `autoDrone` | sync | Drone automation settings (`enabled`, `paused`, repair rules, …) |
-| `autoSendMerc` | sync | Mercenary auto-send settings |
+| `autoSendMerc` | sync | Mercenary auto-send settings (including `hasInsurance`) |
 | `autoSellCheapest` | sync | Whether to sell the cheapest items when the stash is full |
 
 ---

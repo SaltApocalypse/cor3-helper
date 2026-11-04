@@ -34,9 +34,21 @@ setTimeout(() => {
     });
 }, 5000);
 
+// Keep page-world mercenary configure requests aware of the insurance setting.
+function relayMercInsurance() {
+    chrome.storage.sync.get('autoSendMerc', (data) => {
+        window.postMessage({
+            type: 'COR3_SET_MERC_INSURANCE',
+            hasInsurance: !!(data.autoSendMerc && data.autoSendMerc.hasInsurance)
+        }, '*');
+    });
+}
+relayMercInsurance();
+
 // Listen for autoSendMerc toggle changes to trigger auto-send check
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'sync' || !changes.autoSendMerc) return;
+    relayMercInsurance();
     const newVal = changes.autoSendMerc.newValue;
     if (newVal && newVal.enabled) {
         console.log('[COR3 Helper] Auto-send mercenary enabled — checking expedition data');

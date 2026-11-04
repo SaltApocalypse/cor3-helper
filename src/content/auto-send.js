@@ -284,7 +284,7 @@ export function proceedWithMerc(mercId, allMercs, settings, localData) {
         locationConfigId: loc.id,
         zoneConfigId: zone.id,
         goalId: goal.id,
-        hasInsurance: false
+        hasInsurance: !!settings.autoSendMerc.hasInsurance
     };
     console.log('[COR3 Helper] Auto-send: launching expedition with mercenary:', selectedMerc.callsign, '(' + (isUsol ? 'USOL' : 'CORE') + ')');
     setTimeout(() => {

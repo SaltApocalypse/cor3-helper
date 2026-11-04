@@ -199,7 +199,7 @@ window.__cor3RequestExpeditionConfig = function (marketId) {
 window.__cor3PendingMercConfigures = [];
 
 // Request mercenary configure details (cost, risk, chances)
-window.__cor3RequestMercConfigure = function (mercenaryId, marketId, locationConfigId, zoneConfigId, goalId) {
+window.__cor3RequestMercConfigure = function (mercenaryId, marketId, locationConfigId, zoneConfigId, goalId, hasInsurance) {
     var mid = marketId || window.__cor3LastMarketId || '019d3ea4-85bd-7389-904d-8f7c85841134';
     console.log('[COR3 Helper] Requesting configure for mercenary:', mercenaryId);
     window.__cor3PendingMercConfigures.push(mercenaryId);
@@ -209,7 +209,7 @@ window.__cor3RequestMercConfigure = function (mercenaryId, marketId, locationCon
         locationConfigId: locationConfigId,
         zoneConfigId: zoneConfigId,
         goalId: goalId,
-        hasInsurance: false
+        hasInsurance: hasInsurance !== undefined ? !!hasInsurance : !!window.__cor3MercHasInsurance
     };
     var msg = '42["event",{"event":{"name":"expeditions","action":"configure"},"data":' + JSON.stringify(data) + '}]';
     wsSend(msg);

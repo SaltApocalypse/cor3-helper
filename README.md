@@ -49,6 +49,7 @@ The use of automation tools may be detectable by the site's developers and could
 - **Auto-choose USOL First** — When enabled, USOL mercenaries are prioritized over CORE mercenaries during auto-choose, picking the cheapest USOL merc before considering CORE.
 - **Ignore Elite Mercenary** — When enabled, elite mercenaries are excluded from auto-choose selection.
 - **Apply Merc Cost Limiter** — When enabled, mercenaries with costs above the configured "Maximum merc cost limit" are excluded from auto-choose selection. Default limit is 15,000.
+- **Mercenary Insurance** — Add insurance to mercenary expeditions. The toggle is in the Mercenaries settings and applies to both configure quotes and the actual launch. Mercenary expeditions only.
 - **Get rid of Veterans** — When enabled, overrides loot/risk modifiers for veteran mercenary expeditions with loot=1 and risk=10, making decisions favor high-risk options to have higher chance on getting rid of veteran mercs. Located in the Decisions section.
 - **Auto Sell Cheapest Items** — Enable "auto sell" toggle for extension to sell two cheapest items from inventory automatically when there is not enough space to pickup expedition container items.
 - **Inventory Batch Sell** — In the Inventory section, filter stash items by rarity (COMMON/RARE/SUPERRARE/EPIC) and craft tag (NONE/CRAFT), then sell all matching items in one action. Both filters must be chosen; a second confirmation click is required before selling.

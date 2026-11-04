@@ -676,6 +676,10 @@ export function installMessageListener() {
         if (event.data && event.data.type === 'COR3_REQUEST_ARCHIVED_EXPEDITIONS') {
             window.__cor3RequestArchivedExpeditions();
         }
+        // Mercenary configure/launch insurance preference (set by content.js from autoSendMerc)
+        if (event.data && event.data.type === 'COR3_SET_MERC_INSURANCE') {
+            window.__cor3MercHasInsurance = !!event.data.hasInsurance;
+        }
         // Mercenary requests
         if (event.data && event.data.type === 'COR3_REQUEST_MERCENARIES') {
             window.__cor3RequestMercenaries(null, function () {
