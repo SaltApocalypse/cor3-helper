@@ -40,24 +40,17 @@ The use of automation tools may be detectable by the site's developers and could
 - **Inventory (standalone section)** — Inventory is its own section after Expeditions, shared across both expedition modes, with the batch-sell toolbar
 - **Loadout Viewer** — View and manage your equipped hardware (CPU/GPU/RAM/PSU) and installed software. Game-style card UI with hardware specs, software power ratios, resource supply/demand overview with boot status, CHANGE/INFO buttons for hardware, and sort/search/equip/unequip for software
 - **Active Expedition Tracking** — See active expeditions with remaining timer, cost, risk, insurance, and mercenary info
-- **Expedition Decisions** — View and respond to pending decisions by clicking them with score calculation
-- **Auto-resolve Decisions** — Automatically resolve mercenary expedition and drone mission events. The **Aggressive decisions** toggle switches the policy: aggressive prefers higher loot then lower risk; normal prefers lower risk then higher loot.
+- **Auto-resolve Decisions** — Mercenary and drone expedition decisions are always resolved with the aggressive policy (higher loot, then lower risk).
 - **Inventory Viewer** — Browse your stash sorted by rarity (rarest first) then price, with item/storage details, total value, and last-updated timestamps
-- **Mercenaries (Multi-Market)** — View mercenaries from CORE and USOL markets in expandable rows with faction icons. Each merc card shows callsign, rank, status, specialization, traits, mission count, cost, rest timers, risk, failed-survive chance, and death chance. Elite mercenaries are displayed on top with a bold "ELITE" badge.
-- **Auto-dispatch Mercenary** — Enable auto-dispatch and select a mercenary (or enable auto-choose) to send the next expedition automatically. Auto-claim/pay rewards can be toggled separately; mercenary rewards must be paid for before the slot frees up. Works across CORE and USOL markets with market-aware expedition config.
-- **Auto Choose Mercenary** — Enable "auto choose" toggle for extension to do best mercenary selection according to their cost and risk values across all markets.
-- **Auto-choose USOL First** — When enabled, USOL mercenaries are prioritized over CORE mercenaries during auto-choose, picking the cheapest USOL merc before considering CORE.
-- **Ignore Elite Mercenary** — When enabled, elite mercenaries are excluded from auto-choose selection.
-- **Apply Merc Cost Limiter** — When enabled, mercenaries with costs above the configured "Maximum merc cost limit" are excluded from auto-choose selection. Default limit is 15,000.
+- **Mercenary Auto Expedition** — Reduced to two switches: **Auto expedition** and **Add insurance**. When enabled, the helper automatically selects the best available mercenary, pays and claims rewards, and resolves decisions aggressively. Selection priority is elite USOL > normal USOL > normal CORE/HOME, with total cost ascending inside each group (risk ascending as a tie-breaker). No cost limit is applied. Locations/zones/goals remain the existing hardcoded defaults. Detailed pause reasons (no available mercenary, missing config, insufficient credits, etc.) are shown below the two switches.
 
 - **Inventory Batch Sell** — In the Inventory section, filter stash items by rarity (COMMON/RARE/SUPERRARE/EPIC) and craft tag (NONE/CRAFT), then sell all matching items in one action. Both filters must be chosen; a second confirmation click is required before selling.
 - **Inventory Merge & Quantity** — Duplicate item types are merged into a single card with an `xN` quantity badge, while keeping the existing compact list layout.
 - **Warehouse Sorting** — The new 12-wide warehouse grid is supported. **Smart Sort** groups by rarity, then by item height (tallest first), keeps identical item types together, and packs multiple types onto the same shelf. **Compact Sort** is a first-fit fallback for nearly full warehouses. If Smart needs more rows than the warehouse has, it automatically falls back to Compact and shows a notice. Layouts are precomputed, already-correct items are skipped, the in-game sorting table is used only for blocking items, progress is shown, and mailbox auto-claim is paused while sorting.
 - **SUPERRARE Rarity** — Registered between RARE and EPIC (final display order: QUEST > LEGENDARY > EPIC > SUPERRARE > RARE > COMMON).
 - **Mailbox Auto-Claim** — Mercenary expedition and personal drone rewards are now delivered to the stash mailbox. The helper claims pending EXPEDITION / DRONE_MISSION mail when auto-claim is enabled, with stash-capacity checks and a `claim.item` fallback for fragmented warehouse layouts.
-- **Personal Drone Automation** — Fully automated drone missions (Personal Drone Assembling): auto-dispatch, auto-claim rewards via the mailbox, auto-resolve in-mission decisions, and custom repair rules (durability threshold, low-battery top-up, pause on repair failure, launch only when fully charged). Transient “already in progress” errors are retried instead of pausing the automation. Includes rate-limit retry with backoff that auto-disables on repeated failures. Active drone mission, its decisions, and archived drone missions are shown in the Expeditions panel, with the active mission pin-able like mercenary expeditions.
+- **Personal Drone Automation** — Reduced to two switches: **Auto expedition** and **Auto repair**. Auto expedition selects the mission with the lowest battery cost, then lowest location risk, then shortest duration; claims rewards through the mailbox; and resolves decisions aggressively. Auto repair triggers at battery below 30% or durability at/below 60, repairs to 100 without interrupting the repair, and pauses with a detailed reason if repair fails. Transient “already in progress” errors are retried instead of pausing. Includes rate-limit retry with backoff that auto-disables on repeated failures. Active mission and archived missions are shown in the Expeditions panel, with the active mission pin-able.
 - **Archived Expeditions** — View past expeditions with outcome, cost, risk, location, loot container details and item images. Auto-loaded on startup
-- **Multi-Alarm System** — Create multiple configurable alarms for any timer (daily ops, market job resets, expeditions). Each alarm has its own threshold, volume, continuous mode, and on/off toggle
 - **Move Notifications** — Option to move in-game notification toasts and history panel from the right side to the left side of the screen
 - **Secret Link/Server Finder** — Scans all known server IPs on the network map to discover hidden connections and servers. Sends `connect.ip` for each known IP, then compares before/after map data. Uses a toggle switch (auto-disables after scan) with progress and results shown in a log box. Reports new connections and new servers found
 - **Helper-Only Mode** — Toggle to hide all automation features, converting the extension to a pure info/helper tool
@@ -112,23 +105,53 @@ The use of automation tools may be detectable by the site's developers and could
 
 ## Fork Releases & Versioning
 
-- **Base version** (Chrome `manifest.version`): `1.8.1`
-- **Display version** (Chrome `manifest.version_name`): `1.8.1-salta.1`
-- **GitHub tag**: `v1.8.1-salta.1`
+- **Stable branch**: `main`
+- **Experimental branch**: `experimental`
+- **Stable display suffix**: `-salta.N`
+- **Experimental display suffix**: `-salta-exp.N`
 - Fork releases are published as **pre-releases** to distinguish them from upstream stable releases.
 
-Chrome only accepts 1–4 dot-separated integers in `manifest.version`, so the `-salta.1` suffix lives in `version_name` (display-only) and the GitHub tag. `build.js` generates both from `package.json`:
+Chrome only accepts 1–4 dot-separated integers in `manifest.version`, so the suffix lives in `version_name` (display-only) and the GitHub tag. `build.js` generates both from `package.json`.
+
+Stable `main` example:
 
 ```json
-"version": "1.8.1",
+"version": "1.8.5",
 "cor3Fork": { "label": "salta", "build": 1 }
 ```
 
 Result:
 
 ```json
-"version": "1.8.1",
-"version_name": "1.8.1-salta.1"
+"version": "1.8.5",
+"version_name": "1.8.5-salta.1"
+```
+
+Experimental example:
+
+```json
+"version": "1.8.5",
+"cor3Fork": { "label": "salta-exp", "build": 1 }
+```
+
+Result:
+
+```json
+"version": "1.8.5",
+"version_name": "1.8.5-salta-exp.1"
+```
+
+All future experimental releases must use the `salta-exp.N` suffix and a `v*-salta-exp.N` tag, for example:
+
+```text
+v1.8.5-salta-exp.1
+v1.8.6-salta-exp.1
+```
+
+Stable releases keep the existing `salta.N` suffix:
+
+```text
+v1.8.5-salta.1
 ```
 
 Release process:
@@ -137,11 +160,17 @@ Release process:
 # 0. Update package.json version and create docs/releases/<tag>.md first
 npm run release:prepare   # sync versions.json + build
 git add versions.json     # only if it changed
-git commit -am "chore(release): v1.8.1-salta.1"
-git push origin main
+git commit -am "chore(release): vX.Y.Z-salta.N"   # stable
+# or: "chore(release): vX.Y.Z-salta-exp.N"        # experimental
+git push origin main                              # stable
+# or: git push origin experimental                 # experimental
+```
 
-git tag -a v1.8.1-salta.1 -m "Salta fork release v1.8.1-salta.1"
-git push origin v1.8.1-salta.1
+Then create and push only the specific release tag:
+
+```bash
+git tag -a vX.Y.Z-salta-exp.N -m "Salta fork experimental release vX.Y.Z-salta-exp.N"
+git push origin vX.Y.Z-salta-exp.N
 ```
 
 `release:prepare` refreshes `versions.json` and rebuilds. The release workflow only checks `versions.json` and prints a warning if it is stale; it does not modify the file or commit to `main`.
@@ -202,12 +231,9 @@ Where the values come from:
 - **Auto Simple Decrypt Hacking** — Toggle the switch to enable. It automatically solves Simple Decrypt hacking minigames by clicking the decrypt button and monitoring progress.
 - **Auto Daily Hacking** — Toggle the switch to enable. It opens daily ops, starts the task, solves the puzzle automatically, and disables itself when done.
 - **Auto Job Solver** — Toggle the switch to reveal job selection UI. Choose job types from HOME, D4RK, SOYUZ, and USOL market tabs, then click Start. The debug console shows real-time job progress and logs. Toggle "Auto Finish All Jobs" for fully automatic operation.
-- **Set decision scores** by clicking edit button. After the change click save button to keep the changes. This way you can change default scoring that extension shows next to each decision.
-- **Enable Auto-resolve decisions** to let the extension resolve expedition/drone events automatically. Use the **Aggressive decisions** toggle to switch between aggressive and normal policies.
-- **Enable Auto-dispatch mercenary** for the extension to send the selected mercenary automatically after the current expedition ends. Use **Auto-claim & pay rewards** to pay for and claim completed expedition rewards automatically.
-- **Enable Auto-choose mercenary** for the extension to choose which mercenary to send next according to cost and risk across CORE and USOL markets. It only works when auto-dispatch is on. Use the Advanced options to prioritize USOL, ignore elite mercenaries, or apply a cost limit.
+- **Enable Auto-resolve decisions** to let the extension resolve expedition/drone events automatically. Both mercenary and drone decisions are always aggressive.
+- **Enable Auto expedition** for the extension to select a mercenary and send the next expedition automatically, then pay for and claim completed expedition rewards. Selection priority is elite USOL > normal USOL > normal CORE/HOME, with the cheapest option inside each group. **Add insurance** applies to both configure quotes and the actual launch.
 - **Secret Link/Server Finder** — Toggle the switch to enable. It scans all known server IPs by connecting to each one, then compares the network map before and after to discover any new hidden connections or servers. The toggle auto-disables when the scan completes.
-- **Alarms** — Click ➕ in the Alarms section to create a new alarm. Choose a timer source, set a threshold, and configure volume/continuous beeping. Toggle alarms on/off or edit/delete them anytime.
 - **Check for Updates** — Click the button at the bottom of the popup to see if a new version of the extension is available on this fork's GitHub releases. It also shows if web/system versions are changed recently.
 - **DevTools WS Inspector** — Open Chrome DevTools (F12) and navigate to the "COR3 Helper" tab. Use the category selector to switch between WS Messages, Auto Job Solver logs, Auto Valuable Seller logs, Error Logs, Page Console Logs, and Extension Console Logs. Use the page selector to browse log history (1000 entries per page). Use the filter inputs, format dropdown, search bar, and export buttons to analyze data. Toggle Live mode to see only new entries from the activation point onward. Click the ⧉ popout button to open an offline log viewer in a new window where you can import previously exported log files.
 
@@ -217,14 +243,14 @@ Where the values come from:
 |----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `manifest.json`            | Extension manifest (Manifest V3) — permissions include storage, scripting, activeTab, tabs, alarms, sidePanel                                                             |
 | `popup.html`               | Popup UI (HTML + CSS) — includes auto job solver section, debug console, and all toggle UIs                                                                               |
-| `popup.js`                 | Popup logic, rendering, alarm management, auto job solver UI, debug console, live storage update listeners                                                                |
+| `popup.js`                 | Popup logic, rendering, auto job solver UI, debug console, live storage update listeners                                                                                   |
 | `console-logger.js`        | Console interceptor — captures console.log/warn/error in both MAIN world and extension contexts for DevTools log viewing                                                  |
 | `errors.js`                | Centralized error logging — stores errors to chrome.storage.local with source, message, stack, and context (max 200 entries)                                              |
 | `notepack.min.js`          | Bundled notepack.io 3.0.1 library — local copy of msgpack encoder/decoder used by the binary WS codec                                                                     |
 | `msgpack-codec.js`         | Socket.IO v5 binary packet codec — converts between legacy 42[...] strings and binary msgpack WS frames using notepack.io                                                 |
 | `content-early.js`         | Injected at `document_start` — intercepts WebSocket/HTTP polling messages, WS send functions, D4RK path-through logic                                                     |
 | `content.js`               | Injected at `document_idle` — relays data to storage, handles auto-refresh, auto job solver injection, notification repositioning                                         |
-| `background.js`            | Service worker — auto finish all jobs scheduling, expedition polling, alarm management                                                         |
+| `background.js`            | Service worker — auto finish all jobs scheduling, expedition polling                                                                          |
 | `ws-messages.js`           | IndexedDB writer for WS messages and categorized logs (auto-jobs, auto-valuable, errors). 24h purge                                                                       |
 | `ws-interceptor.js`        | WebSocket interceptor helper                                                                                                                                              |
 | `decrypt-solver.js`        | Auto-solver for decryption hacking minigame (injected into page when enabled)                                                                                             |

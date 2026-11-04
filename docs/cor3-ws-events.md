@@ -273,6 +273,38 @@ Important fields:
 - `containerData`: array of reward slots; after payment each entry has `isCollected: true`.
 - `status`: `PREPARING` → `IN_PROGRESS` → `COMPLETED` (or `FAILED`).
 
+### 4.1.1 Insurance
+
+Mercenary expeditions only. `hasInsurance` is sent in **both** `configure` and `launch` requests:
+
+```json
+42["event",{"event":{"name":"expeditions","action":"configure"},"data":{
+  "mercenaryId":"...",
+  "marketId":"...",
+  "locationConfigId":"...",
+  "zoneConfigId":"...",
+  "goalId":"...",
+  "hasInsurance":true
+}}]
+```
+
+The `configure` response includes:
+
+- `isInsuranceAvailable`: whether insurance can be selected for this expedition.
+- `insuranceCost`: insurance premium (0 when `hasInsurance` is false).
+- `totalCost`, `prepaymentAmount`, `remainingAmount`: reflect the selected insurance.
+- `riskScore`, `riskLevel`, `riskBreakdown`, `outcomeChances`, `duration`.
+
+The `launch` response includes `hasInsurance` and `insuranceRefundAmount`.
+In the capture, the insured launch returned `insuranceRefundAmount` equal to
+`prepaymentAmount`.
+
+The helper stores the setting as `autoSendMerc.hasInsurance` and exposes it as
+the **Add insurance** switch next to **Auto expedition**. The setting is relayed
+to the page world so `configure` quotes and the actual `launch` use the same
+value. Mercenary selection is automatic: elite USOL > normal USOL > normal
+CORE/HOME, with total cost ascending and risk ascending as a tie-breaker.
+
 ### 4.2 Open reward container
 
 ```json
@@ -355,6 +387,18 @@ Transient errors are detected by keyword matching (English and Chinese) and must
 2. Helper claims the matching message(s) with `mail claim.all`.
 3. Helper clears `droneCompleted`, refreshes `get.options`, and launches the next mission.
 
+### 5.4 Automation behavior
+
+- Mission selection is automatic: lowest `batteryCost`, then lowest
+  `location.baseRisk`, then shortest `durationSeconds`.
+- Auto repair is optional. When enabled, it triggers when `battery.current < 30`
+  or `durability <= 60`, repairs to `targetDurability: 100`, and waits for the
+  repair to finish without launching another action.
+- Repair failure pauses auto expedition and reports the reason in `droneWarning`.
+- Drone decisions are always resolved with the aggressive policy.
+- The helper no longer waits for a full battery before launch; it launches when
+  the current battery can cover the selected mission cost.
+
 ---
 
 ## 6. Internal bridge (extension ↔ page world)
@@ -411,9 +455,14 @@ Internal content event:
 | `droneCompleted` / `droneCompletedUpdatedAt` | local | Last drone completion push |
 | `droneWarning` | local | Human-readable drone warning/status |
 | `mailWarning` | local | Human-readable mailbox claim warning/status |
-| `autoDrone` | sync | Drone settings (`enabled`, `autoClaim`, `autoDecide`, repair rules, …) |
-| `autoSendMerc` | sync | Mercenary settings (`enabled`, `autoClaim`, `autoResolveDecisions`, …) |
-| `aggressiveDecisions` | sync | Shared decision policy: `true` = aggressive, `false` = normal |
+| `mercWarning` | local | Human-readable mercenary pause reason (no available merc, missing config, transient busy, …) |
+| `autoDrone` | sync | Drone automation (`enabled`, `paused`, `repairEnabled`) |
+| `autoSendMerc` | sync | Mercenary automation (`enabled`, `hasInsurance`, `disabledReason`) |
+
+
+`autoSendMerc.disabledReason` values currently include `stash_full` and
+`insufficient_credits`. Other temporary pauses are reported through
+`mercWarning` and are shown in the Mercenaries panel.
 
 
 ---
