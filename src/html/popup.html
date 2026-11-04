@@ -469,7 +469,7 @@
         <!-- A layer: Mercenaries -->
         <div id="expPanelMercenaries" class="auto-jobs-tab-content active">
         <!-- Active Expeditions (B layer, collapsible) -->
-        <div class="market-sub-header">
+        <div class="market-sub-header" style="margin:8px 0 4px;">
             <div class="expandable-header open" id="mercExpActiveToggle" style="flex:1;">
                 <span class="expand-arrow-sub">▶</span>
                 <div style="display: flex; gap: 3px;">
@@ -488,93 +488,16 @@
             <div id="expeditionInfoContainer"><div class="no-decisions">No expedition data yet.</div></div>
         </div>
 
-        <!-- Dispatch Settings (B layer) -->
-        <div class="market-sub-header" style="margin-top:8px;">
-            <div class="expandable-header open" id="mercDispatchToggle" style="flex:1;">
-                <span class="expand-arrow-sub">▶</span>
-                <span class="market-sub-label" data-i18n-en="⚙️ Dispatch Settings" data-i18n-zh="⚙️ 派遣设置">⚙️ Dispatch Settings</span>
-            </div>
+        <!-- Mercenary automation: two switches only -->
+        <div class="auto-choose-row" style="margin-top:8px;">
+            <span style="font-size:10px;" data-i18n-en="Auto expedition" data-i18n-zh="自动远征">Auto expedition</span>
+            <label class="alarm-toggle-switch"><input type="checkbox" id="autoSendMercenaryToggle"><span class="slider-track"></span></label>
         </div>
-        <div class="last-updated"></div>
-        <div class="expandable-body open" id="mercDispatchBody">
-            <div class="auto-choose-row">
-                <span style="font-size:10px;" data-i18n-en="Auto-dispatch mercenary" data-i18n-zh="自动派遣雇佣兵">Auto-dispatch mercenary</span>
-                <label class="alarm-toggle-switch"><input type="checkbox" id="autoSendMercenaryToggle"><span class="slider-track"></span></label>
-            </div>
-            <div class="auto-choose-row">
-                <span style="font-size:10px;" data-i18n-en="Auto-claim &amp; pay rewards" data-i18n-zh="自动付款并领取奖励">Auto-claim &amp; pay rewards</span>
-                <label class="alarm-toggle-switch"><input type="checkbox" id="autoClaimMercToggle" checked><span class="slider-track"></span></label>
-            </div>
-            <div class="auto-choose-row">
-                <span style="font-size:10px;" data-i18n-en="Auto-resolve decisions" data-i18n-zh="自动处理决策">Auto-resolve decisions</span>
-                <label class="alarm-toggle-switch"><input type="checkbox" id="autoChooseCheckbox"><span class="slider-track"></span></label>
-            </div>
-            <div class="auto-choose-row">
-                <span style="font-size:10px;" data-i18n-en="Auto-choose mercenary" data-i18n-zh="自动选择雇佣兵">Auto-choose mercenary</span>
-                <label class="alarm-toggle-switch"><input type="checkbox" id="autoChooseMercToggle"><span class="slider-track"></span></label>
-            </div>
-
-            <div class="expandable-header" id="mercAdvancedToggle">
-                <span class="expand-arrow-sub">▶</span>
-                <span class="market-sub-label" data-i18n-en="Advanced" data-i18n-zh="高级">Advanced</span>
-            </div>
-            <div class="expandable-body" id="mercAdvancedBody">
-                <div id="mercCostDisplay" style="font-size:10px;margin-bottom:6px;margin-top:2px;">
-                    <span style="color:var(--text-muted);" data-i18n-en="Maximum merc cost limit:" data-i18n-zh="雇佣兵最高费用限制：">Maximum merc cost limit:</span>
-                    <strong id="mercCostDisplayValue">15000</strong>
-                    <button id="editMercCostBtn" class="refresh-btn-small" style="margin-left:8px;font-size:9px;padding:2px 6px;vertical-align:1px;" title="Edit max cost">✏️</button>
-                </div>
-                <div id="mercCostEditRow" style="display:none;font-size:10px;margin-bottom:6px;margin-top:2px;">
-                    <label><span data-i18n-en="Max cost:" data-i18n-zh="最高费用：">Max cost:</span> <input type="number" id="maxMercCostInput" min="0" max="999999" value="15000" style="width:70px;"></label>
-                    <button id="saveMercCostBtn" class="refresh-btn-small" style="margin-left:8px;font-size:9px;padding:2px 6px;">💾 Save</button>
-                    <button id="cancelMercCostBtn" class="refresh-btn-small" style="margin-left:4px;font-size:9px;padding:2px 6px;">Cancel</button>
-                </div>
-                <div class="auto-choose-row">
-                    <span style="font-size:10px;" data-i18n-en="Apply merc cost limiter" data-i18n-zh="应用雇佣兵费用限制">Apply merc cost limiter</span>
-                    <label class="alarm-toggle-switch"><input type="checkbox" id="applyMercCostLimiterToggle"><span class="slider-track"></span></label>
-                </div>
-                <div class="auto-choose-row">
-                    <span style="font-size:10px;" data-i18n-en="Auto-choose USOL first" data-i18n-zh="优先选择 USOL">Auto-choose USOL first</span>
-                    <label class="alarm-toggle-switch"><input type="checkbox" id="autoChooseUsolFirstToggle"><span class="slider-track"></span></label>
-                </div>
-                <div class="auto-choose-row">
-                    <span style="font-size:10px;" data-i18n-en="Ignore elite mercenary" data-i18n-zh="忽略精英雇佣兵">Ignore elite mercenary</span>
-                    <label class="alarm-toggle-switch"><input type="checkbox" id="ignoreEliteMercToggle"><span class="slider-track"></span></label>
-                </div>
-                <div id="mercenaryConfigRow" style="display:none;font-size:10px;color:var(--text-dim);margin-bottom:6px;">
-                    <span data-i18n-en="Selected:" data-i18n-zh="当前选择：">Selected:</span> <span id="selectedMercenaryName" style="color:var(--accent-cyan);font-weight:bold;">None</span>
-                </div>
-            </div>
-
-            <div id="mercWarning" style="display:none;background:rgba(255,160,0,0.15);border:1px solid var(--accent-orange);border-radius:6px;padding:6px 10px;margin-top:6px;font-size:10px;color:var(--accent-orange);"></div>
+        <div class="auto-choose-row">
+            <span style="font-size:10px;" data-i18n-en="Add insurance" data-i18n-zh="投保">Add insurance</span>
+            <label class="alarm-toggle-switch"><input type="checkbox" id="mercInsuranceToggle"><span class="slider-track"></span></label>
         </div>
-
-        <!-- Mercenaries list (B layer) -->
-        <div class="market-sub-header" style="margin-top:8px;">
-            <div class="expandable-header" id="mercenariesSectionToggle" style="flex:1;">
-                <span class="expand-arrow-sub">▶</span>
-                <span class="market-sub-label" data-i18n-en="⚔️ Mercenaries" data-i18n-zh="⚔️ 雇佣兵">⚔️ Mercenaries</span>
-            </div>
-            <button id="refreshMercenariesBtn" class="refresh-btn-small" title="Refresh Mercenaries">🔄</button>
-        </div>
-        <div class="last-updated" id="mercenariesLastUpdated"></div>
-        <div class="expandable-body" id="mercenariesSectionBody">
-            <div id="mercenariesContainer"><div class="no-decisions">Loading mercenaries...</div></div>
-        </div>
-
-        <!-- Decisions (B layer) -->
-        <div class="expandable-header" id="decisionsSectionToggle">
-            <span class="expand-arrow-sub">▶</span>
-            <span class="market-sub-label"><span data-i18n-en="📋 Decisions" data-i18n-zh="📋 决策">📋 Decisions</span> <span id="decisionsCount" style="font-size:9px;color:var(--text-dim);"></span></span>
-        </div>
-        <div class="last-updated" id="decisionLastUpdated"></div>
-        <div class="expandable-body" id="decisionsSectionBody">
-            <div class="auto-choose-row">
-                <span style="font-size:10px;" data-i18n-en="Aggressive decisions" data-i18n-zh="激进决策">Aggressive decisions</span>
-                <label class="alarm-toggle-switch"><input type="checkbox" id="aggressiveDecisionsToggle"><span class="slider-track"></span></label>
-            </div>
-            <div id="decisionsContainer"></div>
-        </div>
+        <div id="mercWarning" style="display:none;background:rgba(255,160,0,0.15);border:1px solid var(--accent-orange);border-radius:6px;padding:6px 10px;margin:6px 0;font-size:10px;color:var(--accent-orange);line-height:1.45;"></div>
 
         <!-- Archived Expeditions -->
         <div class="market-sub-header">
@@ -591,10 +514,15 @@
         <!-- A layer: Personal Drone -->
         <div id="expPanelDrone" class="auto-jobs-tab-content">
             <!-- B layer: Active Expedition -->
-            <div class="market-sub-header" style="margin-top:8px;">
+            <div class="market-sub-header" style="margin:8px 0 4px;">
                 <div class="expandable-header open" id="droneExpActiveToggle" style="flex:1;">
                     <span class="expand-arrow-sub">▶</span>
-                    <span class="market-sub-label" data-i18n-en="📍 Active Expedition" data-i18n-zh="📍 进行中的远征">📍 Active Expedition</span>
+                    <div style="display: flex; gap: 3px;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 20 20" fill="none" data-sentry-element="Icon" data-sentry-component="getTabBarIcon" data-sentry-source-file="get-tab-bar-icon.tsx" style="vertical-align: -4px;">
+                        <path d="M17.2203 13.9921L16.9063 13.5136L16.5176 12.9156L16.3084 12.6016C16.1738 12.3973 16.0293 12.2727 15.8749 12.2278C15.7254 12.1779 15.5609 12.1605 15.3816 12.1755H13.8792L10.9044 15.1434H13.5204L13.7895 14.8967L14.7761 13.9921H17.2203ZM1.40447 16.1003L1.39699 16.1078L1.28487 16.2722L1.14286 16.4965C0.853852 16.9949 1.00334 17.2665 1.59133 17.3113H18.4087C18.9967 17.2665 19.1461 16.9949 18.8571 16.4965L18.7899 16.3844L18.7674 16.3619L18.7151 16.2722L18.7076 16.2573L18.6778 16.2124L18.6628 16.1975L18.1919 15.4798L18.1022 15.3452L17.8182 14.9041H15.2545L13.9913 16.0554H6.02362L4.76045 14.9041H2.18928L1.52405 15.9134L1.48667 15.9807L1.40447 16.1003ZM4.12513 12.2278C3.99059 12.2627 3.86601 12.3624 3.75141 12.5268L3.70656 12.5792L2.78723 13.9921H5.23881L6.22544 14.8967L6.49451 15.1434H9.08811L8.84147 14.8967L6.12079 12.1755H4.61845C4.43905 12.1605 4.27462 12.1779 4.12513 12.2278ZM14.2903 4.05674C14.2953 3.21445 13.8518 2.75844 12.9598 2.68866H7.06257C6.1706 2.75844 5.72462 3.21445 5.72464 4.05674V10.0374L6.63653 10.9494L6.87571 11.1887L7.74272 12.0484L9.55154 13.8501V13.8575L10 14.2986L10.4485 13.8575L12.2647 12.0484L13.2812 11.0391L14.2903 10.0374V4.05674ZM7.77263 7.57037L6.77105 7.12182L9.0059 6.12754L10.0075 3.88479L11.009 6.12754L13.2439 7.12182L12.2423 7.57037L11.009 8.12358L10.0075 10.3588L9.0059 8.12358L7.77263 7.57037Z" fill="rgba(118, 193, 209, 1)"></path>
+                    </svg>
+                    <span class="market-sub-label" data-i18n-en=" Active Expedition" data-i18n-zh=" 进行中的远征"> Active Expedition</span>
+                    </div>
                 </div>
                 <button id="refreshDroneActiveBtn" class="refresh-btn-small" title="Refresh Drone Mission">🔄</button>
             </div>
@@ -603,72 +531,16 @@
                 <div id="droneActiveContainer"><div class="no-decisions">No active drone mission.</div></div>
             </div>
 
-        <!-- Dispatch Settings (B layer) -->
-        <div class="market-sub-header" style="margin-top:8px;">
-            <div class="expandable-header open" id="droneDispatchToggle" style="flex:1;">
-                <span class="expand-arrow-sub">▶</span>
-                <span class="market-sub-label" data-i18n-en="⚙️ Dispatch Settings" data-i18n-zh="⚙️ 派遣设置">⚙️ Dispatch Settings</span>
-            </div>
+        <!-- Drone automation: two switches only -->
+        <div class="auto-choose-row" style="margin-top:8px;">
+            <span style="font-size:10px;" data-i18n-en="Auto expedition" data-i18n-zh="自动远征">Auto expedition</span>
+            <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneToggle"><span class="slider-track"></span></label>
         </div>
-        <div class="last-updated"></div>
-        <div class="expandable-body open" id="droneDispatchBody">
-            <div class="auto-choose-row">
-                <span style="font-size:10px;" data-i18n-en="Auto-dispatch drone" data-i18n-zh="自动派遣无人机">Auto-dispatch drone</span>
-                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneToggle"><span class="slider-track"></span></label>
-            </div>
-            <div class="auto-choose-row">
-                <span style="font-size:10px;" data-i18n-en="Auto-claim rewards" data-i18n-zh="自动领取奖励">Auto-claim rewards</span>
-                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneClaimToggle"><span class="slider-track"></span></label>
-            </div>
-            <div class="auto-choose-row">
-                <span style="font-size:10px;" data-i18n-en="Auto-resolve decisions" data-i18n-zh="自动处理决策">Auto-resolve decisions</span>
-                <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneDecideToggle"><span class="slider-track"></span></label>
-            </div>
-            <div class="auto-choose-row">
-                <span style="font-size:10px;" data-i18n-en="Auto-choose mission" data-i18n-zh="自动选择任务">Auto-choose mission</span>
-                <label class="alarm-toggle-switch"><input type="checkbox" id="autoChooseDroneLocationToggle"><span class="slider-track"></span></label>
-            </div>
-
-            <div class="expandable-header" id="droneAdvancedToggle">
-                <span class="expand-arrow-sub">▶</span>
-                <span class="market-sub-label" data-i18n-en="Advanced" data-i18n-zh="高级">Advanced</span>
-            </div>
-            <div class="expandable-body" id="droneAdvancedBody">
-                <div class="auto-choose-row" id="droneMissionSelectRow">
-                    <span style="font-size:10px;" data-i18n-en="Destination" data-i18n-zh="目的地">Destination</span>
-                    <div style="display:flex;gap:4px;">
-                        <select id="droneLocationSelect" style="max-width:110px;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;"></select>
-                        <select id="droneMissionSelect" style="max-width:110px;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;"></select>
-                    </div>
-                </div>
-                <div class="auto-choose-row">
-                    <span style="font-size:10px;" data-i18n-en="Launch only when fully charged" data-i18n-zh="仅在满电时派遣">Launch only when fully charged</span>
-                    <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneFullChargeToggle"><span class="slider-track"></span></label>
-                </div>
-                <div class="auto-choose-row">
-                    <span style="font-size:10px;" data-i18n-en="Auto-repair drone" data-i18n-zh="自动维修无人机">Auto-repair drone</span>
-                    <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneRepairToggle"><span class="slider-track"></span></label>
-                </div>
-                <div class="auto-choose-row">
-                    <span style="font-size:10px;" data-i18n-en="Repair below durability" data-i18n-zh="耐久低于此值时维修">Repair below durability</span>
-                    <input type="number" id="droneRepairThresholdInput" min="1" max="99" value="60" style="width:52px;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:2px 4px;">
-                </div>
-                <div class="auto-choose-row">
-                    <span style="font-size:10px;" data-i18n-en="Repair when battery &lt;" data-i18n-zh="电量低于此值时维修">Repair when battery &lt;</span>
-                    <div style="display:flex;align-items:center;gap:4px;">
-                        <input type="number" id="droneLowBatteryThresholdInput" min="1" max="99" value="30" style="width:40px;font-size:10px;background:#11111b;color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:2px 4px;">
-                        <span style="font-size:10px;">%</span>
-                        <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneRepairOnLowBatteryToggle"><span class="slider-track"></span></label>
-                    </div>
-                </div>
-                <div class="auto-choose-row">
-                    <span style="font-size:10px;" data-i18n-en="Pause if repair fails" data-i18n-zh="维修失败时暂停">Pause if repair fails</span>
-                    <label class="alarm-toggle-switch"><input type="checkbox" id="autoDronePauseOnFailToggle"><span class="slider-track"></span></label>
-                </div>
-            </div>
-
-            <div id="droneWarning" style="display:none;background:rgba(255,160,0,0.15);border:1px solid var(--accent-orange);border-radius:6px;padding:6px 10px;margin-top:6px;font-size:10px;color:var(--accent-orange);"></div>
+        <div class="auto-choose-row">
+            <span style="font-size:10px;" data-i18n-en="Auto repair" data-i18n-zh="自动维修">Auto repair</span>
+            <label class="alarm-toggle-switch"><input type="checkbox" id="autoDroneRepairToggle"><span class="slider-track"></span></label>
         </div>
+        <div id="droneWarning" style="display:none;background:rgba(255,160,0,0.15);border:1px solid var(--accent-orange);border-radius:6px;padding:6px 10px;margin:6px 0;font-size:10px;color:var(--accent-orange);line-height:1.45;"></div>
 
         <!-- Drone Status (B layer) -->
         <div class="market-sub-header" style="margin-top:8px;">
@@ -681,20 +553,6 @@
         <div class="last-updated" id="personalDroneLastUpdated"></div>
         <div class="expandable-body" id="personalDroneSectionBody">
             <div id="personalDroneContainer"></div>
-        </div>
-
-        <!-- B layer: Decisions -->
-        <div class="expandable-header" id="droneDecisionsToggle">
-            <span class="expand-arrow-sub">▶</span>
-            <span class="market-sub-label"><span data-i18n-en="📋 Decisions" data-i18n-zh="📋 决策">📋 Decisions</span> <span id="droneDecisionsCount" style="font-size:9px;color:var(--text-dim);"></span></span>
-        </div>
-        <div class="last-updated" id="droneDecisionsLastUpdated"></div>
-        <div class="expandable-body" id="droneDecisionsSectionBody">
-            <div class="auto-choose-row">
-                <span style="font-size:10px;" data-i18n-en="Aggressive decisions" data-i18n-zh="激进决策">Aggressive decisions</span>
-                <label class="alarm-toggle-switch"><input type="checkbox" id="aggressiveDecisionsDroneToggle"><span class="slider-track"></span></label>
-            </div>
-            <div id="droneDecisionsContainer"><div class="no-decisions">No active mission decisions.</div></div>
         </div>
 
             <!-- B layer: Archived Expeditions -->
@@ -822,52 +680,6 @@
         </div>
     </div>
 
-    <!-- Alarms Section -->
-    <div class="section">
-        <div class="alarm-section-title">
-            <span>⏰ Alarms</span>
-            <div style="display:flex;gap:4px;">
-                <button id="stopAllAlarmsBtn" class="refresh-btn-small" title="Stop all sounding alarms" style="display:none;">🛑</button>
-                <button id="addAlarmBtn" class="refresh-btn-small" title="Add new alarm">➕</button>
-            </div>
-        </div>
-        <div id="alarmList"></div>
-        <!-- Add/Edit alarm form (hidden by default) -->
-        <div id="alarmForm" class="alarm-form" style="display:none;">
-            <div class="alarm-form-title" id="alarmFormTitle">New Alarm</div>
-            <div class="alarm-row">
-                <span>Watch:</span>
-                <select id="alarmTimerSelect">
-                    <option value="daily">Daily Ops</option>
-                    <option value="home_jobs">Market-1 Jobs Reset</option>
-                    <option value="dark_jobs">Market-2 Jobs Reset</option>
-                    <option value="soyuz_jobs">Market-3 Jobs Reset</option>
-                    <option value="usol_jobs">Market-4 Jobs Reset</option>
-                    <optgroup label="Expeditions" id="alarmExpeditionGroup"></optgroup>
-                </select>
-            </div>
-            <div class="threshold-row">
-                <span class="th-label">Alert when remaining:</span>
-                <input type="number" id="alarmMinutes" min="0" max="59" value="1"> <span class="th-label">m</span>
-                <input type="number" id="alarmSeconds" min="0" max="59" value="0"> <span class="th-label">s</span>
-            </div>
-            <div class="switch-row">
-                <span>Continuous (beep every 2s)</span>
-                <label><input type="checkbox" id="alarmContinuous"> On</label>
-            </div>
-            <div class="slider-container">
-                <span>Volume:</span>
-                <input type="range" id="alarmVolume" min="0" max="100" value="50">
-                <span id="alarmVolumeLabel">50%</span>
-            </div>
-            <div style="display:flex;gap:6px;margin-top:4px;">
-                <button id="saveAlarmBtn">💾 Save</button>
-                <button id="cancelAlarmBtn" class="danger">Cancel</button>
-                <button id="testAlarmBtn" style="margin-left:auto;">🔊 Test</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Dev TCs Section (hidden by default) -->
     <div id="devTcsSection" class="section" style="display:none;">
         <div class="alarm-section-title">
@@ -948,7 +760,7 @@
 
     <!-- Check for Updates -->
     <div style="margin-top:8px;text-align:center;">
-        <button id="checkUpdateBtn" style="width:auto;padding:6px 14px;font-size:11px;">&#x1F504; Check for Updates</button>
+        <button id="checkUpdateBtn" style="width:auto;padding:6px 14px;font-size:11px;" data-i18n-en="🔄 Check for Updates" data-i18n-zh="🔄 检查更新">🔄 Check for Updates</button>
         <div id="updateResult" style="font-size:10px;color:var(--text-dim);margin-top:4px;"></div>
     </div>
 

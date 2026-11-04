@@ -1,6 +1,7 @@
 // --- Auto Job Solver UI ---
 import { _h, _clearEl, _safeSetHtml } from './dom-helpers.js';
 import { getCor3Tab, formatTimeRemaining, updateSelectAllState } from './utils.js';
+import { t } from './i18n.js';
 import { findMaintenanceBlocker } from '../shared/server-map.js';
 import { MARKET_RESET_DURATIONS_MS } from '../shared/server-constants.js';
 
@@ -190,7 +191,7 @@ function renderAutoJobsMarket(container, data, marketKey, marketAvailable, maint
     if (availableJobs.length === 0) {
         const noJobsDiv = document.createElement('div');
         noJobsDiv.className = 'auto-jobs-no-jobs';
-        noJobsDiv.textContent = 'All jobs completed or expired.';
+        noJobsDiv.textContent = t('All jobs completed or expired.', '所有任务已完成或已过期。');
         container.appendChild(noJobsDiv);
         return;
     }
@@ -306,10 +307,11 @@ chrome.storage.sync.get('autoJobsSelectedTypes', (data) => {
 
 // Refresh button
 refreshAutoJobsBtn.addEventListener('click', async () => {
-    autoJobsContentHome.replaceChildren(_h('div', {className: 'auto-jobs-no-jobs'}, 'Refreshing (sequential)...'));
-    autoJobsContentDark.replaceChildren(_h('div', {className: 'auto-jobs-no-jobs'}, 'Refreshing (sequential)...'));
-    autoJobsContentSoyuz.replaceChildren(_h('div', {className: 'auto-jobs-no-jobs'}, 'Refreshing (sequential)...'));
-    autoJobsContentUsol.replaceChildren(_h('div', {className: 'auto-jobs-no-jobs'}, 'Refreshing (sequential)...'));
+    const refreshingText = t('Refreshing (sequential)...', '正在依次刷新...');
+    autoJobsContentHome.replaceChildren(_h('div', {className: 'auto-jobs-no-jobs'}, refreshingText));
+    autoJobsContentDark.replaceChildren(_h('div', {className: 'auto-jobs-no-jobs'}, refreshingText));
+    autoJobsContentSoyuz.replaceChildren(_h('div', {className: 'auto-jobs-no-jobs'}, refreshingText));
+    autoJobsContentUsol.replaceChildren(_h('div', {className: 'auto-jobs-no-jobs'}, refreshingText));
     try {
         const tab = await getCor3Tab();
         if (tab) {
@@ -502,7 +504,7 @@ copyAllLogsBtn.addEventListener('click', async () => {
 autoJobsStartBtn.addEventListener('click', async () => {
     if (autoJobsRunning) {
         autoJobsRunning = false;
-        autoJobsStartBtn.textContent = '▶ Start Auto Jobs';
+        autoJobsStartBtn.textContent = t('▶ Start Auto Jobs', '▶ 开始自动任务');
         autoJobsStartBtn.className = 'auto-jobs-btn-start start';
         addAutoJobLog('Auto Jobs stopped by user.', 'warn');
         try {
@@ -512,7 +514,7 @@ autoJobsStartBtn.addEventListener('click', async () => {
         await chrome.storage.local.set({ autoJobsRunning: false });
     } else {
         autoJobsRunning = true;
-        autoJobsStartBtn.textContent = '■ Stop Auto Jobs';
+        autoJobsStartBtn.textContent = t('■ Stop Auto Jobs', '■ 停止自动任务');
         autoJobsStartBtn.className = 'auto-jobs-btn-start stop';
 
         const { marketData, darkMarketData, soyuzMarketData, usolMarketData } = await chrome.storage.local.get(['marketData', 'darkMarketData', 'soyuzMarketData', 'usolMarketData']);
@@ -570,7 +572,7 @@ autoJobsStartBtn.addEventListener('click', async () => {
         if (jobsToRun.length === 0) {
             addAutoJobLog('No jobs selected or available to run.', 'warn');
             autoJobsRunning = false;
-            autoJobsStartBtn.textContent = '▶ Start Auto Jobs';
+            autoJobsStartBtn.textContent = t('▶ Start Auto Jobs', '▶ 开始自动任务');
             autoJobsStartBtn.className = 'auto-jobs-btn-start start';
             return;
         }
@@ -678,7 +680,7 @@ async function dismissFailedJobsForMarket(marketKey, btn) {
 
     if (resp && (resp.queueResult === 'queued' || resp.queueResult === 'already-running')) {
         const activeType = resp.queueStatus && resp.queueStatus.active ? resp.queueStatus.active : 'another automation';
-        const friendlyNames = { 'auto-jobs': 'Auto Job Solver', 'auto-valuable': 'Auto Valuable Seller', 'auto-update-markets': 'Auto Update Markets', 'auto-send': 'Auto Send Mercenary', 'clear-failed-jobs': 'Clear Failed Jobs' };
+        const friendlyNames = { 'auto-jobs': 'Auto Job Solver', 'auto-valuable': 'Auto Valuable Seller', 'auto-update-markets': 'Auto Update Markets', 'auto-send': 'Mercenary Auto Expedition', 'clear-failed-jobs': 'Clear Failed Jobs' };
         const activeName = friendlyNames[activeType] || activeType;
         if (btn) {
             btn.title = 'Delayed — waiting for "' + activeName + '" to finish';
@@ -794,7 +796,7 @@ function addAutoJobLog(msg, level = 'info') {
 
 export function renderDebugLogs() {
     if (autoJobsDebugLogs.length === 0) {
-        debugLogsBody.replaceChildren(_h('div', {style: 'color:var(--text-dim);'}, 'No logs yet.'));
+        debugLogsBody.replaceChildren(_h('div', {style: 'color:var(--text-dim);'}, t('No logs yet.', '暂无日志。')));
         return;
     }
     const frag = document.createDocumentFragment();
@@ -928,7 +930,7 @@ export async function renderDebugJobs() {
     if (!hasAny) {
         const empty = document.createElement('div');
         empty.style.color = 'var(--text-dim)';
-        empty.textContent = 'No job data yet.';
+        empty.textContent = t('No job data yet.', '暂无任务数据。');
         frag.appendChild(empty);
     }
     debugJobsBody.replaceChildren(frag);
@@ -1001,10 +1003,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
         const running = changes.autoJobsRunning.newValue;
         autoJobsRunning = !!running;
         if (autoJobsRunning) {
-            autoJobsStartBtn.textContent = '■ Stop Auto Jobs';
+            autoJobsStartBtn.textContent = t('■ Stop Auto Jobs', '■ 停止自动任务');
             autoJobsStartBtn.className = 'auto-jobs-btn-start stop';
         } else {
-            autoJobsStartBtn.textContent = '▶ Start Auto Jobs';
+            autoJobsStartBtn.textContent = t('▶ Start Auto Jobs', '▶ 开始自动任务');
             autoJobsStartBtn.className = 'auto-jobs-btn-start start';
         }
     }
@@ -1078,7 +1080,7 @@ chrome.storage.local.get(['autoJobsDebugLogs', 'autoJobsTracker', 'autoJobsRunni
     }
     if (data.autoJobsRunning) {
         autoJobsRunning = true;
-        autoJobsStartBtn.textContent = '■ Stop Auto Jobs';
+        autoJobsStartBtn.textContent = t('■ Stop Auto Jobs', '■ 停止自动任务');
         autoJobsStartBtn.className = 'auto-jobs-btn-start stop';
     }
 });

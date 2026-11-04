@@ -1,3 +1,5 @@
+import { t } from './i18n.js';
+
 export async function getCor3Tab() {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (activeTab && activeTab.url && (activeTab.url.includes('cor3.gg') || activeTab.url.includes('os.cor3.gg'))) {
@@ -10,12 +12,12 @@ export async function getCor3Tab() {
 export function formatTimeAgo(ts) {
     if (!ts) return '';
     const diff = Date.now() - ts;
-    if (diff < 60000) return 'Updated just now';
+    if (diff < 60000) return t('Updated just now', '刚刚更新');
     const mins = Math.floor(diff / 60000);
-    if (mins < 60) return `Updated ${mins}m ago`;
+    if (mins < 60) return t(`Updated ${mins}m ago`, `更新于 ${mins} 分钟前`);
     const hrs = Math.floor(mins / 60);
     const remMins = mins % 60;
-    return `Updated ${hrs}h ${remMins}m ago`;
+    return t(`Updated ${hrs}h ${remMins}m ago`, `更新于 ${hrs} 小时 ${remMins} 分钟前`);
 }
 
 export function showLastUpdated(el, tsKey) {

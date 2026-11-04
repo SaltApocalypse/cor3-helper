@@ -2,6 +2,7 @@ import { _h, _noData, _safeSetHtml } from './dom-helpers.js';
 import { getCor3Tab } from './utils.js';
 import { refreshAllTimestamps } from './timestamps.js';
 import { state, zoomList } from './state.js';
+import { translateErrorText } from './i18n.js';
 
 const loadoutError = document.getElementById('loadoutError');
 const loadoutHwContainer = document.getElementById('loadoutHwContainer');
@@ -548,7 +549,7 @@ function renderLoadoutSoftware(data) {
 }
 
 export function showLoadoutError(msg) {
-    loadoutError.textContent = msg;
+    loadoutError.textContent = translateErrorText(msg);
     loadoutError.style.display = 'block';
     setTimeout(() => { loadoutError.style.display = 'none'; }, 10000);
 }

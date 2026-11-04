@@ -1,6 +1,7 @@
 // --- Auto Valuable Seller UI ---
 import { _h, _clearEl, _safeSetHtml } from './dom-helpers.js';
 import { getCor3Tab, updateSelectAllState } from './utils.js';
+import { t } from './i18n.js';
 
 const valuableToggle = document.getElementById('autoValuableSellerToggle');
 const valuableStatus = document.getElementById('autoValuableSellerStatus');
@@ -69,7 +70,7 @@ async function renderValuableTabs() {
 function renderValuableServers(data) {
     _clearEl(valuableContentServers);
     if (!data || !data.servers || data.servers.length === 0) {
-        valuableContentServers.replaceChildren(_h('div', {className: 'auto-jobs-no-jobs'}, 'No valuable data yet. Click "Start Valuable Search" to scan servers.'));
+        valuableContentServers.replaceChildren(_h('div', {className: 'auto-jobs-no-jobs'}, t('No valuable data yet. Click "Start Valuable Search" to scan servers.', '暂无贵重物品数据。点击“开始搜索贵重物品”扫描服务器。')));
         return;
     }
 
@@ -186,7 +187,7 @@ const VALUABLE_SERVER_PATH_LENGTHS = {
 function renderValuableDownloads(data) {
     _clearEl(valuableContentDownloads);
     if (!data || !data.files || data.files.length === 0) {
-        valuableContentDownloads.replaceChildren(_h('div', {className: 'auto-jobs-no-jobs'}, 'No download data yet. Click "Start Valuable Search" to scan.'));
+        valuableContentDownloads.replaceChildren(_h('div', {className: 'auto-jobs-no-jobs'}, t('No download data yet. Click "Start Valuable Search" to scan.', '暂无下载数据。点击“开始搜索贵重物品”扫描。')));
         return;
     }
 
@@ -298,7 +299,7 @@ function renderValuableMaintenance(data) {
     if (_maintTimerInterval) { clearInterval(_maintTimerInterval); _maintTimerInterval = null; }
 
     if (!data || !data.servers || data.servers.length === 0) {
-        valuableContentMaintenance.replaceChildren(_h('div', {className: 'auto-jobs-no-jobs'}, 'Run "Start Valuable Search" to see the maintenance status of servers. If no servers are shown after the search, there is no upcoming or active maintenance.'));
+        valuableContentMaintenance.replaceChildren(_h('div', {className: 'auto-jobs-no-jobs'}, t('Run "Start Valuable Search" to see the maintenance status of servers. If no servers are shown after the search, there is no upcoming or active maintenance.', '运行“开始搜索贵重物品”以查看服务器维护状态。如果搜索后没有显示服务器，则没有即将进行或正在进行的维护。')));
         return;
     }
 
@@ -477,18 +478,18 @@ async function updateValuableDownloadSelection() {
 // Button mutual exclusion
 function updateValuableButtons() {
     if (valuableSearchRunning) {
-        valuableSearchBtn.textContent = '■ Stop Valuable Search';
+        valuableSearchBtn.textContent = t('■ Stop Valuable Search', '■ 停止搜索贵重物品');
         valuableSearchBtn.className = 'valuable-btn stop';
         valuableSellerBtn.disabled = true;
     } else if (valuableSellerRunning) {
-        valuableSellerBtn.textContent = '■ Stop Valuable Seller';
+        valuableSellerBtn.textContent = t('■ Stop Valuable Seller', '■ 停止自动出售');
         valuableSellerBtn.className = 'valuable-btn stop';
         valuableSearchBtn.disabled = true;
     } else {
-        valuableSearchBtn.textContent = '▶ Start Valuable Search';
+        valuableSearchBtn.textContent = t('▶ Start Valuable Search', '▶ 开始搜索贵重物品');
         valuableSearchBtn.className = 'valuable-btn start';
         valuableSearchBtn.disabled = false;
-        valuableSellerBtn.textContent = '▶ Start Valuable Seller';
+        valuableSellerBtn.textContent = t('▶ Start Valuable Seller', '▶ 开始自动出售');
         valuableSellerBtn.className = 'valuable-btn start';
         valuableSellerBtn.disabled = false;
     }
@@ -585,7 +586,7 @@ function addValuableLog(msg, level = 'info') {
 
 function renderValuableDebugLogs() {
     if (valuableDebugLogs.length === 0) {
-        valuableDebugLogsBody.replaceChildren(_h('div', {style: 'color:var(--text-dim);'}, 'No logs yet.'));
+        valuableDebugLogsBody.replaceChildren(_h('div', {style: 'color:var(--text-dim);'}, t('No logs yet.', '暂无日志。')));
         return;
     }
     const frag = document.createDocumentFragment();
