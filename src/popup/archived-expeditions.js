@@ -1,6 +1,7 @@
 import { _h, _noData, _clearEl, _safeSetHtml } from './dom-helpers.js';
 import { getCor3Tab, waitForStorageKey } from './utils.js';
 import { refreshAllTimestamps } from './timestamps.js';
+import { t, getUiLang, translateStatus } from './i18n.js';
 
 const archivedExpSectionToggle = document.getElementById('archivedExpSectionToggle');
 const archivedExpSectionBody = document.getElementById('archivedExpSectionBody');
@@ -57,10 +58,10 @@ function renderArchivedExpeditions(data) {
 
         let html = `<div class="archived-exp-header">`;
         html += `<span class="archived-exp-merc">🧑 ${mercName}</span>`;
-        html += `<span class="outcome-tag ${outcomeClass}">${outcome}</span>`;
+        html += `<span class="outcome-tag ${outcomeClass}">${translateStatus(outcome)}</span>`;
         html += `</div>`;
         html += `<div class="archived-exp-info">`;
-        html += `Faction: <b>${factionDisplay}</b>`;
+        html += `${t('Faction:', '阵营：')} <b>${factionDisplay}</b>`;
         html += `<br>`;
         if ((exp.locationName && exp.zoneName) && (exp.locationName.length + exp.zoneName.length) > 30) {
             html += `📍 ${exp.locationName || '--'} /`;
@@ -71,8 +72,8 @@ function renderArchivedExpeditions(data) {
         }
         if (exp.objectiveName) html += ` — ${exp.objectiveName}`;
         html += `<br>`;
-        if (exp.totalCost !== undefined) html += `💰 Cost: ${exp.totalCost.toLocaleString()} · `;
-        if (exp.riskScore !== undefined) html += `⚠️ Risk: ${exp.riskScore}`;
+        if (exp.totalCost !== undefined) html += `💰 ${t('Cost:', '费用：')} ${exp.totalCost.toLocaleString()} · `;
+        if (exp.riskScore !== undefined) html += `⚠️ ${t('Risk:', '风险：')} ${exp.riskScore}`;
         html += `</div>`;
 
         const rawContainer = exp.containerData || exp.container;
@@ -81,7 +82,7 @@ function renderArchivedExpeditions(data) {
         if (containerItems && containerItems.length > 0) {
             const uid = 'archived_' + exp.id;
             html += `<div class="container-items">`;
-            html += `<div class="expandable-header" data-expand="${uid}"><span class="expand-arrow">▶</span><span class="expand-label">Loot (${containerItems.length} items)</span></div>`;
+            html += `<div class="expandable-header" data-expand="${uid}"><span class="expand-arrow">▶</span><span class="expand-label">📦 ${t(`Loot (${containerItems.length} items)`, `战利品（${containerItems.length} 件）`)}</span></div>`;
             html += `<div class="expandable-body" id="${uid}">`;
             for (const ci of containerItems) {
                 const det = ci.item || ci;
@@ -89,20 +90,16 @@ function renderArchivedExpeditions(data) {
                 const imgTag = imgSrc ? `<img src="${imgSrc}" style="width:24px;height:24px;border-radius:4px;vertical-align:middle;margin-right:4px;" loading="lazy">` : '';
                 const tierTag = det.tier ? ` <span class="tier-tag tier-tag-${det.tier.toLowerCase()}">${det.tier}</span>` : '';
                 let statusTag = '';
-                if (det.isCollected) statusTag = ' <span style="color:var(--accent-green);font-size:9px;">✓ Collected</span>';
-                else if (det.isDeleted) statusTag = ' <span style="color:var(--accent-red);font-size:9px;">✗ Deleted</span>';
+                if (det.isCollected) statusTag = ` <span style="color:var(--accent-green);font-size:9px;">✓ ${t('Collected', '已收集')}</span>`;
+                else if (det.isDeleted) statusTag = ` <span style="color:var(--accent-red);font-size:9px;">✗ ${t('Deleted', '已删除')}</span>`;
                 html += `<div style="font-size:10px;margin:2px 0;">${imgTag}${det.name || det.id || '?'}${tierTag}${statusTag}</div>`;
             }
             html += `</div></div>`;
         }
         if (exp.completedAt) {
-            const agoMs = Date.now() - new Date(exp.completedAt).getTime();
-            let agoText = '';
-            if (agoMs < 60000) agoText = 'just now';
-            else if (agoMs < 3600000) agoText = Math.floor(agoMs / 60000) + 'm ago';
-            else if (agoMs < 86400000) { const h = Math.floor(agoMs / 3600000); const m = Math.floor((agoMs % 3600000) / 60000); agoText = h + 'h' + (m > 0 ? ' ' + m + 'm' : '') + ' ago'; }
-            else { const d = Math.floor(agoMs / 86400000); const h = Math.floor((agoMs % 86400000) / 3600000); agoText = d + 'd' + (h > 0 ? ' ' + h + 'h' : '') + ' ago'; }
-            html += `<span style="font-size:9px;color:var(--text-dim);display:flex;flex-direction:row-reverse;">🕐 Completed ${agoText}</span>`;
+            const locale = getUiLang() === 'zh' ? 'zh-CN' : undefined;
+            const completedText = new Date(exp.completedAt).toLocaleString(locale);
+            html += `<span style="font-size:9px;color:var(--text-dim);display:flex;flex-direction:row-reverse;">🕐 ${t('Completed', '完成于')} ${completedText}</span>`;
         }
 
         _safeSetHtml(card, html);

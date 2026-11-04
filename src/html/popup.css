@@ -1548,6 +1548,10 @@
             font-size: 12px;
             font-weight: bold;
             color: var(--accent-cyan);
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         .expedition-card .exp-status {
             font-size: 10px;
@@ -1556,6 +1560,8 @@
             border-radius: 3px;
             background: var(--accent-green);
             color: var(--bg-primary);
+            white-space: nowrap;
+            flex-shrink: 0;
         }
         .expedition-card .exp-status.running {
             background: var(--accent-orange);

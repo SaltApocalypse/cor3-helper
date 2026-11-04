@@ -3,7 +3,7 @@ import { _h, _noData, _clearEl } from './dom-helpers.js';
 import { getCor3Tab, formatTimeRemaining, showLastUpdated, waitForStorageKey } from './utils.js';
 import { state } from './state.js';
 import { savePinnedState, renderPinnedTimers } from './pinned-timers.js';
-import { t, onLangChange } from './i18n.js';
+import { t, getUiLang, onLangChange, translateErrorText, translateStatus } from './i18n.js';
 
 const refreshDroneBtn = document.getElementById('refreshDroneBtn');
 const personalDroneContainer = document.getElementById('personalDroneContainer');
@@ -77,7 +77,7 @@ function updateDroneMissionSelectRow() {
 function updateDroneWarning(cfg) {
     if (!droneWarning) return;
     if (cfg && cfg.paused) {
-        droneWarning.textContent = '⚠️ Auto-drone is paused. Re-enable auto-dispatch to resume.';
+        droneWarning.textContent = t('⚠️ Auto-drone is paused. Re-enable auto-dispatch to resume.', '⚠️ 自动无人机已暂停。请重新启用自动派遣以恢复。');
         droneWarning.style.display = '';
     } else {
         droneWarning.style.display = 'none';
@@ -216,29 +216,76 @@ function renderDroneArchived(data) {
         droneArchivedContainer.replaceChildren(_noData(t('No archived drone missions found.', '没有已归档的无人机任务。')));
         return;
     }
+    const locale = getUiLang() === 'zh' ? 'zh-CN' : undefined;
     const frag = document.createDocumentFragment();
     for (const m of items) {
         const outcome = (m.outcome || m.status || 'ARCHIVED').toUpperCase();
         let cls = 'outcome-full';
-        if (outcome.includes('PARTIAL')) cls = 'outcome-partial';
+        if (outcome.includes('SEVERELY') || outcome.includes('DESTROYED')) cls = 'outcome-death';
+        else if (outcome.includes('DAMAGED')) cls = 'outcome-partial';
+        else if (outcome.includes('PARTIAL')) cls = 'outcome-partial';
         else if (outcome.includes('FAIL')) cls = 'outcome-fail';
+
         const loc = (m.location && m.location.name) || '';
         const mis = (m.mission && m.mission.name) || '';
+        const infoParts = [`📍 ${loc || '--'}`];
+        if (m.finalRisk !== undefined) infoParts.push(`⚠️ ${t('Risk:', '风险：')} ${m.finalRisk}`);
+        if (m.damageDealt !== undefined) infoParts.push(`💥 ${t('Damage:', '损伤：')} ${m.damageDealt}`);
+
         const card = _h('div', { className: 'archived-exp-card' },
             _h('div', { className: 'archived-exp-header' },
                 _h('span', { className: 'archived-exp-merc' }, `🛩️ ${mis || '?'}`),
-                _h('span', { className: `outcome-tag ${cls}` }, outcome)),
-            _h('div', { className: 'archived-exp-info' },
-                `📍 ${loc || '--'}`,
-                _h('br'),
-                m.startTime ? `🕐 ${new Date(m.startTime).toLocaleString()}` : '',
-                _h('br'),
-                `${m.finalRisk !== undefined ? '⚠️ ' + t('Risk:', '风险：') + ' ' + m.finalRisk + ' · ' : ''}${m.damageDealt !== undefined ? '💥 ' + t('Dmg:', '伤害：') + ' ' + m.damageDealt : ''}`,
-                (m.loot && m.loot.length) ? _h('br') : null,
-                (m.loot && m.loot.length) ? `📦 ${t('Loot:', '战利品：')} ${m.loot.length} ${t('item(s)', '件')}` : ''));
+                _h('span', { className: `outcome-tag ${cls}` }, translateStatus(outcome))),
+            _h('div', { className: 'archived-exp-info' }, infoParts.join(' · ')));
+
+        const lootItems = Array.isArray(m.loot) ? m.loot : [];
+        if (lootItems.length > 0) {
+            const uid = 'drone_archived_' + m.id;
+            const lootHeader = _h('div', { className: 'expandable-header', dataset: { expand: uid } },
+                _h('span', { className: 'expand-arrow' }, '▶'),
+                _h('span', { className: 'expand-label' }, `📦 ${t(`Loot (${lootItems.length} items)`, `战利品（${lootItems.length} 件）`)}`));
+            const lootBody = _h('div', { className: 'expandable-body', id: uid });
+            for (const li of lootItems) {
+                const det = (li && typeof li === 'object' && li.item) ? li.item
+                    : (li && typeof li === 'object' ? li : { name: String(li) });
+                const imgSrc = det.imageUrl || det.image || '';
+                const row = _h('div', { style: 'font-size:10px;margin:2px 0;' });
+                if (imgSrc) {
+                    row.appendChild(_h('img', {
+                        src: imgSrc,
+                        style: 'width:24px;height:24px;border-radius:4px;vertical-align:middle;margin-right:4px;'
+                    }));
+                }
+                row.appendChild(document.createTextNode(det.name || det.id || '?'));
+                if (det.tier) {
+                    row.appendChild(_h('span', { className: 'tier-tag tier-tag-' + String(det.tier).toLowerCase() }, det.tier));
+                }
+                if (det.isCollected) {
+                    row.appendChild(_h('span', { style: 'color:var(--accent-green);font-size:9px;' }, ` ✓ ${t('Collected', '已收集')}`));
+                } else if (det.isDeleted) {
+                    row.appendChild(_h('span', { style: 'color:var(--accent-red);font-size:9px;' }, ` ✗ ${t('Deleted', '已删除')}`));
+                }
+                lootBody.appendChild(row);
+            }
+            card.appendChild(_h('div', { className: 'container-items' }, lootHeader, lootBody));
+        }
+
+        const completedTs = m.completedAt || m.endTime || m.startTime;
+        if (completedTs) {
+            card.appendChild(_h('span', { style: 'font-size:9px;color:var(--text-dim);display:flex;flex-direction:row-reverse;' },
+                `🕐 ${t('Completed', '完成于')} ${new Date(completedTs).toLocaleString(locale)}`));
+        }
         frag.appendChild(card);
     }
     droneArchivedContainer.replaceChildren(frag);
+    droneArchivedContainer.querySelectorAll('.expandable-header').forEach(hdr => {
+        hdr.addEventListener('click', () => {
+            hdr.classList.toggle('open');
+            const targetId = hdr.getAttribute('data-expand');
+            const body = document.getElementById(targetId);
+            if (body) body.classList.toggle('openExtended');
+        });
+    });
 }
 
 // --- Data loading -------------------------------------------------------
@@ -349,7 +396,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (changes.droneArchivedData) loadDroneArchived();
     if (changes.droneWarning) {
         const warn = changes.droneWarning.newValue;
-        if (warn && droneWarning) { droneWarning.textContent = '⚠️ ' + warn; droneWarning.style.display = ''; }
+        if (warn && droneWarning) { droneWarning.textContent = '⚠️ ' + translateErrorText(warn); droneWarning.style.display = ''; }
     }
 });
 chrome.storage.onChanged.addListener((changes, area) => {
