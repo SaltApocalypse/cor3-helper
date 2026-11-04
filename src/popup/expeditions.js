@@ -5,6 +5,7 @@ import { updateExpeditionAlarmOptions } from './alarms.js';
 import { refreshAllTimestamps } from './timestamps.js';
 import { state } from './state.js';
 import { savePinnedState, renderPinnedTimers } from './pinned-timers.js';
+import { t, translateErrorText } from './i18n.js';
 
 const expeditionInfoContainer = document.getElementById('expeditionInfoContainer');
 const decisionsContainer = document.getElementById('decisionsContainer');
@@ -78,9 +79,9 @@ function renderExpeditionError(error) {
     const now = Date.now();
     if (error.noRetry) {
         return el('div', { className: 'warning-banner', style: 'background:rgba(255,80,80,0.15);border-color:var(--accent-red);color:var(--accent-red);' },
-            el('div', { style: { fontWeight: 'bold', marginBottom: '4px' } }, '❌ Expedition Error'),
-            el('div', { style: { fontSize: '10px' } }, error.error),
-            el('div', { style: { fontSize: '10px', marginTop: '4px' } }, 'Re-enable auto-send mercenary to retry.')
+            el('div', { style: { fontWeight: 'bold', marginBottom: '4px' } }, t('❌ Expedition Error', '❌ 远征错误')),
+            el('div', { style: { fontSize: '10px' } }, translateErrorText(error.error)),
+            el('div', { style: { fontSize: '10px', marginTop: '4px' } }, t('Re-enable auto-send mercenary to retry.', '请重新启用自动派遣雇佣兵后重试。'))
         );
     }
     const retryAfter = error.retryAfter || 120000;
@@ -88,9 +89,9 @@ function renderExpeditionError(error) {
     if (timeUntilRetry > 0) {
         const retryMinutes = Math.ceil(timeUntilRetry / 60000);
         return el('div', { className: 'warning-banner', style: 'background:rgba(255,165,0,0.15);border-color:var(--accent-orange);color:var(--accent-orange);' },
-            el('div', { style: { fontWeight: 'bold', marginBottom: '4px' } }, '⚠️ Expedition Launch Failed'),
-            el('div', { style: { fontSize: '10px' } }, error.error),
-            el('div', { style: { fontSize: '10px', marginTop: '4px' } }, `Retrying in ${retryMinutes} minute${retryMinutes !== 1 ? 's' : ''}...`)
+            el('div', { style: { fontWeight: 'bold', marginBottom: '4px' } }, t('⚠️ Expedition Launch Failed', '⚠️ 远征派遣失败')),
+            el('div', { style: { fontSize: '10px' } }, translateErrorText(error.error)),
+            el('div', { style: { fontSize: '10px', marginTop: '4px' } }, t(`Retrying in ${retryMinutes} minute${retryMinutes !== 1 ? 's' : ''}...`, `将在 ${retryMinutes} 分钟后重试...`))
         );
     }
     chrome.storage.local.remove('expeditionLaunchError');

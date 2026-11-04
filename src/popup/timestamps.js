@@ -1,4 +1,5 @@
 import { showLastUpdated } from './utils.js';
+import { onLangChange } from './i18n.js';
 
 const dailyLastUpdated = document.getElementById('dailyLastUpdated');
 const coreMarketLastUpdated = document.getElementById('coreMarketLastUpdated');
@@ -27,3 +28,5 @@ export function refreshAllTimestamps() {
     if (mercenariesLastUpdated) showLastUpdated(mercenariesLastUpdated, 'mercenariesUpdatedAt');
     if (loadoutLastUpdated) showLastUpdated(loadoutLastUpdated, 'loadoutUpdatedAt');
 }
+
+onLangChange(() => refreshAllTimestamps());

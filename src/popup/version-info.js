@@ -1,5 +1,6 @@
 import { _safeSetHtml } from './dom-helpers.js';
 import { getCor3Tab } from './utils.js';
+import { t } from './i18n.js';
 import {
     FORK_REPO,
     FORK_REPO_URL,
@@ -46,7 +47,7 @@ function compareVersions(v1, v2) {
 }
 
 checkUpdateBtn.addEventListener('click', async () => {
-    updateResult.textContent = 'Checking...';
+    updateResult.textContent = t('Checking...', '检查中...');
     updateResult.style.color = 'var(--text-dim)';
     try {
         const localManifest = chrome.runtime.getManifest();
@@ -72,28 +73,28 @@ checkUpdateBtn.addEventListener('click', async () => {
         let extBehind = false;
 
         if (remoteExtVersion && compareVersions(localExtVersion, remoteExtVersion) < 0) {
-            messages.push(`Extension: <b>v${localExtVersionName}</b> → <b>v${remoteExtVersion}</b>`);
+            messages.push(`${t('Extension', '扩展')}: <b>v${localExtVersionName}</b> → <b>v${remoteExtVersion}</b>`);
             extBehind = true;
         }
 
         if (messages.length > 0) {
-            let html = `Updates detected:<br>${messages.join('<br>')}`;
+            let html = `${t('Updates detected:', '检测到更新：')}<br>${messages.join('<br>')}`;
             if (extBehind) {
-                html += `<br><a href="${FORK_RELEASES_URL}" target="_blank" style="color:var(--accent-cyan);">Download from ${FORK_DISPLAY_NAME}</a><br><span style="font-size:9px;color:var(--text-muted);">Download ZIP, extract, and reload on chrome://extensions</span>`;
+                html += `<br><a href="${FORK_RELEASES_URL}" target="_blank" style="color:var(--accent-cyan);">${t('Download from ' + FORK_DISPLAY_NAME, '从 ' + FORK_DISPLAY_NAME + ' 下载')}</a><br><span style="font-size:9px;color:var(--text-muted);">${t('Download ZIP, extract, and reload on chrome://extensions', '下载 ZIP，解压后在 chrome://extensions 重新加载')}</span>`;
             }
-            html += `<br><span style="font-size:9px;color:var(--text-muted);">Salta fork · Upstream: <a href="${UPSTREAM_URL}" target="_blank" style="color:var(--accent-cyan);">${UPSTREAM_REPO}</a></span>`;
+            html += `<br><span style="font-size:9px;color:var(--text-muted);">${t('Fork', '分支')}: ${FORK_DISPLAY_NAME} · ${t('Upstream', '上游')}: <a href="${UPSTREAM_URL}" target="_blank" style="color:var(--accent-cyan);">${UPSTREAM_REPO}</a></span>`;
             _safeSetHtml(updateResult, html);
             updateResult.style.color = 'var(--accent-orange)';
         } else {
             const localWeb = webVersion || null;
             const localSys = systemVersion || null;
-            updateResult.textContent = `You're up to date! (${FORK_DISPLAY_NAME})`;
+            updateResult.textContent = t(`You're up to date! (${FORK_DISPLAY_NAME})`, `已是最新版本！（${FORK_DISPLAY_NAME}）`);
             updateResult.style.color = 'var(--accent-green)';
         }
     } catch (e) {
         console.log('[COR3 Helper] Check for updates error:', e);
         cor3LogError('popup.js', e, { action: 'checkForUpdates' });
-        updateResult.textContent = 'Could not check for updates. Check your connection.';
+        updateResult.textContent = t('Could not check for updates. Check your connection.', '无法检查更新，请检查网络连接。');
         updateResult.style.color = 'var(--accent-red)';
     }
 });
@@ -136,12 +137,12 @@ async function displayVersionInfo(retryCount) {
         }
     }
 
-    let parts = [`Extension: v${extVersionName} <span style="color:var(--accent-cyan);">(${FORK_DISPLAY_NAME})</span>`];
-    if (finalWebVersion) parts.push(`Web: ${finalWebVersion}`);
-    if (finalSystemVersion) parts.push(`System: ${finalSystemVersion}`);
-    if (finalPatchVersion) parts.push(`Patch: ${finalPatchVersion}`);
+    let parts = [`${t('Extension', '扩展')}: v${extVersionName} <span style="color:var(--accent-cyan);">(${FORK_DISPLAY_NAME})</span>`];
+    if (finalWebVersion) parts.push(`${t('Web', '网页')}: ${finalWebVersion}`);
+    if (finalSystemVersion) parts.push(`${t('System', '系统')}: ${finalSystemVersion}`);
+    if (finalPatchVersion) parts.push(`${t('Patch', '补丁')}: ${finalPatchVersion}`);
     let html = parts.join(' · ');
-    html += `<br><span style="font-size:9px;color:var(--text-muted);">Fork: <a href="${FORK_REPO_URL}" target="_blank" style="color:var(--accent-cyan);">${FORK_REPO}</a> · Upstream: <a href="${UPSTREAM_URL}" target="_blank" style="color:var(--accent-cyan);">${UPSTREAM_REPO}</a></span>`;
+    html += `<br><span style="font-size:9px;color:var(--text-muted);">${t('Fork', '分支')}: <a href="${FORK_REPO_URL}" target="_blank" style="color:var(--accent-cyan);">${FORK_REPO}</a> · ${t('Upstream', '上游')}: <a href="${UPSTREAM_URL}" target="_blank" style="color:var(--accent-cyan);">${UPSTREAM_REPO}</a></span>`;
     _safeSetHtml(versionSection, html);
     versionSection.style.display = 'block';
 
@@ -168,9 +169,9 @@ async function autoCheckWebsiteUpdated() {
         if (webVersion && remote.web) {
             const comparison = compareVersions(webVersion, remote.web);
             if (comparison > 0) {
-                webVersionNotice.textContent = '⚠️ Website is recently updated';
+                webVersionNotice.textContent = t('⚠️ Website is recently updated', '⚠️ 网页最近有更新');
                 webVersionNotice.style.display = 'block';
-                webVersionData.textContent = 'Detected: ' + webVersion + ' · Old: ' + remote.web;
+                webVersionData.textContent = t('Detected: ' + webVersion + ' · Old: ' + remote.web, '检测到：' + webVersion + ' · 旧版本：' + remote.web);
                 webVersionData.style.display = 'block';
             }
         }
@@ -178,9 +179,9 @@ async function autoCheckWebsiteUpdated() {
         if (systemVersion && remote.system) {
             const comparison = compareVersions(systemVersion, remote.system);
             if (comparison < 0) {
-                systemVersionNotice.textContent = '⚠️ You are lagging behind in progress!';
+                systemVersionNotice.textContent = t('⚠️ You are lagging behind in progress!', '⚠️ 你的进度落后了！');
                 systemVersionNotice.style.display = 'block';
-                webVersionData.textContent = 'Aim for ' + remote.system + ' system version!';
+                webVersionData.textContent = t('Aim for ' + remote.system + ' system version!', '目标系统版本：' + remote.system + '！');
                 webVersionData.style.display = 'block';
             }
         }
@@ -188,9 +189,9 @@ async function autoCheckWebsiteUpdated() {
         if (patchVersion && remote.patch && patchVersionNotice && patchVersionData) {
             const comparison = compareVersions(patchVersion, remote.patch);
             if (comparison > 0) {
-                patchVersionNotice.textContent = '⚠️ Patch version is changed. Check patch notes!';
+                patchVersionNotice.textContent = t('⚠️ Patch version is changed. Check patch notes!', '⚠️ 补丁版本已变更，请查看更新说明！');
                 patchVersionNotice.style.display = 'block';
-                patchVersionData.textContent = 'Detected: ' + patchVersion + ' · Old: ' + remote.patch;
+                patchVersionData.textContent = t('Detected: ' + patchVersion + ' · Old: ' + remote.patch, '检测到：' + patchVersion + ' · 旧版本：' + remote.patch);
                 patchVersionData.style.display = 'block';
             }
         }

@@ -5,6 +5,7 @@ import { refreshAllTimestamps } from './timestamps.js';
 import { state } from './state.js';
 import { findMaintenanceBlocker } from '../shared/server-map.js';
 import { loadExpeditions } from './expeditions.js';
+import { translateErrorText } from './i18n.js';
 
 const mercenariesSectionToggle = document.getElementById('mercenariesSectionToggle');
 const mercenariesSectionBody = document.getElementById('mercenariesSectionBody');
@@ -34,13 +35,13 @@ let mercRestTimers = {};
 export function updateMercWarning(settings) {
     if (!mercWarning) return;
     if (settings && settings.disabledReason === 'stash_full' && !settings.enabled) {
-        mercWarning.textContent = '⚠️ Stash is full — auto-send mercenary disabled. Clear stash and re-enable auto-send to resume.';
+        mercWarning.textContent = '⚠️ ' + translateErrorText('Stash is full — auto-send mercenary disabled. Clear stash and re-enable auto-send to resume.');
         mercWarning.style.borderColor = 'var(--accent-orange)';
         mercWarning.style.color = 'var(--accent-orange)';
         mercWarning.style.background = 'rgba(255,160,0,0.15)';
         mercWarning.style.display = '';
     } else if (settings && settings.disabledReason === 'insufficient_credits' && !settings.enabled) {
-        mercWarning.textContent = '⚠️ Insufficient credits — auto-send mercenary disabled. Earn more credits and re-enable auto-send to resume.';
+        mercWarning.textContent = '⚠️ ' + translateErrorText('Insufficient credits — auto-send mercenary disabled. Earn more credits and re-enable auto-send to resume.');
         mercWarning.style.borderColor = 'var(--accent-red, #ff4444)';
         mercWarning.style.color = 'var(--accent-red, #ff4444)';
         mercWarning.style.background = 'rgba(255,68,68,0.15)';
@@ -96,7 +97,7 @@ chrome.storage.sync.get('autoSendMerc', (data) => {
 });
 chrome.storage.local.get('mercWarning', (data) => {
     if (data.mercWarning && mercWarning) {
-        mercWarning.textContent = '⚠️ ' + data.mercWarning;
+        mercWarning.textContent = '⚠️ ' + translateErrorText(data.mercWarning);
         mercWarning.style.borderColor = 'var(--accent-orange)';
         mercWarning.style.color = 'var(--accent-orange)';
         mercWarning.style.background = 'rgba(255,160,0,0.15)';
@@ -477,7 +478,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (changes.mercWarning) {
         const val = changes.mercWarning.newValue;
         if (val && mercWarning) {
-            mercWarning.textContent = '⚠️ ' + val;
+            mercWarning.textContent = '⚠️ ' + translateErrorText(val);
             mercWarning.style.borderColor = 'var(--accent-orange)';
             mercWarning.style.color = 'var(--accent-orange)';
             mercWarning.style.background = 'rgba(255,160,0,0.15)';
