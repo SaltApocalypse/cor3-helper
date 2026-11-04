@@ -345,9 +345,8 @@ function maybeEnqueueAll() {
         chrome.storage.sync.get(['autoSendMerc', 'autoDrone'], function (settings) {
             var merc = settings.autoSendMerc || {};
             var drone = settings.autoDrone || {};
-            // autoClaim defaults to the old behaviour (enabled) when not set yet.
-            var expEnabled = merc.autoClaim !== undefined ? !!merc.autoClaim : !!merc.enabled;
-            var droneEnabled = drone.autoClaim !== undefined ? !!drone.autoClaim : !!drone.enabled;
+            var expEnabled = !!merc.enabled;
+            var droneEnabled = !!drone.enabled;
             if (!expEnabled && !droneEnabled && _forcedSources.size === 0) return;
             var msgs = _mailData.messages || [];
             for (var i = 0; i < msgs.length; i++) {

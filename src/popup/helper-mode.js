@@ -1,6 +1,4 @@
 // --- Helper-Only Mode ---
-import { reRenderDecisions } from './modifiers.js';
-import { loadMercenaries } from './mercenaries.js';
 import { renderDebugJobs, renderDebugLogs } from './auto-job-solver-ui.js';
 import { loadPinnedState } from './pinned-timers.js';
 import { updateAutoUpdateMarketsStatus } from './ui-toggles.js';
@@ -38,30 +36,30 @@ export async function applyHelperMode(helper, mode) {
                 value = state.isHelper ? disabledValue : (oldValues[key] ?? disabledValue);
                 chrome.storage.sync.set({ [key]: value });
             } else if (key === 'autoSendMerc') {
-                disabledValue = Object.assign({}, oldValues[key] || {}, {
+                disabledValue = {
                     enabled: false,
-                    autoClaim: false,
-                    autoResolveDecisions: false,
-                    autoChooseMerc: false,
-                    autoChooseUsolFirst: false,
-                    ignoreEliteMerc: false,
-                    applyMercCostLimiter: false,
-                    maxMercCost: 15000,
-                    disabledReason: null,
-                    mercenaryId: "",
-                    mercenaryName: ""
-                });
-                value = state.isHelper ? disabledValue : (oldValues[key] ?? disabledValue);
+                    hasInsurance: false,
+                    disabledReason: null
+                };
+                const oldMerc = oldValues[key] || {};
+                value = state.isHelper ? disabledValue : {
+                    enabled: !!oldMerc.enabled,
+                    hasInsurance: !!oldMerc.hasInsurance,
+                    disabledReason: oldMerc.disabledReason || null
+                };
                 chrome.storage.sync.set({ [key]: value });
             } else if (key === 'autoDrone') {
-                disabledValue = Object.assign({}, oldValues[key] || {}, {
+                disabledValue = {
                     enabled: false,
                     paused: true,
-                    autoClaim: false,
-                    autoDecide: false,
-                    autoChooseLocation: false
-                });
-                value = state.isHelper ? disabledValue : (oldValues[key] ?? disabledValue);
+                    repairEnabled: false
+                };
+                const oldDrone = oldValues[key] || {};
+                value = state.isHelper ? disabledValue : {
+                    enabled: !!oldDrone.enabled,
+                    paused: false,
+                    repairEnabled: !!oldDrone.repairEnabled
+                };
                 chrome.storage.sync.set({ [key]: value });
             } else {
                 value = state.isHelper ? false : (oldValues[key] ?? false);
@@ -69,12 +67,13 @@ export async function applyHelperMode(helper, mode) {
             }
         });
 
-        reRenderDecisions();
-        loadMercenaries();
+        if (state.isHelper) {
+            chrome.storage.local.remove(['mercWarning', 'droneWarning', 'expeditionLaunchError']);
+        }
 
         let toggles = {};
         try {
-            toggles = await chrome.storage.sync.get(['autoRefresh', 'autoJobSolverEnabled', 'autoUpdateMarkets', 'autoFinishAllJobsEnabled', 'autoJobsDebugConsoleEnabled', 'autoSendMerc', 'autoDrone', 'aggressiveDecisions']);
+            toggles = await chrome.storage.sync.get(['autoRefresh', 'autoJobSolverEnabled', 'autoUpdateMarkets', 'autoFinishAllJobsEnabled', 'autoJobsDebugConsoleEnabled', 'autoSendMerc', 'autoDrone']);
         } catch (err) {
             console.log("Couldn't find the related item on storage -> " + err);
         }
@@ -116,34 +115,15 @@ export async function applyHelperMode(helper, mode) {
 
         updateAutoUpdateMarketsStatus();
 
-        // Auto Decisions / Mercenaries / Drone
+        // Mercenaries / Drone
 
         const merc = toggles.autoSendMerc || {};
-        (document.getElementById('autoChooseCheckbox')).checked = !!merc.autoResolveDecisions;
         (document.getElementById('autoSendMercenaryToggle')).checked = !!merc.enabled;
-        (document.getElementById('autoClaimMercToggle')).checked = merc.autoClaim !== false;
-        (document.getElementById('autoChooseMercToggle')).checked = !!merc.autoChooseMerc;
-        (document.getElementById('autoChooseUsolFirstToggle')).checked = !!merc.autoChooseUsolFirst;
-        (document.getElementById('ignoreEliteMercToggle')).checked = !!merc.ignoreEliteMerc;
-        (document.getElementById('applyMercCostLimiterToggle')).checked = !!merc.applyMercCostLimiter;
-        (document.getElementById('maxMercCostInput')).value = merc.maxMercCost ?? 15000;
-        (document.getElementById('mercCostDisplayValue')).textContent = merc.maxMercCost ?? 15000;
+        (document.getElementById('mercInsuranceToggle')).checked = !!merc.hasInsurance;
 
         const drone = toggles.autoDrone || {};
         (document.getElementById('autoDroneToggle')).checked = !!drone.enabled;
-        (document.getElementById('autoDroneClaimToggle')).checked = drone.autoClaim !== false;
-        (document.getElementById('autoDroneDecideToggle')).checked = drone.autoDecide !== false;
-        (document.getElementById('autoChooseDroneLocationToggle')).checked = !!drone.autoChooseLocation;
-        (document.getElementById('autoDroneFullChargeToggle')).checked = !!drone.fullChargeBeforeLaunch;
         (document.getElementById('autoDroneRepairToggle')).checked = !!drone.repairEnabled;
-        (document.getElementById('autoDroneRepairOnLowBatteryToggle')).checked = !!drone.repairOnLowBattery;
-        (document.getElementById('autoDronePauseOnFailToggle')).checked = drone.pauseOnRepairFail !== false;
-        (document.getElementById('droneRepairThresholdInput')).value = drone.repairThreshold ?? 60;
-        (document.getElementById('droneLowBatteryThresholdInput')).value = drone.lowBatteryThreshold ?? 30;
-
-        const aggressive = !!toggles.aggressiveDecisions;
-        (document.getElementById('aggressiveDecisionsToggle')).checked = aggressive;
-        (document.getElementById('aggressiveDecisionsDroneToggle')).checked = aggressive;
 
     }
 
@@ -161,31 +141,16 @@ export async function applyHelperMode(helper, mode) {
         ((document.getElementById(key)).closest('.auto-decrypt-row')).style.display = state.isHelper ? 'none' : 'flex';
     });
 
-    // Auto Decisions and Auto Mercs
+    // Mercenary and Drone automation
 
     [
-        'autoChooseCheckbox', 'autoChooseMercToggle', 'autoChooseUsolFirstToggle',
-        'ignoreEliteMercToggle', 'applyMercCostLimiterToggle', 'autoSendMercenaryToggle',
-        'autoClaimMercToggle', 'autoDroneToggle', 'autoDroneClaimToggle',
-        'autoDroneDecideToggle', 'autoChooseDroneLocationToggle', 'autoDroneFullChargeToggle',
-        'autoDroneRepairToggle', 'autoDroneRepairOnLowBatteryToggle', 'autoDronePauseOnFailToggle',
-        'aggressiveDecisionsToggle', 'aggressiveDecisionsDroneToggle'
+        'mercInsuranceToggle', 'autoSendMercenaryToggle',
+        'autoDroneToggle', 'autoDroneRepairToggle'
     ].forEach(key => {
         const el = document.getElementById(key);
         const row = el && el.closest('.auto-choose-row');
         if (row) row.style.display = state.isHelper ? 'none' : 'flex';
     });
-
-    ['mercAdvancedBody', 'droneAdvancedBody'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.style.display = state.isHelper ? 'none' : '';
-    });
-
-    // Hide merc cost display/edit rows in helper mode
-    if (document.getElementById('mercCostDisplay')) document.getElementById('mercCostDisplay').style.display = state.isHelper ? 'none' : '';
-    if (document.getElementById('mercCostEditRow')) document.getElementById('mercCostEditRow').style.display = 'none';
-
-    (document.getElementById('mercenariesContainer')).querySelectorAll('.merc-card').forEach(c => c.classList.remove('selected'));
 
 }
 if (helperModeToggle) {

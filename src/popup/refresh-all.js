@@ -2,10 +2,10 @@ import { _noData } from './dom-helpers.js';
 import { getCor3Tab, humanDelay, waitForStorageKey } from './utils.js';
 import { refreshAllTimestamps } from './timestamps.js';
 import { fetchDailyOps } from './daily-ops.js';
-import { loadExpeditions, renderDecisions, requestExpeditions } from './expeditions.js';
+import { loadExpeditions, requestExpeditions } from './expeditions.js';
 import { loadMarket, loadDarkMarket, loadSoyuzMarket, loadUsolMarket, refreshMarket1Only, setDarkMarketEndpoint, refreshMarket2Only, refreshMarket3Only, refreshMarket4Only } from './markets.js';
 import { loadInventory } from './inventory.js';
-import { loadMercenaries, requestMercenaries } from './mercenaries.js';
+import { requestMercenaries } from './mercenaries.js';
 import { loadLoadout } from './loadout.js';
 import { refreshArchivedOnly, loadArchivedExpeditions } from './archived-expeditions.js';
 
@@ -15,7 +15,6 @@ const refreshExpeditionsBtn = document.getElementById('refreshExpeditionsBtn');
 
 const inventoryContainer = document.getElementById('inventoryContainer');
 const spaceInfo = document.getElementById('spaceInfo');
-const mercenariesContainer = document.getElementById('mercenariesContainer');
 const expeditionInfoContainer = document.getElementById('expeditionInfoContainer');
 
 let isRefreshing = false;
@@ -48,18 +47,9 @@ async function refreshInventoryOnly() {
 }
 
 async function refreshMercenariesOnly() {
-    mercenariesContainer.replaceChildren(_noData('Loading mercenaries...'));
-    try {
-        const tab = await getCor3Tab();
-        if (tab) {
-            await chrome.storage.local.remove(['coreMercsDone', 'usolMercsDone']);
-            await chrome.tabs.sendMessage(tab.id, { action: "requestMercenaries" });
-            await waitForStorageKey('coreMercsDone', 30000);
-            try { await chrome.tabs.sendMessage(tab.id, { action: "requestUsolMercenaries" }); } catch (e) {}
-            await waitForStorageKey('usolMercsDone', 30000).catch(() => {});
-        }
-    } catch (e) {}
-    await loadMercenaries();
+    // Mercenary data is still needed for automatic selection, but the popup
+    // no longer renders a mercenary list.
+    await requestMercenaries();
     refreshAllTimestamps();
 }
 
@@ -98,12 +88,6 @@ refreshAllBtn.addEventListener('click', async () => {
         await humanDelay();
 
         await executeRefreshStep('expeditions', refreshExpeditionsOnly);
-        await humanDelay();
-
-        await executeRefreshStep('decisions', async () => {
-            const { expeditionDecisions } = await chrome.storage.local.get('expeditionDecisions');
-            renderDecisions(expeditionDecisions || []);
-        });
         await humanDelay();
 
         await executeRefreshStep('inventory', refreshInventoryOnly);

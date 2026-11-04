@@ -126,14 +126,10 @@ export function checkAutoSendOnExpeditionData(expeditions) {
     }
     chrome.storage.sync.get('autoSendMerc', (settings) => {
         const merc = settings.autoSendMerc || {};
-        const dispatchEnabled = !!merc.enabled;
-        const claimEnabled = merc.autoClaim !== undefined ? !!merc.autoClaim : dispatchEnabled;
-        if (!dispatchEnabled && !claimEnabled) return;
+        if (!merc.enabled) return;
 
         const hasActiveExpeditions = expeditions.length > 0;
         if (!hasActiveExpeditions) {
-            if (!dispatchEnabled) return; // claim-only: nothing to dispatch
-            if (!merc.mercenaryId && !merc.autoChooseMerc) return;
             if (!initialMercsReady) {
                 if (autoSendDeferredWaiting) {
                     console.log('[COR3 Helper] Auto-send: Already waiting for initial mercs — skipping duplicate deferral');
@@ -197,15 +193,6 @@ export function checkAutoSendOnExpeditionData(expeditions) {
             _broadcastQueueStatus();
             autoSendExpeditionId = exp.id;
 
-            if (!claimEnabled) {
-                console.log('[COR3 Helper] Auto-send: completed expedition waiting for manual claim:', exp.id);
-                chrome.storage.local.set({ mercWarning: 'Mercenary rewards are pending. Enable Auto-claim & pay rewards or claim manually to continue.' });
-                autoSendInProgress = false;
-                autoSendExpeditionId = null;
-                _automationFinish('auto-send');
-                return;
-            }
-
             if (!exp.containerOpenedAt) {
                 console.log('[COR3 Helper] Auto-send: Detected COMPLETED expedition:', exp.id, '- opening container in 10s');
                 setTimeout(() => {
@@ -229,6 +216,7 @@ export function proceedWithMerc(mercId, allMercs, settings, localData) {
     }
     if (!mercId) {
         console.log('[COR3 Helper] Auto-send: no mercenary selected, aborting');
+        chrome.storage.local.set({ mercWarning: 'Auto expedition paused: automatic mercenary selection returned no mercenary.' });
         autoSendInProgress = false;
         _automationFinish('auto-send');
         return;
@@ -236,6 +224,7 @@ export function proceedWithMerc(mercId, allMercs, settings, localData) {
     const selectedMerc = allMercs.find(m => m.id === mercId);
     if (!selectedMerc || selectedMerc.status !== 'AVAILABLE') {
         console.log('[COR3 Helper] Auto-send: selected mercenary not AVAILABLE (status: ' + (selectedMerc ? selectedMerc.status : 'not found') + '), aborting');
+        chrome.storage.local.set({ mercWarning: 'Auto expedition paused: selected mercenary is no longer available (status: ' + (selectedMerc ? selectedMerc.status : 'not found') + ').' });
         autoSendInProgress = false;
         _automationFinish('auto-send');
         return;
@@ -246,6 +235,7 @@ export function proceedWithMerc(mercId, allMercs, settings, localData) {
     const config = localData[configKey];
     if (!config || !config.locations || config.locations.length === 0) {
         console.log('[COR3 Helper] Auto-send: no expedition config available for ' + (isUsol ? 'USOL' : 'CORE') + ', aborting');
+        chrome.storage.local.set({ mercWarning: 'Auto expedition paused: no expedition config available for ' + (isUsol ? 'USOL' : 'CORE') + '.' });
         autoSendInProgress = false;
         _automationFinish('auto-send');
         return;
@@ -257,6 +247,7 @@ export function proceedWithMerc(mercId, allMercs, settings, localData) {
     const goal = zone && zone.goals && zone.goals[0] ? zone.goals[0] : null;
     if (!zone || !goal) {
         console.log('[COR3 Helper] Auto-send: missing zone/goal config, aborting');
+        chrome.storage.local.set({ mercWarning: 'Auto expedition paused: the selected expedition location is missing zone/goal config.' });
         autoSendInProgress = false;
         _automationFinish('auto-send');
         return;
@@ -267,7 +258,7 @@ export function proceedWithMerc(mercId, allMercs, settings, localData) {
         locationConfigId: loc.id,
         zoneConfigId: zone.id,
         goalId: goal.id,
-        hasInsurance: false
+        hasInsurance: !!settings.autoSendMerc.hasInsurance
     };
     console.log('[COR3 Helper] Auto-send: launching expedition with mercenary:', selectedMerc.callsign, '(' + (isUsol ? 'USOL' : 'CORE') + ')');
     setTimeout(() => {

@@ -228,51 +228,49 @@ export function setupWsRelay() {
                     }
 
                     const allMercs = [...coreMercs, ...usolMercs];
-                    let mercId = settings.autoSendMerc.mercenaryId;
+                    const configs = localData.mercConfigData || {};
+                    const eliteIds = new Set();
+                    coreElite.forEach(es => { if (es.mercenary) eliteIds.add(es.mercenary.id); });
+                    const usolElite2 = (usolData && usolData.eliteSlots) || [];
+                    usolElite2.forEach(es => { if (es.mercenary) eliteIds.add(es.mercenary.id); });
+                    allMercs.forEach(m => { if (!m._isElite) m._isElite = eliteIds.has(m.id); });
 
-                    if (settings.autoSendMerc.autoChooseMerc) {
-                        const configs = localData.mercConfigData || {};
-                        const ignoreElite = !!settings.autoSendMerc.ignoreEliteMerc;
-                        const usolFirst = !!settings.autoSendMerc.autoChooseUsolFirst;
-                        const eliteIds = new Set();
-                        coreElite.forEach(es => { if (es.mercenary) eliteIds.add(es.mercenary.id); });
-                        const usolElite2 = (usolData && usolData.eliteSlots) || [];
-                        usolElite2.forEach(es => { if (es.mercenary) eliteIds.add(es.mercenary.id); });
-                        allMercs.forEach(m => { if (!m._isElite) m._isElite = eliteIds.has(m.id); });
+                    // Fixed selection policy:
+                    // elite (USOL) > normal USOL > normal CORE/HOME,
+                    // then totalCost ascending, then riskScore ascending.
+                    const available = allMercs.filter(m => m.status === 'AVAILABLE' && configs[m.id]);
+                    let mercId = null;
+                    if (available.length > 0) {
+                        available.sort((a, b) => {
+                            const eliteA = a._isElite ? 0 : 1;
+                            const eliteB = b._isElite ? 0 : 1;
+                            if (eliteA !== eliteB) return eliteA - eliteB;
 
-                        let available = allMercs.filter(m => m.status === 'AVAILABLE' && configs[m.id]);
-                        if (ignoreElite) available = available.filter(m => !m._isElite);
-                        if (settings.autoSendMerc.applyMercCostLimiter) {
-                            const maxCost = settings.autoSendMerc.maxMercCost ?? 15000;
-                            available = available.filter(m => (configs[m.id].totalCost || 0) <= maxCost);
-                        }
-                        if (available.length > 0) {
-                            available.sort((a, b) => {
-                                if (usolFirst) {
-                                    if (a._market === 'usol' && b._market !== 'usol') return -1;
-                                    if (a._market !== 'usol' && b._market === 'usol') return 1;
-                                }
-                                const costA = (configs[a.id] && configs[a.id].totalCost) || Infinity;
-                                const costB = (configs[b.id] && configs[b.id].totalCost) || Infinity;
-                                if (costA !== costB) return costA - costB;
-                                const riskA = (configs[a.id] && configs[a.id].riskScore) || 0;
-                                const riskB = (configs[b.id] && configs[b.id].riskScore) || 0;
-                                if (riskA !== riskB) return riskA - riskB;
-                                if (a._market === 'usol' && b._market !== 'usol') return -1;
-                                if (a._market !== 'usol' && b._market === 'usol') return 1;
-                                return 0;
-                            });
-                            mercId = available[0].id;
-                            console.log('[COR3 Helper] Auto-choose merc: selected', available[0].callsign, '(' + available[0]._market + ') cost:', configs[available[0].id].totalCost);
-                        } else {
-                            console.log('[COR3 Helper] Auto-send: no fitting merc available after filtering');
-                            chrome.storage.local.set({ mercWarning: 'No fitting merc available — all mercs filtered out or unavailable.' + (_autoSendUsolSkipped ? ' (USOL market unreachable)' : '') });
-                            setAutoSendUsolSkipped(false);
-                            setAutoSendMercRetryCount(0);
-                            setAutoSendInProgress(false);
-                            _automationFinish('auto-send');
-                            return;
-                        }
+                            const marketA = a._market === 'usol' ? 0 : 1;
+                            const marketB = b._market === 'usol' ? 0 : 1;
+                            if (marketA !== marketB) return marketA - marketB;
+
+                            const costA = Number.isFinite(Number(configs[a.id].totalCost)) ? Number(configs[a.id].totalCost) : Infinity;
+                            const costB = Number.isFinite(Number(configs[b.id].totalCost)) ? Number(configs[b.id].totalCost) : Infinity;
+                            if (costA !== costB) return costA - costB;
+
+                            const riskA = Number.isFinite(Number(configs[a.id].riskScore)) ? Number(configs[a.id].riskScore) : 0;
+                            const riskB = Number.isFinite(Number(configs[b.id].riskScore)) ? Number(configs[b.id].riskScore) : 0;
+                            if (riskA !== riskB) return riskA - riskB;
+
+                            return String(a.callsign || a.name || '').localeCompare(String(b.callsign || b.name || ''));
+                        });
+                        mercId = available[0].id;
+                        chrome.storage.local.remove('mercWarning');
+                        console.log('[COR3 Helper] Auto-choose merc: selected', available[0].callsign, '(' + available[0]._market + ', ' + (available[0]._isElite ? 'elite' : 'normal') + ') cost:', configs[available[0].id].totalCost);
+                    } else {
+                        console.log('[COR3 Helper] Auto-send: no available mercenary with configure data');
+                        chrome.storage.local.set({ mercWarning: 'Auto expedition paused: no available mercenary with expedition data. All candidates may be resting or missing configure data.' + (_autoSendUsolSkipped ? ' USOL market is unreachable.' : '') });
+                        setAutoSendUsolSkipped(false);
+                        setAutoSendMercRetryCount(0);
+                        setAutoSendInProgress(false);
+                        _automationFinish('auto-send');
+                        return;
                     }
                     setAutoSendUsolSkipped(false);
                     proceedWithMerc(mercId, allMercs, settings, localData);
@@ -302,15 +300,14 @@ export function setupWsRelay() {
                 console.log('[COR3 Helper] Auto-send: open.container failed:', msg);
                 if (msg === 'insufficient-credits') {
                     chrome.storage.sync.get('autoSendMerc', (settings) => {
-                        if (settings.autoSendMerc) {
-                            chrome.storage.sync.set({
-                                autoSendMerc: {
-                                    ...settings.autoSendMerc,
-                                    enabled: false,
-                                    disabledReason: 'insufficient_credits'
-                                }
-                            });
-                        }
+                        const merc = settings.autoSendMerc || {};
+                        chrome.storage.sync.set({
+                            autoSendMerc: {
+                                enabled: false,
+                                hasInsurance: !!merc.hasInsurance,
+                                disabledReason: 'insufficient_credits'
+                            }
+                        });
                     });
                     chrome.storage.local.set({
                         expeditionLaunchError: {
@@ -358,15 +355,14 @@ export function setupWsRelay() {
         if (event.data && event.data.type === 'COR3_WS_INSUFFICIENT_CREDITS') {
             console.log('[COR3 Helper] Insufficient credits for expedition launch, disabling auto-send mercenary');
             chrome.storage.sync.get('autoSendMerc', (settings) => {
-                if (settings.autoSendMerc) {
-                    chrome.storage.sync.set({
-                        autoSendMerc: {
-                            ...settings.autoSendMerc,
-                            enabled: false,
-                            disabledReason: 'insufficient_credits'
-                        }
-                    });
-                }
+                const merc = settings.autoSendMerc || {};
+                chrome.storage.sync.set({
+                    autoSendMerc: {
+                        enabled: false,
+                        hasInsurance: !!merc.hasInsurance,
+                        disabledReason: 'insufficient_credits'
+                    }
+                });
             });
             chrome.storage.local.set({
                 expeditionLaunchError: {
@@ -419,6 +415,7 @@ export function setupWsRelay() {
         if (event.data && event.data.type === 'COR3_WS_EXPEDITION_LAUNCHED') {
             console.log('[COR3 Helper] Expedition launched successfully');
             setAutoSendMercRetryCount(0);
+            chrome.storage.local.remove('mercWarning');
         }
         if (event.data && event.data.type === 'COR3_WS_EXPEDITION_LAUNCH_ERROR') {
             console.log('[COR3 Helper] Expedition launch error:', event.data.error);

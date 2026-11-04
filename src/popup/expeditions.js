@@ -1,16 +1,12 @@
 // --- Expedition Info + Decisions (inline) ---
 import { getCor3Tab, formatTimeRemaining } from './utils.js';
 import { el, clearEl, noDataMsg } from './dom-helpers.js';
-import { updateExpeditionAlarmOptions } from './alarms.js';
 import { refreshAllTimestamps } from './timestamps.js';
 import { state } from './state.js';
 import { savePinnedState, renderPinnedTimers } from './pinned-timers.js';
-import { pickBestOption } from '../shared/decision-policy.js';
+import { t, translateErrorText } from './i18n.js';
 
 const expeditionInfoContainer = document.getElementById('expeditionInfoContainer');
-const decisionsContainer = document.getElementById('decisionsContainer');
-const decisionsSectionToggle = document.getElementById('decisionsSectionToggle');
-const decisionsSectionBody = document.getElementById('decisionsSectionBody');
 
 const personalDroneSectionToggle = document.getElementById('personalDroneSectionToggle');
 const personalDroneSectionBody = document.getElementById('personalDroneSectionBody');
@@ -22,11 +18,6 @@ if (personalDroneSectionToggle && personalDroneSectionBody) {
     });
 }
 
-decisionsSectionToggle.addEventListener('click', () => {
-    decisionsSectionToggle.classList.toggle('open');
-    decisionsSectionBody.classList.toggle('open');
-});
-
 // On popup open: load cached expeditions (no WS requests)
 loadExpeditions();
 
@@ -34,9 +25,9 @@ function renderExpeditionError(error) {
     const now = Date.now();
     if (error.noRetry) {
         return el('div', { className: 'warning-banner', style: 'background:rgba(255,80,80,0.15);border-color:var(--accent-red);color:var(--accent-red);' },
-            el('div', { style: { fontWeight: 'bold', marginBottom: '4px' } }, '❌ Expedition Error'),
-            el('div', { style: { fontSize: '10px' } }, error.error),
-            el('div', { style: { fontSize: '10px', marginTop: '4px' } }, 'Re-enable auto-send mercenary to retry.')
+            el('div', { style: { fontWeight: 'bold', marginBottom: '4px' } }, t('❌ Expedition Error', '❌ 远征错误')),
+            el('div', { style: { fontSize: '10px' } }, translateErrorText(error.error)),
+            el('div', { style: { fontSize: '10px', marginTop: '4px' } }, t('Re-enable Auto expedition to retry.', '请重新启用“自动远征”后重试。'))
         );
     }
     const retryAfter = error.retryAfter || 120000;
@@ -44,9 +35,9 @@ function renderExpeditionError(error) {
     if (timeUntilRetry > 0) {
         const retryMinutes = Math.ceil(timeUntilRetry / 60000);
         return el('div', { className: 'warning-banner', style: 'background:rgba(255,165,0,0.15);border-color:var(--accent-orange);color:var(--accent-orange);' },
-            el('div', { style: { fontWeight: 'bold', marginBottom: '4px' } }, '⚠️ Expedition Launch Failed'),
-            el('div', { style: { fontSize: '10px' } }, error.error),
-            el('div', { style: { fontSize: '10px', marginTop: '4px' } }, `Retrying in ${retryMinutes} minute${retryMinutes !== 1 ? 's' : ''}...`)
+            el('div', { style: { fontWeight: 'bold', marginBottom: '4px' } }, t('⚠️ Expedition Launch Failed', '⚠️ 远征派遣失败')),
+            el('div', { style: { fontSize: '10px' } }, translateErrorText(error.error)),
+            el('div', { style: { fontSize: '10px', marginTop: '4px' } }, t(`Retrying in ${retryMinutes} minute${retryMinutes !== 1 ? 's' : ''}...`, `将在 ${retryMinutes} 分钟后重试...`))
         );
     }
     chrome.storage.local.remove('expeditionLaunchError');
@@ -177,166 +168,9 @@ export function renderExpeditionInfo(expeditions) {
     });
 }
 
-export function renderDecisions(decisions) {
-    clearEl(decisionsContainer);
-    const countEl = document.getElementById('decisionsCount');
-
-    if (!decisions || decisions.length === 0) {
-        decisionsContainer.appendChild(noDataMsg('No pending decisions found.'));
-        if (countEl) countEl.textContent = '';
-        return;
-    }
-
-    const pending = decisions.filter(d => !d.isResolved);
-    if (countEl) countEl.textContent = pending.length > 0 ? `(${pending.length} pending)` : '';
-
-    let activeConfirmEl = null;
-    let confirmTimeout = null;
-
-    for (const d of decisions) {
-        const card = document.createElement('div');
-        card.className = 'decision-card';
-
-        let statusTag;
-        if (d.isResolved && d.isAutoResolved) {
-            statusTag = el('span', { className: 'auto-resolved-tag' }, 'AUTO-RESOLVED');
-        } else if (d.isResolved) {
-            statusTag = el('span', { className: 'resolved-tag' }, 'RESOLVED');
-        } else {
-            statusTag = el('span', { className: 'pending-tag' }, 'PENDING');
-        }
-
-        const mercInfo = el('div', { className: 'merc-info' },
-            `🧑 ${d.mercenaryCallsign} — ${d.locationName} / ${d.zoneName} `, statusTag
-        );
-        card.appendChild(mercInfo);
-        card.appendChild(el('div', { className: 'msg-content' }, d.content));
-
-        // Deadline
-        const isExpired = d.decisionDeadline && new Date(d.decisionDeadline) <= new Date();
-        if (d.decisionDeadline) {
-            const dl = new Date(d.decisionDeadline);
-            const diffMs = dl - new Date();
-            if (diffMs > 0) {
-                const mins = Math.floor(diffMs / 60000);
-                const hrs = Math.floor(mins / 60);
-                const remMins = mins % 60;
-                card.appendChild(el('div', { className: 'deadline' }, `⏳ Deadline: ${hrs}h ${remMins}m remaining`));
-            } else {
-                card.appendChild(el('div', { className: 'deadline' }, '⏳ Deadline: Expired'));
-            }
-        }
-
-        // Options
-        const canClick = !d.isResolved && !isExpired;
-        if (Array.isArray(d.decisionOptions)) {
-            for (const opt of d.decisionOptions) {
-                const isSelected = d.selectedOption === opt.id;
-                const isDefault = (d.isAutoResolved && d.selectedOption === opt.id);
-                const riskSign = opt.riskModifier > 0 ? '+' : '';
-                const lootSign = opt.lootModifier > 0 ? '+' : '';
-                const selectedLabel = isSelected ? (isDefault ? " (⏳Expired⏳)" : ' ✓') : '';
-
-                const optRow = el('div', {
-                    className: 'option-row' + (isSelected ? ' option-selected' : '') + (canClick ? ' clickable' : ''),
-                    dataset: { optId: opt.id, expId: d.expeditionId, msgId: d.messageId }
-                },
-                    el('span', { className: 'option-label' }, opt.label + selectedLabel),
-                    el('span', { className: 'option-stats' },
-                        el('span', { className: 'stat-risk' }, `Risk: ${riskSign}${opt.riskModifier}`),
-                        el('span', { className: 'stat-loot' }, `Loot: ${lootSign}${opt.lootModifier}`)
-                    )
-                );
-
-                if (canClick) {
-                    optRow.addEventListener('click', async () => {
-                        const optId = optRow.dataset.optId;
-                        const expId = optRow.dataset.expId;
-                        const msgId = optRow.dataset.msgId;
-                        if (!optId || !expId || !msgId) return;
-
-                        if (!optRow.classList.contains('confirming')) {
-                            if (activeConfirmEl && activeConfirmEl !== optRow) {
-                                activeConfirmEl.classList.remove('confirming');
-                            }
-                            if (confirmTimeout) clearTimeout(confirmTimeout);
-                            optRow.classList.add('confirming');
-                            activeConfirmEl = optRow;
-                            confirmTimeout = setTimeout(() => {
-                                optRow.classList.remove('confirming');
-                                activeConfirmEl = null;
-                            }, 3000);
-                            return;
-                        }
-
-                        if (confirmTimeout) clearTimeout(confirmTimeout);
-                        optRow.classList.remove('confirming');
-                        activeConfirmEl = null;
-                        optRow.style.opacity = '0.5';
-                        try {
-                            const tab = await getCor3Tab();
-                            if (tab) {
-                                await chrome.tabs.sendMessage(tab.id, {
-                                    action: 'respondDecision',
-                                    expeditionId: expId,
-                                    messageId: msgId,
-                                    selectedOption: optId
-                                });
-                                setTimeout(() => requestExpeditions(), 2000);
-                            }
-                        } catch (e) { /* not reachable */ }
-                    });
-                }
-
-                card.appendChild(optRow);
-            }
-        }
-
-        decisionsContainer.appendChild(card);
-    }
-}
-
-const autoChosenDecisions = new Set();
-export async function checkAutoChoose(decisions) {
-    if (!decisions || decisions.length === 0) return;
-
-    const settings = await chrome.storage.sync.get(['autoSendMerc', 'aggressiveDecisions', 'decisionModifiers']);
-    const merc = settings.autoSendMerc || {};
-    const enabled = merc.autoResolveDecisions !== undefined
-        ? !!merc.autoResolveDecisions
-        : !!(settings.decisionModifiers && settings.decisionModifiers.autoChoose);
-    if (!enabled) return;
-    const aggressive = !!settings.aggressiveDecisions;
-
-    for (const d of decisions) {
-        if (!d || d.isResolved || !Array.isArray(d.decisionOptions)) continue;
-        if (autoChosenDecisions.has(d.messageId)) continue;
-        if (d.decisionDeadline && new Date(d.decisionDeadline).getTime() <= Date.now()) continue;
-
-        const bestOpt = pickBestOption(d.decisionOptions, aggressive);
-        if (!bestOpt) continue;
-
-        autoChosenDecisions.add(d.messageId);
-        try {
-            const tab = await getCor3Tab();
-            if (tab) {
-                await chrome.tabs.sendMessage(tab.id, {
-                    action: 'respondDecision',
-                    expeditionId: d.expeditionId,
-                    messageId: d.messageId,
-                    selectedOption: bestOpt.id
-                });
-                console.log(`[COR3 Helper] Auto-resolved "${bestOpt.label}" (${aggressive ? 'aggressive' : 'normal'})`);
-            }
-        } catch (e) { /* silent */ }
-    }
-}
-
 export async function loadExpeditions() {
-    const { expeditionsData, expeditionDecisions } = await chrome.storage.local.get(['expeditionsData', 'expeditionDecisions']);
+    const { expeditionsData } = await chrome.storage.local.get('expeditionsData');
     renderExpeditionInfo(expeditionsData || []);
-    renderDecisions(expeditionDecisions || []);
-    updateExpeditionAlarmOptions(expeditionsData || []);
     refreshAllTimestamps();
 
     setInterval(() => {
@@ -378,7 +212,6 @@ export async function requestExpeditions() {
         if (!loaded) {
             loaded = true;
             expeditionInfoContainer.replaceChildren(noDataMsg('No active expeditions.'));
-            decisionsContainer.replaceChildren(noDataMsg('No pending decisions found.'));
         }
     }, 5000);
 }

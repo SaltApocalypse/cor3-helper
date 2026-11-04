@@ -8,7 +8,6 @@ import './auto-send.js';
 import './mail.js';
 import './drone.js';
 import './stash-sort.js';
-import './alarms.js';
 import './auto-refresh.js';
 import './solvers.js';
 import './dom-tweaks.js';
@@ -34,11 +33,23 @@ setTimeout(() => {
     });
 }, 5000);
 
+// Keep the page-world mercenary configure requests aware of the insurance setting.
+function relayMercInsurance() {
+    chrome.storage.sync.get('autoSendMerc', (data) => {
+        window.postMessage({
+            type: 'COR3_SET_MERC_INSURANCE',
+            hasInsurance: !!(data.autoSendMerc && data.autoSendMerc.hasInsurance)
+        }, '*');
+    });
+}
+relayMercInsurance();
+
 // Listen for autoSendMerc changes (dispatch or auto-claim) to re-check expeditions.
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'sync' || !changes.autoSendMerc) return;
+    relayMercInsurance();
     const newVal = changes.autoSendMerc.newValue || {};
-    if (newVal.enabled || newVal.autoClaim === true) {
+    if (newVal.enabled) {
         console.log('[COR3 Helper] Auto-send settings changed — checking expedition data');
         chrome.storage.local.get('expeditionsData', (result) => {
             if (result.expeditionsData) {
