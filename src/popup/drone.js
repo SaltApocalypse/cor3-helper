@@ -1,35 +1,19 @@
 // Personal Drone Assembling — UI + control logic.
-import { _h, _noData, _clearEl } from './dom-helpers.js';
+import { _h, _noData } from './dom-helpers.js';
 import { getCor3Tab, formatTimeRemaining, showLastUpdated, waitForStorageKey } from './utils.js';
 import { state } from './state.js';
 import { savePinnedState, renderPinnedTimers } from './pinned-timers.js';
-import { t, onLangChange } from './i18n.js';
+import { t, getUiLang, onLangChange, translateErrorText, translateStatus } from './i18n.js';
 
 const refreshDroneBtn = document.getElementById('refreshDroneBtn');
 const personalDroneContainer = document.getElementById('personalDroneContainer');
 const personalDroneLastUpdated = document.getElementById('personalDroneLastUpdated');
 const droneWarning = document.getElementById('droneWarning');
-const droneLocationSelect = document.getElementById('droneLocationSelect');
-const droneMissionSelect = document.getElementById('droneMissionSelect');
-const droneMissionSelectRow = document.getElementById('droneMissionSelectRow');
 const autoDroneToggle = document.getElementById('autoDroneToggle');
-const autoDroneClaimToggle = document.getElementById('autoDroneClaimToggle');
-const autoDroneDecideToggle = document.getElementById('autoDroneDecideToggle');
-const autoChooseDroneLocationToggle = document.getElementById('autoChooseDroneLocationToggle');
-const autoDroneFullChargeToggle = document.getElementById('autoDroneFullChargeToggle');
 const autoDroneRepairToggle = document.getElementById('autoDroneRepairToggle');
-const droneRepairThresholdInput = document.getElementById('droneRepairThresholdInput');
-const autoDroneRepairOnLowBatteryToggle = document.getElementById('autoDroneRepairOnLowBatteryToggle');
-const droneLowBatteryThresholdInput = document.getElementById('droneLowBatteryThresholdInput');
-const autoDronePauseOnFailToggle = document.getElementById('autoDronePauseOnFailToggle');
 
 const droneActiveContainer = document.getElementById('droneActiveContainer');
 const droneActiveLastUpdated = document.getElementById('droneActiveLastUpdated');
-const droneDecisionsToggle = document.getElementById('droneDecisionsToggle');
-const droneDecisionsSectionBody = document.getElementById('droneDecisionsSectionBody');
-const droneDecisionsContainer = document.getElementById('droneDecisionsContainer');
-const droneDecisionsCount = document.getElementById('droneDecisionsCount');
-const droneDecisionsLastUpdated = document.getElementById('droneDecisionsLastUpdated');
 const droneArchivedToggle = document.getElementById('droneArchivedToggle');
 const droneArchivedSectionBody = document.getElementById('droneArchivedSectionBody');
 const droneArchivedContainer = document.getElementById('droneArchivedContainer');
@@ -39,37 +23,26 @@ const refreshDroneArchivedBtn = document.getElementById('refreshDroneArchivedBtn
 const droneExpActiveToggle = document.getElementById('droneExpActiveToggle');
 const droneExpActiveBody = document.getElementById('droneExpActiveBody');
 
-function wireSection(toggleId, bodyId) {
-    const toggle = document.getElementById(toggleId);
-    const body = document.getElementById(bodyId);
-    if (!toggle || !body) return;
-    toggle.addEventListener('click', () => {
-        toggle.classList.toggle('open');
-        body.classList.toggle('open');
-    });
-}
-wireSection('droneDispatchToggle', 'droneDispatchBody');
-wireSection('droneAdvancedToggle', 'droneAdvancedBody');
-
 let _droneData = null;
 let _droneMissionData = null;
 let _droneArchivedLoaded = false;
+let _droneSettings = { enabled: false, paused: false, repairEnabled: false };
+let _localWarning = '';
 
 // --- Settings -----------------------------------------------------------
+function normalizeDroneSettings(raw) {
+    const cfg = raw || {};
+    return {
+        enabled: !!cfg.enabled,
+        paused: !!cfg.paused,
+        repairEnabled: !!cfg.repairEnabled
+    };
+}
+
 function droneSettingsToStorage() {
     return {
         enabled: autoDroneToggle ? autoDroneToggle.checked : false,
-        autoClaim: autoDroneClaimToggle ? autoDroneClaimToggle.checked : true,
-        autoDecide: autoDroneDecideToggle ? autoDroneDecideToggle.checked : true,
-        autoChooseLocation: autoChooseDroneLocationToggle ? autoChooseDroneLocationToggle.checked : false,
-        fullChargeBeforeLaunch: autoDroneFullChargeToggle ? autoDroneFullChargeToggle.checked : false,
-        locationConfigId: droneLocationSelect ? droneLocationSelect.value : '',
-        missionConfigId: droneMissionSelect ? droneMissionSelect.value : '',
-        repairEnabled: autoDroneRepairToggle ? autoDroneRepairToggle.checked : false,
-        repairThreshold: droneRepairThresholdInput ? (parseInt(droneRepairThresholdInput.value, 10) || 60) : 60,
-        repairOnLowBattery: autoDroneRepairOnLowBatteryToggle ? autoDroneRepairOnLowBatteryToggle.checked : false,
-        lowBatteryThreshold: droneLowBatteryThresholdInput ? (parseInt(droneLowBatteryThresholdInput.value, 10) || 30) : 30,
-        pauseOnRepairFail: autoDronePauseOnFailToggle ? autoDronePauseOnFailToggle.checked : true
+        repairEnabled: autoDroneRepairToggle ? autoDroneRepairToggle.checked : false
     };
 }
 
@@ -80,39 +53,38 @@ function saveDroneSettings() {
     });
 }
 
-function updateDroneMissionSelectRow() {
-    if (autoChooseDroneLocationToggle && droneMissionSelectRow) {
-        droneMissionSelectRow.style.display = autoChooseDroneLocationToggle.checked ? 'none' : 'flex';
-    }
-}
-
-function updateDroneWarning(cfg) {
+function setDroneWarningText(text) {
     if (!droneWarning) return;
-    if (cfg && cfg.paused) {
-        droneWarning.textContent = '⚠️ Auto-drone is paused. Re-enable auto-dispatch to resume.';
-        droneWarning.style.display = '';
-    } else {
+    if (!text) {
         droneWarning.style.display = 'none';
+        droneWarning.textContent = '';
+        return;
     }
+    droneWarning.textContent = '⚠️ ' + translateErrorText(text);
+    droneWarning.style.borderColor = 'var(--accent-orange)';
+    droneWarning.style.color = 'var(--accent-orange)';
+    droneWarning.style.background = 'rgba(255,160,0,0.15)';
+    droneWarning.style.display = '';
 }
 
-function populateDroneSelects() {
-    if (!droneLocationSelect || !droneMissionSelect || !_droneData) return;
-    const locations = (_droneData.locations || []);
-    const prevLoc = droneLocationSelect.value;
-    const prevMis = droneMissionSelect.value;
-    droneLocationSelect.replaceChildren();
-    for (const loc of locations) {
-        droneLocationSelect.appendChild(_h('option', { value: loc.id }, loc.name));
-    }
-    if (locations.length === 0) { droneMissionSelect.replaceChildren(); return; }
-    const selLoc = locations.find(l => l.id === prevLoc) || locations[0];
-    droneLocationSelect.value = selLoc.id;
-    droneMissionSelect.replaceChildren();
-    for (const m of (selLoc.missions || [])) {
-        droneMissionSelect.appendChild(_h('option', { value: m.id }, m.name));
-    }
-    if (selLoc.missions && selLoc.missions.some(m => m.id === prevMis)) droneMissionSelect.value = prevMis;
+function renderDroneWarning(cfg) {
+    const parts = [];
+    if (cfg && cfg.paused) parts.push('Auto drone paused. Re-enable Auto expedition to resume.');
+    if (_localWarning) parts.push(_localWarning);
+    setDroneWarningText(parts.join(' '));
+}
+
+function updateDroneWarning(cfg, localWarning) {
+    _droneSettings = normalizeDroneSettings(cfg);
+    if (localWarning !== undefined) _localWarning = localWarning || '';
+    renderDroneWarning(_droneSettings);
+}
+
+function applySettingsToUi(raw) {
+    _droneSettings = normalizeDroneSettings(raw);
+    if (autoDroneToggle) autoDroneToggle.checked = _droneSettings.enabled;
+    if (autoDroneRepairToggle) autoDroneRepairToggle.checked = _droneSettings.repairEnabled;
+    renderDroneWarning(_droneSettings);
 }
 
 // --- Rendering ----------------------------------------------------------
@@ -193,33 +165,6 @@ function renderDroneActive() {
     });
 }
 
-function renderDroneDecisions() {
-    if (!droneDecisionsContainer) return;
-    const mission = _droneMissionData;
-    const isRunning = mission && _droneData && _droneData.activeMissionId && mission.status === 'RUNNING';
-    const events = isRunning && Array.isArray(mission.channelEvents) ? mission.channelEvents : [];
-    const decisions = events.filter(e => e.type === 'DECISION' || e.type === 'HAZARD');
-    if (droneDecisionsCount) droneDecisionsCount.textContent = decisions.length ? `(${decisions.length})` : '';
-    if (!isRunning || decisions.length === 0) {
-        droneDecisionsContainer.replaceChildren(_noData(t('No active mission decisions.', '没有进行中的任务决策。')));
-        return;
-    }
-    const frag = document.createDocumentFragment();
-    for (const ev of decisions) {
-        const chosen = (Array.isArray(mission.resolvedEvents) ? mission.resolvedEvents : []).find(r => r.eventId === ev.eventId);
-        const chosenLabel = chosen && Array.isArray(ev.options) ? (ev.options.find(o => o.id === chosen.optionId) || {}).label : null;
-        const statusColor = ev.isResolved ? 'var(--accent-green)' : 'var(--accent-orange)';
-        const row = _h('div', { style: 'font-size:10px;color:var(--text-muted);padding:4px 0;border-bottom:1px solid var(--border);' },
-            _h('div', { style: 'display:flex;justify-content:space-between;gap:6px;' },
-                _h('span', { style: `font-weight:bold;color:${ev.type === 'DECISION' ? 'var(--accent-cyan)' : 'var(--accent-red)'};` }, `${ev.type === 'DECISION' ? '🧭' : '⚠️'} ${ev.type === 'DECISION' ? t('DECISION', '决策') : t('HAZARD', '危险')}`),
-                _h('span', { style: `color:${statusColor};` }, ev.isResolved ? t('Resolved', '已处理') : t('Pending', '待处理'))),
-            _h('div', null, ev.message || ''),
-            chosenLabel ? _h('div', { style: 'color:var(--accent-green);' }, `✔ ${chosenLabel}`) : null);
-        frag.appendChild(row);
-    }
-    droneDecisionsContainer.replaceChildren(frag);
-}
-
 function renderDroneArchived(data) {
     if (!droneArchivedContainer) return;
     let items = data;
@@ -228,29 +173,76 @@ function renderDroneArchived(data) {
         droneArchivedContainer.replaceChildren(_noData(t('No archived drone missions found.', '没有已归档的无人机任务。')));
         return;
     }
+    const locale = getUiLang() === 'zh' ? 'zh-CN' : undefined;
     const frag = document.createDocumentFragment();
     for (const m of items) {
         const outcome = (m.outcome || m.status || 'ARCHIVED').toUpperCase();
         let cls = 'outcome-full';
-        if (outcome.includes('PARTIAL')) cls = 'outcome-partial';
+        if (outcome.includes('SEVERELY') || outcome.includes('DESTROYED')) cls = 'outcome-death';
+        else if (outcome.includes('DAMAGED')) cls = 'outcome-partial';
+        else if (outcome.includes('PARTIAL')) cls = 'outcome-partial';
         else if (outcome.includes('FAIL')) cls = 'outcome-fail';
+
         const loc = (m.location && m.location.name) || '';
         const mis = (m.mission && m.mission.name) || '';
+        const infoParts = [`📍 ${loc || '--'}`];
+        if (m.finalRisk !== undefined) infoParts.push(`⚠️ ${t('Risk:', '风险：')} ${m.finalRisk}`);
+        if (m.damageDealt !== undefined) infoParts.push(`💥 ${t('Damage:', '损伤：')} ${m.damageDealt}`);
+
         const card = _h('div', { className: 'archived-exp-card' },
             _h('div', { className: 'archived-exp-header' },
                 _h('span', { className: 'archived-exp-merc' }, `🛩️ ${mis || '?'}`),
-                _h('span', { className: `outcome-tag ${cls}` }, outcome)),
-            _h('div', { className: 'archived-exp-info' },
-                `📍 ${loc || '--'}`,
-                _h('br'),
-                m.startTime ? `🕐 ${new Date(m.startTime).toLocaleString()}` : '',
-                _h('br'),
-                `${m.finalRisk !== undefined ? '⚠️ ' + t('Risk:', '风险：') + ' ' + m.finalRisk + ' · ' : ''}${m.damageDealt !== undefined ? '💥 ' + t('Dmg:', '伤害：') + ' ' + m.damageDealt : ''}`,
-                (m.loot && m.loot.length) ? _h('br') : null,
-                (m.loot && m.loot.length) ? `📦 ${t('Loot:', '战利品：')} ${m.loot.length} ${t('item(s)', '件')}` : ''));
+                _h('span', { className: `outcome-tag ${cls}` }, translateStatus(outcome))),
+            _h('div', { className: 'archived-exp-info' }, infoParts.join(' · ')));
+
+        const lootItems = Array.isArray(m.loot) ? m.loot : [];
+        if (lootItems.length > 0) {
+            const uid = 'drone_archived_' + m.id;
+            const lootHeader = _h('div', { className: 'expandable-header', dataset: { expand: uid } },
+                _h('span', { className: 'expand-arrow' }, '▶'),
+                _h('span', { className: 'expand-label' }, `📦 ${t(`Loot (${lootItems.length} items)`, `战利品（${lootItems.length} 件）`)}`));
+            const lootBody = _h('div', { className: 'expandable-body', id: uid });
+            for (const li of lootItems) {
+                const det = (li && typeof li === 'object' && li.item) ? li.item
+                    : (li && typeof li === 'object' ? li : { name: String(li) });
+                const imgSrc = det.imageUrl || det.image || '';
+                const row = _h('div', { style: 'font-size:10px;margin:2px 0;' });
+                if (imgSrc) {
+                    row.appendChild(_h('img', {
+                        src: imgSrc,
+                        style: 'width:24px;height:24px;border-radius:4px;vertical-align:middle;margin-right:4px;'
+                    }));
+                }
+                row.appendChild(document.createTextNode(det.name || det.id || '?'));
+                if (det.tier) {
+                    row.appendChild(_h('span', { className: 'tier-tag tier-tag-' + String(det.tier).toLowerCase() }, det.tier));
+                }
+                if (det.isCollected) {
+                    row.appendChild(_h('span', { style: 'color:var(--accent-green);font-size:9px;' }, ` ✓ ${t('Collected', '已收集')}`));
+                } else if (det.isDeleted) {
+                    row.appendChild(_h('span', { style: 'color:var(--accent-red);font-size:9px;' }, ` ✗ ${t('Deleted', '已删除')}`));
+                }
+                lootBody.appendChild(row);
+            }
+            card.appendChild(_h('div', { className: 'container-items' }, lootHeader, lootBody));
+        }
+
+        const completedTs = m.completedAt || m.endTime || m.startTime;
+        if (completedTs) {
+            card.appendChild(_h('span', { style: 'font-size:9px;color:var(--text-dim);display:flex;flex-direction:row-reverse;' },
+                `🕐 ${t('Completed', '完成于')} ${new Date(completedTs).toLocaleString(locale)}`));
+        }
         frag.appendChild(card);
     }
     droneArchivedContainer.replaceChildren(frag);
+    droneArchivedContainer.querySelectorAll('.expandable-header').forEach(hdr => {
+        hdr.addEventListener('click', () => {
+            hdr.classList.toggle('open');
+            const targetId = hdr.getAttribute('data-expand');
+            const body = document.getElementById(targetId);
+            if (body) body.classList.toggle('openExtended');
+        });
+    });
 }
 
 // --- Data loading -------------------------------------------------------
@@ -258,13 +250,10 @@ export async function loadDrone() {
     const { droneData, droneMissionData } = await chrome.storage.local.get(['droneData', 'droneMissionData']);
     _droneData = droneData || null;
     _droneMissionData = droneMissionData || null;
-    populateDroneSelects();
     renderDrone();
     renderDroneActive();
-    renderDroneDecisions();
     if (personalDroneLastUpdated) showLastUpdated(personalDroneLastUpdated, 'droneDataUpdatedAt');
     if (droneActiveLastUpdated) showLastUpdated(droneActiveLastUpdated, 'droneMissionUpdatedAt');
-    if (droneDecisionsLastUpdated) showLastUpdated(droneDecisionsLastUpdated, 'droneMissionUpdatedAt');
 }
 
 async function requestDrone() {
@@ -284,7 +273,7 @@ async function loadDroneArchived() {
 }
 
 async function requestDroneArchived() {
-    if (droneArchivedContainer) droneArchivedContainer.replaceChildren(_noData(t('Loading archived drone missions...', '正在加载已归档的无人机任务...')));
+    if (droneArchivedContainer) droneArchivedContainer.replaceChildren(_noData(t('Loading archived drone missions...', '正在加载已归档的无人机任务。')));
     try {
         const tab = await getCor3Tab();
         if (tab) await chrome.tabs.sendMessage(tab.id, { action: 'requestDroneArchived', cursor: null, limit: 20 });
@@ -305,9 +294,6 @@ if (refreshDroneArchivedBtn) refreshDroneArchivedBtn.addEventListener('click', (
 if (droneExpActiveToggle && droneExpActiveBody) {
     droneExpActiveToggle.addEventListener('click', () => { droneExpActiveToggle.classList.toggle('open'); droneExpActiveBody.classList.toggle('open'); });
 }
-if (droneDecisionsToggle && droneDecisionsSectionBody) {
-    droneDecisionsToggle.addEventListener('click', () => { droneDecisionsToggle.classList.toggle('open'); droneDecisionsSectionBody.classList.toggle('open'); });
-}
 if (droneArchivedToggle && droneArchivedSectionBody) {
     droneArchivedToggle.addEventListener('click', () => {
         droneArchivedToggle.classList.toggle('open');
@@ -316,46 +302,39 @@ if (droneArchivedToggle && droneArchivedSectionBody) {
     });
 }
 
-const droneToggleEls = [autoDroneToggle, autoDroneClaimToggle, autoDroneDecideToggle, autoChooseDroneLocationToggle, autoDroneFullChargeToggle, autoDroneRepairToggle, autoDroneRepairOnLowBatteryToggle, autoDronePauseOnFailToggle].filter(Boolean);
-droneToggleEls.forEach(el => {
+[autoDroneToggle, autoDroneRepairToggle].filter(Boolean).forEach(el => {
     el.addEventListener('change', () => {
-        if (el === autoChooseDroneLocationToggle) updateDroneMissionSelectRow();
-        if (el === autoDroneToggle && autoDroneToggle.checked) {
+        if (el === autoDroneToggle) {
+            const enabled = autoDroneToggle.checked;
             chrome.storage.sync.get('autoDrone', (data) => {
                 const existing = data.autoDrone || {};
-                chrome.storage.sync.set({ autoDrone: Object.assign({}, existing, droneSettingsToStorage(), { paused: false }) });
+                chrome.storage.sync.set({
+                    autoDrone: Object.assign({}, existing, droneSettingsToStorage(), { paused: false })
+                });
             });
+            _localWarning = '';
             chrome.storage.local.remove('droneWarning');
-            updateDroneWarning(null);
-            requestDrone();
+            updateDroneWarning({ enabled, paused: false, repairEnabled: autoDroneRepairToggle ? autoDroneRepairToggle.checked : false });
+            if (enabled) requestDrone();
         } else {
             saveDroneSettings();
         }
     });
 });
-if (droneRepairThresholdInput) droneRepairThresholdInput.addEventListener('change', saveDroneSettings);
-if (droneLowBatteryThresholdInput) droneLowBatteryThresholdInput.addEventListener('change', saveDroneSettings);
-if (droneLocationSelect) droneLocationSelect.addEventListener('change', () => { populateDroneSelects(); saveDroneSettings(); });
-if (droneMissionSelect) droneMissionSelect.addEventListener('change', saveDroneSettings);
 
 // --- Initial load + storage listeners -----------------------------------
 chrome.storage.sync.get('autoDrone', (data) => {
     const cfg = data.autoDrone || {};
-    if (autoDroneToggle) autoDroneToggle.checked = !!cfg.enabled;
-    if (autoDroneClaimToggle) autoDroneClaimToggle.checked = cfg.autoClaim !== false;
-    if (autoDroneDecideToggle) autoDroneDecideToggle.checked = cfg.autoDecide !== false;
-    if (autoChooseDroneLocationToggle) autoChooseDroneLocationToggle.checked = !!cfg.autoChooseLocation;
-    if (autoDroneFullChargeToggle) autoDroneFullChargeToggle.checked = !!cfg.fullChargeBeforeLaunch;
-    if (autoDroneRepairToggle) autoDroneRepairToggle.checked = !!cfg.repairEnabled;
-    if (droneRepairThresholdInput) droneRepairThresholdInput.value = cfg.repairThreshold ?? 60;
-    if (autoDroneRepairOnLowBatteryToggle) autoDroneRepairOnLowBatteryToggle.checked = !!cfg.repairOnLowBattery;
-    if (droneLowBatteryThresholdInput) droneLowBatteryThresholdInput.value = cfg.lowBatteryThreshold ?? 30;
-    if (autoDronePauseOnFailToggle) autoDronePauseOnFailToggle.checked = cfg.pauseOnRepairFail !== false;
-    if (cfg.autoClaim === undefined) {
-        chrome.storage.sync.set({ autoDrone: Object.assign({}, cfg, { autoClaim: true }) });
+    applySettingsToUi(cfg);
+    chrome.storage.local.get('droneWarning', (local) => {
+        _localWarning = local.droneWarning || '';
+        renderDroneWarning(_droneSettings);
+    });
+    // Drop obsolete option fields after migration.
+    const allowed = new Set(['enabled', 'paused', 'repairEnabled']);
+    if (Object.keys(cfg).some(k => !allowed.has(k))) {
+        chrome.storage.sync.set({ autoDrone: normalizeDroneSettings(cfg) });
     }
-    updateDroneMissionSelectRow();
-    updateDroneWarning(cfg);
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -363,15 +342,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (changes.droneData || changes.droneMissionData) loadDrone();
     if (changes.droneArchivedData) loadDroneArchived();
     if (changes.droneWarning) {
-        const warn = changes.droneWarning.newValue;
-        if (warn && droneWarning) { droneWarning.textContent = '⚠️ ' + warn; droneWarning.style.display = ''; }
+        _localWarning = changes.droneWarning.newValue || '';
+        renderDroneWarning(_droneSettings);
     }
 });
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'sync' && changes.autoDrone && changes.autoDrone.newValue) {
-        const cfg = changes.autoDrone.newValue;
-        if (autoDroneToggle) autoDroneToggle.checked = !!cfg.enabled;
-        updateDroneWarning(cfg);
+        applySettingsToUi(changes.autoDrone.newValue);
     }
 });
 

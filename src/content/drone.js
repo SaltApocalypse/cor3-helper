@@ -48,16 +48,10 @@ function scheduleDroneOptionsRefresh(delayMs) {
     }, delayMs || 1000);
 }
 
-// Pick the mission to dispatch: manual selection when autoChooseLocation is off,
-// otherwise the cheapest (lowest battery cost) then lowest-risk then shortest mission.
-function pickDroneMission(options, cfg) {
+// Pick the mission to dispatch: lowest battery cost, then lowest location risk,
+// then shortest duration.
+function pickDroneMission(options) {
     if (!options || !options.locations || options.locations.length === 0) return null;
-    if (!cfg.autoChooseLocation) {
-        const loc = options.locations.find(l => l.id === cfg.locationConfigId) || options.locations[0];
-        if (!loc || !loc.missions || loc.missions.length === 0) return null;
-        const mis = loc.missions.find(m => m.id === cfg.missionConfigId) || loc.missions[0];
-        return mis ? Object.assign({}, mis, { locationConfigId: loc.id, _risk: loc.baseRisk || 0 }) : null;
-    }
     let best = null;
     for (const loc of options.locations) {
         for (const m of (loc.missions || [])) {
@@ -91,7 +85,7 @@ function checkAutoDrone() {
             // New mailbox flow: drone loot is delivered directly to the mailbox.
             // Ask the mailbox module to claim messages for this mission; it will
             // emit COR3_MAIL_CLAIMED when the mission's rewards are collected.
-            if (cfg.autoClaim !== false && options && options.drone && completed && completed.missionId &&
+            if (options && options.drone && completed && completed.missionId &&
                 (Array.isArray(completed.loot) ? completed.loot.some(i => !i.claimed) : true)) {
                 if (autoDroneClaimedMissionId !== completed.missionId) {
                     autoDroneClaimedMissionId = completed.missionId;
@@ -115,13 +109,12 @@ function checkAutoDrone() {
                 return;
             }
 
-            // Repair when durability is at/below threshold, or when battery is low (top-up during downtime)
+            // Repair when durability is at/below 60, or when battery is below 30
+            // (use the charging downtime to repair durability back to 100).
             if (cfg.repairEnabled) {
-                const threshold = typeof cfg.repairThreshold === 'number' ? cfg.repairThreshold : 60;
-                const lowBattThreshold = typeof cfg.lowBatteryThreshold === 'number' ? cfg.lowBatteryThreshold : 30;
                 const battCur = options.battery && typeof options.battery.current === 'number' ? options.battery.current : 100;
-                const needsDurabilityRepair = drone.durability <= threshold;
-                const needsLowBatteryRepair = !!cfg.repairOnLowBattery && battCur < lowBattThreshold && drone.durability < drone.maxDurability;
+                const needsDurabilityRepair = drone.durability <= 60;
+                const needsLowBatteryRepair = battCur < 30 && drone.durability < drone.maxDurability;
                 if (needsDurabilityRepair || needsLowBatteryRepair) {
                     console.log('[COR3 Helper] Auto-drone: repairing (durability', drone.durability, ', battery', battCur + ')');
                     _setDronePending('repair');
@@ -132,7 +125,7 @@ function checkAutoDrone() {
             }
 
             // Launch when battery is sufficient
-            const mission = pickDroneMission(options, cfg);
+            const mission = pickDroneMission(options);
             if (!mission) {
                 console.log('[COR3 Helper] Auto-drone: no mission available');
                 finish();
@@ -141,11 +134,6 @@ function checkAutoDrone() {
             const batt = options.battery;
             if (batt && typeof batt.current === 'number' && batt.current < (mission.batteryCost || 0)) {
                 console.log('[COR3 Helper] Auto-drone: battery', batt.current, '< cost', mission.batteryCost, '— waiting for recharge');
-                finish();
-                return;
-            }
-            if (cfg.fullChargeBeforeLaunch && batt && typeof batt.current === 'number' && typeof batt.max === 'number' && batt.current < batt.max) {
-                console.log('[COR3 Helper] Auto-drone: waiting for full charge (', batt.current, '/', batt.max, ')');
                 finish();
                 return;
             }
@@ -160,22 +148,21 @@ function checkAutoDrone() {
 // Auto-resolve in-mission DECISION/HAZARD events using the shared decision policy.
 // Prefer options that do not require a module we may not have.
 function checkAutoDroneDecide(eventData) {
-    chrome.storage.sync.get(['autoDrone', 'aggressiveDecisions'], (settings) => {
+    chrome.storage.sync.get('autoDrone', (settings) => {
         const cfg = settings.autoDrone || {};
-        if (!cfg.enabled || !cfg.autoDecide) return;
+        if (!cfg.enabled || cfg.paused) return;
         const ev = eventData && eventData.event;
         if (!ev || !ev.isResolvable || ev.isResolved) return;
         if (!Array.isArray(ev.options) || ev.options.length === 0) return;
         if (autoDroneResolvedEvents.has(ev.eventId)) return;
 
-        const aggressive = !!settings.aggressiveDecisions;
         const usable = ev.options.filter(o => o && !o.requiredModuleId);
         const pool = usable.length > 0 ? usable : ev.options;
-        const best = pickBestOption(pool, aggressive);
+        const best = pickBestOption(pool, true);
         if (!best) return;
 
         autoDroneResolvedEvents.add(ev.eventId);
-        console.log('[COR3 Helper] Auto-drone: resolving event', ev.type, '->', best.label, '(' + (aggressive ? 'aggressive' : 'normal') + ')');
+        console.log('[COR3 Helper] Auto-drone: resolving event', ev.type, '->', best.label, '(aggressive)');
         window.postMessage({ type: 'COR3_RESOLVE_DRONE_EVENT', missionId: eventData.missionId, eventId: ev.eventId, optionId: best.id }, '*');
     });
 }
@@ -234,10 +221,8 @@ function handleDroneError(action, error) {
         const cfg = settings.autoDrone || {};
         if (action === 'repair') {
             chrome.storage.local.set({ droneWarning: 'Drone repair failed: ' + msg });
-            if (cfg.pauseOnRepairFail !== false) {
-                console.log('[COR3 Helper] Auto-drone: pausing after repair failure');
-                chrome.storage.sync.set({ autoDrone: Object.assign({}, cfg, { paused: true }) });
-            }
+            console.log('[COR3 Helper] Auto-drone: pausing after repair failure');
+            chrome.storage.sync.set({ autoDrone: Object.assign({}, cfg, { paused: true }) });
         } else {
             chrome.storage.local.set({ droneWarning: 'Drone ' + action + ' failed: ' + msg });
         }
@@ -276,7 +261,7 @@ window.addEventListener('message', (event) => {
     } else if (type === 'COR3_WS_DRONE_LAUNCHED') {
         console.log('[COR3 Helper] Auto-drone: mission launched');
         _clearDronePending();
-        chrome.storage.local.remove('droneCompleted');
+        chrome.storage.local.remove(['droneCompleted', 'droneWarning']);
         autoDroneClaimedMissionId = null;
     } else if (type === 'COR3_WS_DRONE_COMPLETED') {
         const completedData = event.data.data || {};
