@@ -1,7 +1,6 @@
 // chrome.runtime.onMessage listener — handles messages from popup/background
 
 import { isContextValid, _automationEnqueue, _automationFinish, setAutomationQueue, getAutomationQueue } from './helpers.js';
-import { setAlarms, resetAlarmTriggered, playAlarm, startContinuousAlarm, stopAlarm } from './alarms.js';
 import { setAutoRefreshSettings } from './auto-refresh.js';
 import { setMarketRefreshInProgress, setAutoUpdateMarketsLastRefresh, setAutoJobsActive, _marketRefreshInProgress, _autoUpdateMarketsLastRefresh } from './auto-update-markets.js';
 import {
@@ -34,22 +33,7 @@ function fetchDailyRewards(token) {
 
 export function setupMessageListener() {
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-        if (request.action === "updateAlarms") {
-            setAlarms(request.alarms || []);
-            resetAlarmTriggered();
-            sendResponse({ success: true });
-        } else if (request.action === "testAlarm") {
-            const vol = request.volume !== undefined ? request.volume : 50;
-            if (request.continuous) {
-                startContinuousAlarm(vol);
-            } else {
-                playAlarm(vol);
-            }
-            sendResponse({ success: true });
-        } else if (request.action === "stopAlarm") {
-            stopAlarm();
-            sendResponse({ success: true });
-        } else if (request.action === "requestExpeditions") {
+        if (request.action === "requestExpeditions") {
             window.postMessage({ type: 'COR3_REQUEST_EXPEDITIONS' }, '*');
             sendResponse({ success: true });
         } else if (request.action === "requestNetworkMap") {

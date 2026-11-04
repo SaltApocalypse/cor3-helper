@@ -2,7 +2,6 @@
 import { _h, _noData, _clearEl, _safeSetHtml } from './dom-helpers.js';
 import { getCor3Tab, formatTimeRemaining, waitForStorageKey } from './utils.js';
 import { refreshAllTimestamps } from './timestamps.js';
-import { TIMER_LABELS, alarmTimerSelect, renderAlarmList } from './alarms.js';
 import { renderPinnedTimers } from './pinned-timers.js';
 import { state, zoomList } from './state.js';
 import { findMaintenanceBlocker } from '../shared/server-map.js';
@@ -371,11 +370,7 @@ export function renderMarket(data) {
     if (data && data.market && data.market.marketName) {
         state.coreMarketName = data.market.marketName;
         updateMarketLabel(coreMarketLabel, state.coreMarketName, 'Market-1', '🏠');
-        TIMER_LABELS.home_jobs = state.coreMarketName + ' Jobs Reset';
-        const opt = alarmTimerSelect.querySelector('option[value="home_jobs"]');
-        if (opt) opt.textContent = TIMER_LABELS.home_jobs;
         renderPinnedTimers();
-        renderAlarmList();
     }
     renderMarketInto(marketContainer, data, 'Market-1', 'home');
 }
@@ -410,11 +405,7 @@ export function renderDarkMarket(data, available, maintenanceEndsAt, blockerServ
     if (data && data.market && data.market.marketName) {
         state.darkMarketName = data.market.marketName;
         updateMarketLabel(darkMarketLabel, state.darkMarketName, 'Market-2', '🌑');
-        TIMER_LABELS.dark_jobs = state.darkMarketName + ' Jobs Reset';
-        const opt = alarmTimerSelect.querySelector('option[value="dark_jobs"]');
-        if (opt) opt.textContent = TIMER_LABELS.dark_jobs;
         renderPinnedTimers();
-        renderAlarmList();
     }
     renderMarketInto(darkMarketContainer, data, 'Market-2', 'dark');
 }
@@ -449,11 +440,7 @@ export function renderSoyuzMarket(data, available, maintenanceEndsAt, blockerSer
     if (data && data.market && data.market.marketName) {
         state.soyuzMarketName = data.market.marketName;
         updateMarketLabel(soyuzMarketLabel, state.soyuzMarketName, 'Market-3', '☭');
-        TIMER_LABELS.soyuz_jobs = state.soyuzMarketName + ' Jobs Reset';
-        const opt = alarmTimerSelect.querySelector('option[value="soyuz_jobs"]');
-        if (opt) opt.textContent = TIMER_LABELS.soyuz_jobs;
         renderPinnedTimers();
-        renderAlarmList();
     }
     renderMarketInto(soyuzMarketContainer, data, 'Market-3', 'soyuz');
 }
@@ -488,11 +475,7 @@ export function renderUsolMarket(data, available, maintenanceEndsAt, blockerServ
     if (data && data.market && data.market.marketName) {
         state.usolMarketName = data.market.marketName;
         updateMarketLabel(usolMarketLabel, state.usolMarketName, 'Market-4', '☮');
-        TIMER_LABELS.usol_jobs = state.usolMarketName + ' Jobs Reset';
-        const opt = alarmTimerSelect.querySelector('option[value="usol_jobs"]');
-        if (opt) opt.textContent = TIMER_LABELS.usol_jobs;
         renderPinnedTimers();
-        renderAlarmList();
     }
     renderMarketInto(usolMarketContainer, data, 'Market-4', 'usol');
 }
@@ -736,9 +719,6 @@ export function initMarketStorageListener() {
                 if (md.market && md.market.marketName) {
                     state.coreMarketName = md.market.marketName;
                     updateMarketLabel(coreMarketLabel, state.coreMarketName, 'Market-1', '🏠');
-                    TIMER_LABELS.home_jobs = state.coreMarketName + ' Jobs Reset';
-                    const opt = alarmTimerSelect.querySelector('option[value="home_jobs"]');
-                    if (opt) opt.textContent = TIMER_LABELS.home_jobs;
                 }
                 renderMarket(md);
                 refreshAllTimestamps();
@@ -783,9 +763,6 @@ export function initMarketCacheLoad() {
             if (result.marketData.market && result.marketData.market.marketName) {
                 state.coreMarketName = result.marketData.market.marketName;
                 updateMarketLabel(coreMarketLabel, state.coreMarketName, 'Market-1', '🏠');
-                TIMER_LABELS.home_jobs = state.coreMarketName + ' Jobs Reset';
-                const opt = alarmTimerSelect.querySelector('option[value="home_jobs"]');
-                if (opt) opt.textContent = TIMER_LABELS.home_jobs;
             }
             renderMarket(result.marketData);
         } else {
@@ -797,9 +774,6 @@ export function initMarketCacheLoad() {
                 if (result.darkMarketData.market && result.darkMarketData.market.marketName) {
                     state.darkMarketName = result.darkMarketData.market.marketName;
                     updateMarketLabel(darkMarketLabel, state.darkMarketName, 'Market-2', '🌑');
-                    TIMER_LABELS.dark_jobs = state.darkMarketName + ' Jobs Reset';
-                    const opt = alarmTimerSelect.querySelector('option[value="dark_jobs"]');
-                    if (opt) opt.textContent = TIMER_LABELS.dark_jobs;
                 }
             }
             renderDarkMarket(result.darkMarketData || null, result.darkMarketAvailable, result.darkMarketMaintenanceEndsAt, result.darkMarketBlockerServer);
@@ -817,9 +791,6 @@ export function initMarketCacheLoad() {
                 if (result.soyuzMarketData.market && result.soyuzMarketData.market.marketName) {
                     state.soyuzMarketName = result.soyuzMarketData.market.marketName;
                     updateMarketLabel(soyuzMarketLabel, state.soyuzMarketName, 'Market-3', '☭');
-                    TIMER_LABELS.soyuz_jobs = state.soyuzMarketName + ' Jobs Reset';
-                    const opt = alarmTimerSelect.querySelector('option[value="soyuz_jobs"]');
-                    if (opt) opt.textContent = TIMER_LABELS.soyuz_jobs;
                 }
             }
             renderSoyuzMarket(result.soyuzMarketData || null, result.soyuzMarketAvailable, result.soyuzMarketMaintenanceEndsAt, result.soyuzMarketBlockerServer);
@@ -837,9 +808,6 @@ export function initMarketCacheLoad() {
                 if (result.usolMarketData.market && result.usolMarketData.market.marketName) {
                     state.usolMarketName = result.usolMarketData.market.marketName;
                     updateMarketLabel(usolMarketLabel, state.usolMarketName, 'Market-4', '☮');
-                    TIMER_LABELS.usol_jobs = state.usolMarketName + ' Jobs Reset';
-                    const opt = alarmTimerSelect.querySelector('option[value="usol_jobs"]');
-                    if (opt) opt.textContent = TIMER_LABELS.usol_jobs;
                 }
             }
             renderUsolMarket(result.usolMarketData || null, result.usolMarketAvailable, result.usolMarketMaintenanceEndsAt, result.usolMarketBlockerServer);

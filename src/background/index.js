@@ -109,10 +109,6 @@ scheduleAutoFinishAllBg();
 
 // --- Message listener ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === "alarmActiveStatus") {
-        sendResponse({ success: true });
-        return true;
-    }
     if (request.action === "scheduleAutoFinishAll") {
         scheduleAutoFinishAllBg();
         sendResponse({ success: true });
