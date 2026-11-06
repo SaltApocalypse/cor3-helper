@@ -7,7 +7,7 @@ A Chrome extension that enhances the [cor3.gg](https://cor3.gg) experience by mo
 > - Fork releases: [SaltApocalypse/cor3-helper/releases](https://github.com/SaltApocalypse/cor3-helper/releases)
 > - Upstream project and original author: [Femtoce11/cor3-helper](https://github.com/Femtoce11/cor3-helper)
 >
-> The extension's update checks point at this fork. Game-version data (`versions.json`) is mirrored from upstream and can also be synced manually with `npm run sync-versions`.
+> The extension's update checks point at this fork. Game-version data (`versions.json`) is merged with upstream without downgrading newer fork values; update it with `npm run sync-versions`.
 
 ## Affiliation & Disclaimer
 
@@ -27,9 +27,9 @@ The use of automation tools may be detectable by the site's developers and could
 - **Auto ICE Wall Hacking** — Automatically solves ICE Wall hacking minigame. Detects triangle patterns and clicks them in the correct sequence to complete the puzzle
 - **Auto Simple Decrypt Hacking** — Automatically solves Simple Decrypt hacking minigame. Clicks the decrypt button and monitors progress until completion
 - **Anti-AFK Clicker** — Automatically prevents the anti-AFK screen locker from appearing by simulating a click on the desktop wrapper every 3 minutes. Enabled internally whenever any automation feature starts (Auto Job Solver, Auto Valuable Seller, Auto Daily Hacking, hack solvers, etc.)
-- **Auto Daily Hacking** — Fully automated daily ops solver. Opens daily ops tab, starts the task, detects the puzzle type (System Log Integrity or Signal Hack), solves it end-to-end, closes windows, and auto-disables the toggle after completion. Includes retry logic (up to 3 attempts) with automatic window cleanup between retries
+- **Auto Daily Hacking** — Fully automated daily ops solver with a persistent switch. Once enabled it stays on: it checks on page load, skips if today’s task is already claimed, and schedules the next check from the API’s next reset time. It opens the daily ops tab, starts the task, detects the puzzle type by English or Chinese title (System Log Integrity / 系统日志完整性 or Signal Hack / 信号解码), solves it end-to-end, and closes windows. Successful runs keep the switch on and wait for the next reset; failed runs keep it on and retry later. A per-tab lock prevents duplicate runs. Diagnostic logs and the next check time are shown under the toggle. The game page must be open for automation; if the browser was closed, it checks again on the next page load
 - **Auto Job Solver** — Automated market job solver supporting 9 job types: File Decryption, IP Injection, Data Download, Log Deletion, Log Download, Decrypt & Extract, File Elimination, Data Upload, and IP Cleanup. Features a tabbed UI showing HOME, D4RK, SOYUZ, and USOL market jobs with per-type checkboxes, a start/stop button, and a debug console with Jobs and Logs tabs. Jobs are sorted by server priority (furthest first) and job type priority, automatically handle endpoint setting (with hack-through if unreachable), server login (with hack if no active access), type-specific actions, and job completion with reward tracking. Checks server maintenance status before each job and skips jobs on servers currently in maintenance. Includes dynamic loadout management — automatically equips the right hack/decrypt software before each job and retries with loadout swaps on power/software errors
-- **Auto Valuable Seller** — Automated valuable file/log scanner and seller. Scans all reachable servers for valuable files and logs, downloads them, and sells to the best market. Automatically equips optimal SEARCH and HACK software for each server type before scanning. Features a debug console with real-time progress logs, a server/download results UI, and a Maintenance tab with per-server checkbox selections and batch "Force selected!" for triggering multiple servers at once (furthest-to-closest order)
+- **Auto Valuable Seller** — Automated valuable file/log scanner and seller. Scans all reachable servers for valuable files and logs, downloads them, and sells to the best market. Use the sticky **Select All Results** control at the top of the Servers or Downloads list to select every result before starting the seller. Automatically equips optimal SEARCH and HACK software for each server type before scanning. Features a debug console with real-time progress logs, a server/download results UI, and a Maintenance tab with per-server checkbox selections and batch "Force selected!" for triggering multiple servers at once (furthest-to-closest order)
 - **Auto Dismiss Failed Jobs** — Toggle to automatically dismiss failed and bugged jobs after each solver run, keeping the job queue clean
 - **Auto Finish All Jobs** — Background scheduling that automatically starts the Auto Job Solver when new jobs become available after reset. Uses chrome.alarms to schedule runs at job reset times with retry logic. Works even when the popup is closed. Server maintenance–aware: skips jobs on servers currently in maintenance and schedules retries at the earlier of job reset or maintenance end.
 - **Market Path-Through** — When market servers (D4RK, SOYUZ, USOL) or USOL mercenary endpoints are unreachable (no-path-to-server), dynamically fetches the live network map, discovers all paths via DFS, filters out maintenance-blocked routes, and walks intermediate servers (set endpoint + hack) before retrying the target. Falls back to alternate paths if one fails mid-way.
@@ -160,7 +160,7 @@ git push origin v1.8.1-salta.1
 npm run sync-versions
 ```
 
-There is no scheduled sync. The release workflow only runs a `--check` and prints a warning if `versions.json` is stale; it does not block the release.
+There is no scheduled sync. The release workflow only runs a `--check` and prints a warning if `versions.json` is behind upstream; it does not block the release. Local fork values that are ahead of upstream are kept.
 
 Check-only mode:
 
@@ -179,9 +179,9 @@ To read the live values yourself:
 4. Update `versions.json` manually if needed:
    ```json
    {
-     "web": "v1.25.31",
+     "web": "v1.25.80",
      "system": "3.05",
-     "patch": "3.95.5"
+     "patch": "3.104.9"
    }
    ```
 
@@ -202,7 +202,7 @@ Where the values come from:
 - **Auto Decrypt Hacking** — Toggle the switch to enable. It automatically solves decryption hacks whenever one appears.
 - **Auto ICE Wall Hacking** — Toggle the switch to enable. It automatically solves ICE Wall hacking minigames by detecting and clicking triangle patterns.
 - **Auto Simple Decrypt Hacking** — Toggle the switch to enable. It automatically solves Simple Decrypt hacking minigames by clicking the decrypt button and monitoring progress.
-- **Auto Daily Hacking** — Toggle the switch to enable. It opens daily ops, starts the task, solves the puzzle automatically, and disables itself when done.
+- **Auto Daily Hacking** — Toggle the switch to enable. It stays enabled, checks on page load, runs when today’s task is available, and waits for the next reset after completion. The next automatic check time is shown under the toggle; use the diagnostics log if it stops early.
 - **Auto Job Solver** — Toggle the switch to reveal job selection UI. Choose job types from HOME, D4RK, SOYUZ, and USOL market tabs, then click Start. The debug console shows real-time job progress and logs. Toggle "Auto Finish All Jobs" for fully automatic operation.
 - **Set decision scores** by clicking edit button. After the change click save button to keep the changes. This way you can change default scoring that extension shows next to each decision.
 - **Enable auto choose decision** for extension to automatically choose best decision according to scoring which is calculated by default/modified loot/risk modifiers.

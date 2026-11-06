@@ -19,6 +19,301 @@ import {
     applyNotificationsLeft, removeNotificationsLeft
 } from './dom-tweaks.js';
 
+let _dailyHackStartInProgress = false;
+let _dailyHackAutoStarted = false;
+let _dailyHackAutoStartRetries = 0;
+let _dailyHackTimer = null;
+const _dailyHackOwnerId = `daily-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+const DAILY_HACK_LOCK_TTL_MS = 10 * 60 * 1000;
+const DAILY_HACK_RETRY_DELAY_MS = 30 * 60 * 1000;
+const DAILY_HACK_NEXT_GRACE_MS = 30 * 1000;
+const DAILY_HACK_FALLBACK_DELAY_MS = 24 * 60 * 60 * 1000;
+
+function postDailyHackDiag(step, message, details, level) {
+    window.postMessage({
+        type: 'COR3_DAILY_HACK_LOG',
+        timestamp: Date.now(),
+        step: step,
+        message: message,
+        level: level || 'info',
+        details: details || null
+    }, '*');
+}
+
+function clearDailyHackTimer() {
+    if (_dailyHackTimer) {
+        clearTimeout(_dailyHackTimer);
+        _dailyHackTimer = null;
+    }
+}
+
+function getNextDailyCheckAt(data, fallbackDelayMs) {
+    const nextTaskTime = data && data.nextTaskTime ? new Date(data.nextTaskTime).getTime() : 0;
+    if (Number.isFinite(nextTaskTime) && nextTaskTime > Date.now()) {
+        return nextTaskTime + DAILY_HACK_NEXT_GRACE_MS;
+    }
+    return Date.now() + (fallbackDelayMs || DAILY_HACK_FALLBACK_DELAY_MS);
+}
+
+function scheduleDailyHackCheck(at, reason) {
+    clearDailyHackTimer();
+    const now = Date.now();
+    const target = Math.max(now + 1000, Number(at) || (now + DAILY_HACK_FALLBACK_DELAY_MS));
+    const delay = target - now;
+    chrome.storage.local.set({ dailyHackNextCheckAt: target });
+    postDailyHackDiag('schedule.next', 'Next daily hack check scheduled', {
+        reason,
+        at: new Date(target).toISOString(),
+        delayMs: delay
+    });
+    _dailyHackTimer = setTimeout(() => {
+        _dailyHackTimer = null;
+        startDailyHackAutomation('scheduled');
+    }, Math.min(delay, 2147483647));
+}
+
+function scheduleDailyHackFromData(data, reason, fallbackDelayMs) {
+    scheduleDailyHackCheck(getNextDailyCheckAt(data, fallbackDelayMs), reason);
+}
+
+function setDailyHackResult(status, reason) {
+    chrome.storage.local.set({
+        dailyHackLastRunAt: Date.now(),
+        dailyHackLastResult: { status, reason: reason || null, at: Date.now() }
+    });
+}
+
+function releaseDailyHackLock() {
+    chrome.storage.local.get('dailyHackRunLock', ({ dailyHackRunLock }) => {
+        if (dailyHackRunLock && dailyHackRunLock.owner === _dailyHackOwnerId) {
+            chrome.storage.local.remove('dailyHackRunLock');
+        }
+    });
+}
+
+function acquireDailyHackLock(callback) {
+    chrome.storage.local.get('dailyHackRunLock', ({ dailyHackRunLock }) => {
+        const now = Date.now();
+        if (dailyHackRunLock && dailyHackRunLock.owner !== _dailyHackOwnerId &&
+            now - (dailyHackRunLock.startedAt || 0) < DAILY_HACK_LOCK_TTL_MS) {
+            postDailyHackDiag('lock.busy', 'Another tab is already running daily hack', {
+                owner: dailyHackRunLock.owner,
+                ageMs: now - (dailyHackRunLock.startedAt || 0)
+            }, 'warn');
+            callback(false);
+            return;
+        }
+
+        chrome.storage.local.set({
+            dailyHackRunLock: { owner: _dailyHackOwnerId, startedAt: now }
+        }, () => {
+            chrome.storage.local.get('dailyHackRunLock', ({ dailyHackRunLock: current }) => {
+                callback(!!current && current.owner === _dailyHackOwnerId);
+            });
+        });
+    });
+}
+
+function fetchDailyClaimState(token, callback) {
+    fetch('https://svc-corie.cor3.gg/api/user-daily-claim', {
+        headers: { 'Authorization': token }
+    })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => callback(null, data))
+        .catch(err => callback(err, null));
+}
+
+function startDailyHackAutomation(reason, force) {
+    const isAutoStart = reason === 'load' || reason === 'scheduled';
+    if (reason === 'load' && _dailyHackAutoStarted) return;
+    if (_dailyHackStartInProgress) {
+        postDailyHackDiag('auto.start', 'Daily hack start already in progress', { reason }, 'warn');
+        return;
+    }
+
+    chrome.storage.sync.get(['autoDailyHackEnabled', 'helperMode'], (settings) => {
+        if (!settings.autoDailyHackEnabled) {
+            if (isAutoStart) postDailyHackDiag('auto.start', 'Skipped: autoDailyHackEnabled is off', { reason });
+            return;
+        }
+        if (settings.helperMode) {
+            postDailyHackDiag('auto.start', 'Skipped: Helper-Only Mode is enabled', { reason }, 'warn');
+            return;
+        }
+
+        chrome.storage.local.get('dailyHackNextCheckAt', (local) => {
+            const nextAt = Number(local.dailyHackNextCheckAt) || 0;
+            if (!force && nextAt > Date.now()) {
+                postDailyHackDiag('schedule.skip', 'Daily hack check is not due yet', {
+                    reason,
+                    nextCheckAt: new Date(nextAt).toISOString()
+                });
+                scheduleDailyHackCheck(nextAt, 'not_due');
+                return;
+            }
+
+            _dailyHackStartInProgress = true;
+            postDailyHackDiag(isAutoStart ? 'auto.start' : 'toggle.enable', 'Auto Daily Hacking start requested', {
+                reason,
+                attempt: _dailyHackAutoStartRetries
+            });
+
+            chrome.storage.local.get('bearerToken', (result) => {
+                const token = result.bearerToken;
+                if (!token) {
+                    _dailyHackStartInProgress = false;
+                    postDailyHackDiag('auto.token', 'No bearer token yet', {
+                        reason,
+                        attempt: _dailyHackAutoStartRetries
+                    }, 'warn');
+                    if (reason === 'load' && _dailyHackAutoStartRetries < 10) {
+                        _dailyHackAutoStartRetries++;
+                        setTimeout(() => startDailyHackAutomation('load'), 3000);
+                    } else {
+                        scheduleDailyHackCheck(Date.now() + 60 * 1000, 'waiting_for_token');
+                    }
+                    return;
+                }
+
+                postDailyHackDiag('auto.token', 'Bearer token found — checking daily claim state', {
+                    reason,
+                    tokenLength: token.length
+                });
+                fetchDailyClaimState(token, (err, data) => {
+                    _dailyHackStartInProgress = false;
+                    if (err) {
+                        postDailyHackDiag('auto.api', 'Daily claim API failed — will retry later', {
+                            reason,
+                            error: String(err && err.message || err)
+                        }, 'warn');
+                        scheduleDailyHackCheck(Date.now() + DAILY_HACK_RETRY_DELAY_MS, 'api_failed');
+                        return;
+                    }
+
+                    if (data) {
+                        chrome.storage.local.set({ dailyOpsData: data, dailyOpsUpdatedAt: Date.now() });
+                        fetchDailyRewards(token);
+                    }
+                    postDailyHackDiag('auto.api', 'Daily claim state parsed', {
+                        reason,
+                        hasClaimedToday: !!(data && data.hasClaimedToday),
+                        nextTaskTime: data && data.nextTaskTime,
+                        currentStreak: data && data.currentStreak
+                    });
+
+                    if (data && data.hasClaimedToday) {
+                        postDailyHackDiag('auto.skip', 'Daily already claimed today — waiting for next reset', { reason }, 'warn');
+                        setDailyHackResult('claimed', 'already_claimed');
+                        scheduleDailyHackFromData(data, 'claimed', DAILY_HACK_FALLBACK_DELAY_MS);
+                        _dailyHackAutoStarted = true;
+                        _dailyHackAutoStartRetries = 0;
+                        return;
+                    }
+
+                    acquireDailyHackLock((locked) => {
+                        if (!locked) {
+                            scheduleDailyHackCheck(Date.now() + 2 * 60 * 1000, 'lock_busy');
+                            return;
+                        }
+                        postDailyHackDiag('auto.inject', 'Injecting daily hack solver', { reason });
+                        ensureAntiAfkEnabled();
+                        injectDailyHackSolver();
+                        _dailyHackAutoStarted = true;
+                        _dailyHackAutoStartRetries = 0;
+                        setDailyHackResult('running', reason);
+                    });
+                });
+            });
+        });
+    });
+}
+
+export function handleDailyHackRunFinished(result) {
+    _dailyHackStartInProgress = true;
+    releaseDailyHackLock();
+
+    const success = !!(result && result.success);
+    const reason = (result && result.reason) || (success ? 'success' : 'failed');
+    setDailyHackResult(success ? 'success' : 'failed', reason);
+
+    chrome.storage.sync.get(['autoDailyHackEnabled', 'helperMode'], (settings) => {
+        if (!settings.autoDailyHackEnabled || settings.helperMode) {
+            clearDailyHackTimer();
+            _dailyHackStartInProgress = false;
+            return;
+        }
+
+        if (!success) {
+            postDailyHackDiag('schedule.retry', 'Daily hack failed — retrying later', {
+                retryInMs: DAILY_HACK_RETRY_DELAY_MS
+            }, 'warn');
+            scheduleDailyHackCheck(Date.now() + DAILY_HACK_RETRY_DELAY_MS, 'retry_after_failure');
+            _dailyHackStartInProgress = false;
+            return;
+        }
+
+        chrome.storage.local.get('bearerToken', ({ bearerToken }) => {
+            if (!bearerToken) {
+                scheduleDailyHackCheck(Date.now() + DAILY_HACK_FALLBACK_DELAY_MS, 'success_no_token');
+                _dailyHackStartInProgress = false;
+                return;
+            }
+            fetchDailyClaimState(bearerToken, (err, data) => {
+                if (err) {
+                    scheduleDailyHackCheck(Date.now() + DAILY_HACK_FALLBACK_DELAY_MS, 'success_api_failed');
+                    _dailyHackStartInProgress = false;
+                    return;
+                }
+                if (data) {
+                    chrome.storage.local.set({ dailyOpsData: data, dailyOpsUpdatedAt: Date.now() });
+                }
+                scheduleDailyHackFromData(data, 'success', DAILY_HACK_FALLBACK_DELAY_MS);
+                _dailyHackStartInProgress = false;
+            });
+        });
+    });
+}
+
+export function autoStartDailyHackOnLoad() {
+    setTimeout(() => startDailyHackAutomation('load'), 3000);
+}
+
+function checkDailyHackIfDue(reason) {
+    if (_dailyHackStartInProgress) return;
+    chrome.storage.sync.get('autoDailyHackEnabled', (settings) => {
+        if (!settings.autoDailyHackEnabled) return;
+        chrome.storage.local.get('dailyHackNextCheckAt', ({ dailyHackNextCheckAt }) => {
+            const nextAt = Number(dailyHackNextCheckAt) || 0;
+            if (!nextAt || nextAt <= Date.now()) {
+                startDailyHackAutomation(reason, false);
+            }
+        });
+    });
+}
+
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) checkDailyHackIfDue('visibility');
+});
+
+window.addEventListener('focus', () => checkDailyHackIfDue('focus'));
+
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'sync' || !changes.autoDailyHackEnabled) return;
+    if (!changes.autoDailyHackEnabled.newValue) {
+        clearDailyHackTimer();
+        releaseDailyHackLock();
+        postDailyHackDiag('toggle.disable', 'Auto Daily Hacking disabled via storage');
+    } else {
+        startDailyHackAutomation('storage', false);
+    }
+});
+
+window.addEventListener('beforeunload', () => {
+    clearDailyHackTimer();
+    releaseDailyHackLock();
+});
+
 function fetchDailyRewards(token) {
     fetch('https://svc-corie.cor3.gg/api/user-daily-claim/rewards', {
         headers: { 'Authorization': token }
@@ -183,35 +478,14 @@ export function setupMessageListener() {
             sendResponse({ success: true });
         } else if (request.action === "toggleDailyHackSolver") {
             if (request.enabled) {
-                chrome.storage.local.get('bearerToken', (result) => {
-                    const token = result.bearerToken;
-                    if (!token) {
-                        ensureAntiAfkEnabled();
-                        injectDailyHackSolver();
-                        return;
-                    }
-                    fetch('https://svc-corie.cor3.gg/api/user-daily-claim', { headers: { 'Authorization': token } })
-                        .then(r => r.ok ? r.json() : null)
-                        .then(data => {
-                            if (data) {
-                                chrome.storage.local.set({ dailyOpsData: data, dailyOpsUpdatedAt: Date.now() });
-                                fetchDailyRewards(token);
-                            }
-                            if (data && data.hasClaimedToday) {
-                                console.log('[COR3 Helper] Daily already claimed — skipping solver');
-                                chrome.storage.sync.set({ autoDailyHackEnabled: false });
-                                chrome.storage.local.set({ dailyHackLog: 'Daily already claimed today — skipping automation.', dailyHackLogUpdatedAt: Date.now() });
-                                return;
-                            }
-                            ensureAntiAfkEnabled();
-                            injectDailyHackSolver();
-                        })
-                        .catch(() => {
-                            ensureAntiAfkEnabled();
-                            injectDailyHackSolver();
-                        });
-                });
+                _dailyHackAutoStarted = false;
+                startDailyHackAutomation('toggle', true);
             } else {
+                _dailyHackAutoStarted = false;
+                _dailyHackAutoStartRetries = 0;
+                clearDailyHackTimer();
+                releaseDailyHackLock();
+                postDailyHackDiag('toggle.disable', 'Auto Daily Hacking disabled');
                 stopDailyHackSolver();
             }
             sendResponse({ success: true });

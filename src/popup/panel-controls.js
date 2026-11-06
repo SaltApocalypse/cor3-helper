@@ -46,18 +46,13 @@ const sidePanelBtn = document.getElementById('sidePanelBtn');
 
     addCard([mainView.querySelector('.toggles-section')].filter(Boolean));
 
+    addCard([document.getElementById('dailyOpsAutomationPanel')].filter(Boolean));
+
     addCard([document.getElementById('autoJobSolverSection')].filter(Boolean));
 
     addCard([document.getElementById('autoValuableSellerSection')].filter(Boolean));
 
     const allSections = mainView.querySelectorAll(':scope > .section');
-
-    for (const s of allSections) {
-        if (s.textContent.includes('Daily Ops') && !s.querySelector('#marketContainer')) {
-            addCard([s]);
-            break;
-        }
-    }
 
     let marketsSection = null;
     for (const s of allSections) {

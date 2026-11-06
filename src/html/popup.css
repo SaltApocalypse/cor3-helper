@@ -24,6 +24,7 @@
         body {
             --bg-primary: #05080b;
             --bg-card: rgba(21, 28, 34, 1);
+            --bg-section: var(--bg-card);
             --bg-option: #1d252c;
             --border: rgba(66, 74, 81, 1);
             --text: #ffffff;
@@ -323,6 +324,8 @@
         body.mode-sidepanel .popout-card > .auto-jobs-section,
         body.mode-popout .popout-card > .valuable-section,
         body.mode-sidepanel .popout-card > .valuable-section,
+        body.mode-popout .popout-card > .daily-ops-panel,
+        body.mode-sidepanel .popout-card > .daily-ops-panel,
         body.mode-popout .popout-card > .sub-section,
         body.mode-sidepanel .popout-card > .sub-section,
         body.mode-popout .popout-card > .section-header-row,
@@ -359,18 +362,21 @@
             text-align: center;
             color: var(--accent);
         }
-        .section {
-            margin-bottom: 10px;
-            border-top: 1px solid var(--border);
-            padding-top: 10px;
+        /* Top-level panel cards */
+        .section,
+        .toggles-section,
+        .daily-ops-panel,
+        .auto-jobs-section,
+        .valuable-section {
+            background: var(--bg-section);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px;
+            margin: 0 0 10px 0;
+            box-sizing: border-box;
         }
         .sub-section {
             margin-bottom: 10px;
-        }
-        .toggles-section {
-            margin-bottom: 10px;
-            border-top: 1px solid var(--border);
-            padding-top: 8px;
         }
         .section-title {
             font-size: 14px;
@@ -1016,6 +1022,46 @@
             font-weight: bold;
             font-family: 'Courier New', monospace;
             color: var(--text-secondary);
+        }
+        .daily-ops-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .daily-ops-title {
+            font-size: 12px;
+            font-weight: bold;
+            color: var(--accent-cyan);
+        }
+        .daily-ops-subtitle {
+            font-size: 9px;
+            color: var(--text-dim);
+            margin-top: 2px;
+        }
+        .daily-ops-timer {
+            font-size: 14px;
+            font-weight: bold;
+            color: var(--accent-orange);
+            margin-top: 6px;
+            font-family: 'Courier New', monospace;
+        }
+        .daily-ops-meta {
+            font-size: 10px;
+            color: var(--text-dim);
+            margin-top: 4px;
+            line-height: 1.5;
+        }
+        .daily-ops-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 6px;
+            flex-wrap: wrap;
+        }
+        .daily-ops-actions .last-updated {
+            margin-left: auto;
+            font-size: 9px;
         }
 
         /* Expandable section */
@@ -2211,13 +2257,6 @@
         }
 
         /* Auto Job Solver */
-        .auto-jobs-section {
-            background: var(--bg-section);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 10px;
-            margin-bottom: 8px;
-        }
         .auto-jobs-section .section-title {
             display: flex;
             align-items: center;
@@ -2312,6 +2351,15 @@
             height: 14px;
             flex-shrink: 0;
             margin-left: auto;
+        }
+        .valuable-tab-content > .auto-valuable-seller-select-all {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: var(--bg-section);
+            padding: 6px 0 4px;
+            margin-bottom: 2px;
+            border-bottom: 1px solid var(--border);
         }
         .auto-jobs-select-all {
             display: flex;
@@ -2486,13 +2534,6 @@
             text-align: center;
         }
         /* Auto Valuable Seller */
-        .valuable-section {
-            background: var(--bg-section);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 10px;
-            margin-bottom: 8px;
-        }
         .valuable-section .section-title {
             display: flex;
             align-items: center;

@@ -13,11 +13,58 @@
     window.__dailyHackAbort = false;
 
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    const hlog = (msg, level) => {
+    const hlog = (msg, level, step, details) => {
         level = level || 'info';
-        console.log('[COR3 Daily Hack] ' + msg);
-        window.postMessage({ type: 'COR3_DAILY_HACK_LOG', message: msg }, '*');
+        console.log('[COR3 Daily Hack] [' + (step || 'log') + '] ' + msg, details || '');
+        window.postMessage({
+            type: 'COR3_DAILY_HACK_LOG',
+            timestamp: Date.now(),
+            message: msg,
+            level: level,
+            step: step || 'log',
+            details: details || null
+        }, '*');
     };
+
+    function diag(step, message, details, level) {
+        hlog(message, level || 'info', step, details);
+    }
+
+    function selectorInfo(selector) {
+        try {
+            const nodes = document.querySelectorAll(selector);
+            const first = nodes && nodes.length ? nodes[0] : null;
+            return {
+                selector,
+                count: nodes ? nodes.length : 0,
+                text: first ? (first.textContent || '').trim().slice(0, 200) : null
+            };
+        } catch (e) {
+            return { selector, error: String(e && e.message || e) };
+        }
+    }
+
+    function tabBarSnapshot() {
+        try {
+            return Array.from(document.querySelectorAll('[data-component-name^="TabBarItem-"]')).map(el => ({
+                name: el.getAttribute('data-component-name'),
+                text: (el.textContent || '').trim().slice(0, 80)
+            }));
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function dailyComponentSnapshot() {
+        try {
+            return Array.from(document.querySelectorAll('[data-component-name*="Daily"]'))
+                .map(el => el.getAttribute('data-component-name'))
+                .filter(Boolean)
+                .slice(0, 30);
+        } catch (e) {
+            return [];
+        }
+    }
 
     // --- Wait for an element to appear in DOM, with timeout ---
     function waitForEl(selector, timeoutMs, parent) {
@@ -157,17 +204,31 @@
     // STEP 1: Open Daily Ops tab
     // =============================================
     async function openDailyOpsTab() {
-        hlog('Opening Daily Ops tab...');
-        // Click the tab bar item that opens daily ops page
-        let tabItem = document.querySelector('[data-component-name="TabBarItem-019a0c41-b17f-7abc-1234-567890abcde2"]');
+        diag('open.tab', 'Opening Daily Ops tab', {
+            url: location.href,
+            tabBar: tabBarSnapshot(),
+            dailyComponents: dailyComponentSnapshot()
+        });
+        const selectors = [
+            '[data-component-name="TabBarItem-019a0c41-b17f-7abc-1234-567890abcde2"]',
+            '[data-component-name="TabBarItem-019a0c41-b17f-7abc-1234-567890abcde1"]'
+        ];
+        let tabItem = null;
+        for (const selector of selectors) {
+            tabItem = document.querySelector(selector);
+            diag('open.tab', 'Trying Daily Ops tab selector', { selector, found: !!tabItem });
+            if (tabItem) break;
+        }
         if (!tabItem) {
-            tabItem = document.querySelector('[data-component-name="TabBarItem-019a0c41-b17f-7abc-1234-567890abcde1"]');
-            if (!tabItem) {
-                hlog('Could not find Daily Ops tab bar item (.go3582441102)', 'error');
-                return false;
-            }
+            diag('open.tab', 'Daily Ops tab bar item not found', {
+                selectors,
+                tabBar: tabBarSnapshot(),
+                dailyComponents: dailyComponentSnapshot()
+            }, 'error');
+            return false;
         }
         click(tabItem);
+        diag('open.tab', 'Clicked Daily Ops tab', { component: tabItem.getAttribute('data-component-name') });
         await sleep(800);
         return true;
     }
@@ -176,18 +237,26 @@
     // STEP 2: Select "Daily Ops" section
     // =============================================
     async function selectDailyOpsSection() {
-        hlog('Waiting for Start Task button...');
+        const gridButtons = Array.from(document.querySelectorAll('.game-center-grid button')).map(b => (b.textContent || '').trim());
+        diag('select.section', 'Selecting Daily Ops section', {
+            gameCenterGrids: document.querySelectorAll('.game-center-grid').length,
+            gridButtons,
+            startButton: selectorInfo('[data-component-name="DailyOpsStartButton"]')
+        });
         const dailyOpsBtn = document.querySelector('.game-center-grid button:nth-child(2)');
         if (!dailyOpsBtn) {
             const startBtnCheck = await waitForEl('[data-component-name="DailyOpsStartButton"]', 8000);
+            diag('select.section', 'Daily Ops section button missing; checked Start Task button', {
+                startButtonFound: !!startBtnCheck,
+                dailyComponents: dailyComponentSnapshot()
+            }, startBtnCheck ? 'info' : 'error');
             if (startBtnCheck) {
                 return true;
             }
-            hlog('Could not find Daily Ops section button (.game-center-grid button:nth-child(2))', 'error');
             return false;
         }
         click(dailyOpsBtn);
-        hlog('Clicked Daily Ops section');
+        diag('select.section', 'Clicked Daily Ops section', { text: (dailyOpsBtn.textContent || '').trim() });
         await sleep(1000);
         return true;
     }
@@ -196,14 +265,19 @@
     // STEP 3: Click "Start Task" button
     // =============================================
     async function clickStartTask() {
-        hlog('Waiting for Start Task button...');
+        diag('start.task', 'Waiting for Start Task button', {
+            startButton: selectorInfo('[data-component-name="DailyOpsStartButton"]')
+        });
         const startBtn = await waitForEl('[data-component-name="DailyOpsStartButton"]', 8000);
         if (!startBtn) {
-            hlog('Could not find Start Task button (.start-task-button)', 'error');
+            diag('start.task', 'Could not find Start Task button', {
+                startButton: selectorInfo('[data-component-name="DailyOpsStartButton"]'),
+                dailyComponents: dailyComponentSnapshot()
+            }, 'error');
             return false;
         }
         click(startBtn);
-        hlog('Clicked Start Task');
+        diag('start.task', 'Clicked Start Task', { text: (startBtn.textContent || '').trim() });
         await sleep(1000);
         return true;
     }
@@ -212,26 +286,33 @@
     // Signal Hack — full end-to-end
     // =============================================
     async function solveSignalHackFull() {
-        hlog('Signal Hack detected');
+        diag('solve.signal', 'Signal Hack solver started', {
+            getSignal: selectorInfo('.go190644802')
+        });
 
         // Step A: Click "Get Signal" button
         const getSignalBtn = await waitForEl('.go190644802', 5000);
         if (!getSignalBtn) {
-            hlog('Could not find Get Signal button (.go190644802)', 'error');
+            diag('solve.signal', 'Could not find Get Signal button', {
+                selector: selectorInfo('.go190644802')
+            }, 'error');
             return false;
         }
         click(getSignalBtn);
-        hlog('Clicked Get Signal');
+        diag('solve.signal', 'Clicked Get Signal');
         await sleep(1500);
 
         // Step B: Wait for pulse timeline and decode
         const timeline = await waitForEl('.pulse-timeline', 10000);
         if (!timeline) {
-            hlog('Could not find pulse timeline after Get Signal', 'error');
+            diag('solve.signal', 'Could not find pulse timeline after Get Signal', {
+                timeline: selectorInfo('.pulse-timeline')
+            }, 'error');
             return false;
         }
 
         const groups = Array.from(timeline.querySelectorAll('.pulse-group'));
+        diag('solve.signal', 'Pulse groups collected', { count: groups.length });
         const pulses = groups.map((g, i) => {
             const isShort = !!g.querySelector('.pulse-bar.short');
             const longCount = g.querySelectorAll('.pulse-bar.long').length;
@@ -296,6 +377,14 @@
         // Step D: Choose the correct encoding option
         const targetLabel = ENCODING_LABELS[encoding];
         const encodingOptions = Array.from(document.querySelectorAll('.encoding-option'));
+        diag('solve.signal', 'Encoding options collected', {
+            targetLabel,
+            count: encodingOptions.length,
+            headers: encodingOptions.map(o => {
+                const h = o.querySelector('.option-header');
+                return h ? (h.textContent || '').trim() : null;
+            })
+        });
         let chosen = null;
         for (const opt of encodingOptions) {
             const header = opt.querySelector('.option-header');
@@ -305,7 +394,7 @@
             }
         }
         if (!chosen) {
-            hlog(`Could not find encoding option "${targetLabel}"`, 'error');
+            diag('solve.signal', 'Could not find encoding option', { targetLabel }, 'error');
             return false;
         }
         click(chosen);
@@ -325,31 +414,42 @@
         // Step F: Enter the code value
         const codeInput = await waitForEl('.code-input', 5000);
         if (!codeInput) {
-            hlog('Could not find code input (.code-input)', 'error');
+            diag('solve.signal', 'Could not find code input', {
+                input: selectorInfo('.code-input')
+            }, 'error');
             return false;
         }
         setInputValue(codeInput, value);
-        hlog(`Entered code: ${value}`);
+        diag('solve.signal', 'Entered code', { value });
         await sleep(400);
 
         // Step G: Click "CONFIRM CODE"
         const confirmBtn = document.querySelector('.submit-button');
         if (!confirmBtn) {
-            hlog('Could not find Confirm Code button (.submit-button)', 'error');
+            diag('solve.signal', 'Could not find Confirm Code button', {
+                submit: selectorInfo('.submit-button')
+            }, 'error');
             return false;
         }
         click(confirmBtn);
-        hlog('Clicked CONFIRM CODE');
+        diag('solve.signal', 'Clicked CONFIRM CODE');
         await sleep(1500);
 
         // Step H: Check for success
         const resultTitle = document.querySelector('.result-title');
         if (resultTitle && resultTitle.classList.contains('success')) {
-            hlog('✅ Signal Hack VERIFIED — Success!', 'success');
+            diag('solve.signal', 'Signal Hack VERIFIED — Success!', {
+                result: (resultTitle.textContent || '').trim()
+            }, 'success');
         } else if (resultTitle) {
-            hlog('Signal Hack result: ' + (resultTitle.textContent || '').trim(), 'warn');
+            diag('solve.signal', 'Signal Hack result was not success', {
+                className: resultTitle.className,
+                text: (resultTitle.textContent || '').trim()
+            }, 'warn');
         } else {
-            hlog('Could not verify result (no .result-title found)', 'warn');
+            diag('solve.signal', 'Could not verify result — no .result-title found', {
+                result: selectorInfo('.result-title')
+            }, 'warn');
         }
 
         // Step I: Close windows (decode screen + daily ops)
@@ -363,31 +463,43 @@
     // System Log Integrity — full end-to-end
     // =============================================
     async function solveSystemLogIntegrityFull() {
-        hlog('System Log Integrity detected');
+        diag('solve.log', 'System Log Integrity solver started', {
+            getLogs: selectorInfo('.go190644802')
+        });
 
         // Step A: Click "Get Logs" button
         const getLogsBtn = await waitForEl('.go190644802', 5000);
         if (!getLogsBtn) {
-            hlog('Could not find Get Logs button (.go190644802)', 'error');
+            diag('solve.log', 'Could not find Get Logs button', {
+                selector: selectorInfo('.go190644802')
+            }, 'error');
             return false;
         }
         click(getLogsBtn);
-        hlog('Clicked Get Logs');
+        diag('solve.log', 'Clicked Get Logs');
         await sleep(4000);
         // Step B: Wait for pulse timeline and decode
         const log_entries = await waitForEl('.log-entries', 10000);
         if (!log_entries) {
-            hlog('Could not find log-entries after Get Logs', 'error');
+            diag('solve.log', 'Could not find log-entries after Get Logs', {
+                logEntries: selectorInfo('.log-entries')
+            }, 'error');
             return false;
         }
         const logContainer = document.querySelector('.log-entries');
         if (!logContainer) {
-            hlog('Could not find log-entries container', 'error');
+            diag('solve.log', 'Could not find log-entries container', null, 'error');
             return false;
         }
         const entries = Array.from(logContainer.querySelectorAll('.log-entry.log-entry-appearing'));
+        diag('solve.log', 'Log entries collected', {
+            appearing: entries.length,
+            allEntries: logContainer.querySelectorAll('.log-entry').length
+        });
         if (!entries.length) {
-            hlog('No .log-entry elements found', 'error');
+            diag('solve.log', 'No .log-entry.log-entry-appearing elements found', {
+                logEntries: selectorInfo('.log-entries')
+            }, 'error');
             return false;
         }
 
@@ -399,11 +511,17 @@
 
         analyzed.sort((a, b) => b.issues.length - a.issues.length);
         const selected = analyzed.slice(0, 2);
+        diag('solve.log', 'Invalid log entries analyzed', {
+            total: entries.length,
+            invalid: analyzed.length,
+            selected: selected.length,
+            details: analyzed.map(e => ({ text: e.text.slice(0, 160), issues: e.issues }))
+        });
         if (selected.length === 0) {
-            hlog('No invalid log entries found — puzzle may already be solved', 'warn');
+            diag('solve.log', 'No invalid log entries found — puzzle may already be solved', null, 'warn');
             return false;
         }
-        if (selected.length < 2) hlog(`Only found ${selected.length} invalid log(s)`);
+        if (selected.length < 2) diag('solve.log', 'Only found fewer than 2 invalid logs', { count: selected.length }, 'warn');
 
         for (const entry of selected) {
             clickCheckbox(entry.el);
@@ -432,8 +550,12 @@
         }
 
         const blocks = Array.from(analysisContainer.querySelectorAll('.error-analysis-block'));
+        diag('solve.log', 'Analysis blocks collected', {
+            count: blocks.length,
+            analysisContainer: selectorInfo('.analysis-container')
+        });
         if (!blocks.length) {
-            hlog('No .error-analysis-block found', 'error');
+            diag('solve.log', 'No .error-analysis-block found', null, 'error');
             return false;
         }
 
@@ -492,9 +614,18 @@
         await sleep(1500);
         const resultTitle = document.querySelector('.result-title');
         if (resultTitle && resultTitle.classList.contains('success')) {
-            hlog('✅ System Log Integrity VERIFIED — Success!', 'success');
+            diag('solve.log', 'System Log Integrity VERIFIED — Success!', {
+                result: (resultTitle.textContent || '').trim()
+            }, 'success');
         } else if (resultTitle) {
-            hlog('Log Integrity result: ' + (resultTitle.textContent || '').trim(), 'warn');
+            diag('solve.log', 'System Log Integrity result was not success', {
+                className: resultTitle.className,
+                text: (resultTitle.textContent || '').trim()
+            }, 'warn');
+        } else {
+            diag('solve.log', 'Could not verify System Log Integrity result — no .result-title found', {
+                result: selectorInfo('.result-title')
+            }, 'warn');
         }
 
         // Close windows
@@ -507,12 +638,31 @@
     // =============================================
     // Detect puzzle type from DOM
     // =============================================
+    let _lastPuzzleDiagTitle = null;
+    let _lastPuzzleDiagAt = 0;
+
     function detectPuzzle() {
-        // First check for hack type label in the DOM (most reliable)
+        // First check for hack type label in the DOM (most reliable).
+        // The game UI can be localized, so match both English and Chinese titles.
         var hackTypeDiv = document.querySelector('[data-component-name="DailyOpsTaskInfoTitle"]');
-        if (hackTypeDiv) {
-            if ((hackTypeDiv.textContent).includes('System Log Integrity')) return 'log';
-            if ((hackTypeDiv.textContent).includes('Signal Decode')) return 'signal';
+        const title = hackTypeDiv ? (hackTypeDiv.textContent || '').trim() : '';
+        if (title.includes('System Log Integrity') || title.includes('系统日志完整性')) return 'log';
+        if (title.includes('Signal Decode') || title.includes('Signal Hack') ||
+            title.includes('信号解码') || title.includes('信号破解')) return 'signal';
+
+        // DOM fallback: the title may lag behind the rendered puzzle.
+        if (document.querySelector('.log-entries, .log-entry')) return 'log';
+        if (document.querySelector('.pulse-timeline, .encoding-option, .code-input')) return 'signal';
+
+        const now = Date.now();
+        if (title !== _lastPuzzleDiagTitle || now - _lastPuzzleDiagAt > 5000) {
+            _lastPuzzleDiagTitle = title;
+            _lastPuzzleDiagAt = now;
+            diag('detect.puzzle', 'Puzzle type not detected', {
+                title,
+                titleSelector: selectorInfo('[data-component-name="DailyOpsTaskInfoTitle"]'),
+                dailyComponents: dailyComponentSnapshot()
+            }, 'warn');
         }
         return null;
     }
@@ -523,6 +673,11 @@
     const MAX_ATTEMPTS = 3;
 
     async function attemptSolve() {
+        diag('attempt.start', 'Starting Daily Ops attempt', {
+            url: location.href,
+            tabBar: tabBarSnapshot(),
+            dailyComponents: dailyComponentSnapshot()
+        });
         // STEP 1: Open Daily Ops tab
         const tabOpened = await openDailyOpsTab();
         if (!tabOpened || window.__dailyHackAbort) return { success: false, abort: true };
@@ -532,7 +687,7 @@
         if (!sectionSelected || window.__dailyHackAbort) return { success: false, abort: true };
 
         // STEP 3: Wait for puzzle to appear
-        hlog('Waiting for puzzle to appear...');
+        diag('detect.puzzle', 'Waiting for puzzle title before Start Task');
         let puzzle = null;
         let waited = 0;
         while (!puzzle && waited < 15000 && !window.__dailyHackAbort) {
@@ -540,6 +695,10 @@
             await sleep(500);
             waited += 500;
         }
+        diag('detect.puzzle', 'Puzzle detection before Start Task', {
+            puzzle,
+            title: selectorInfo('[data-component-name="DailyOpsTaskInfoTitle"]')
+        });
 
         // STEP 4: Click "Start Task"
         const taskStarted = await clickStartTask();
@@ -547,8 +706,19 @@
 
         if (window.__dailyHackAbort) return { success: false, abort: true };
 
+        const puzzleAfterStart = detectPuzzle();
+        diag('detect.puzzle', 'Puzzle detection after Start Task', {
+            beforeStart: puzzle,
+            afterStart: puzzleAfterStart,
+            title: selectorInfo('[data-component-name="DailyOpsTaskInfoTitle"]')
+        });
+        if (!puzzle && puzzleAfterStart) puzzle = puzzleAfterStart;
+
         if (!puzzle) {
-            hlog('No puzzle detected after 15s', 'error');
+            diag('detect.puzzle', 'No puzzle detected after Start Task; stopping attempt', {
+                title: selectorInfo('[data-component-name="DailyOpsTaskInfoTitle"]'),
+                dailyComponents: dailyComponentSnapshot()
+            }, 'error');
             return { success: false, abort: false };
         }
 
@@ -576,29 +746,36 @@
     }
 
     async function run() {
-        hlog('Solver started — full automation mode');
+        diag('solver.start', 'Solver started — full automation mode', {
+            url: location.href,
+            maxAttempts: MAX_ATTEMPTS,
+            tabBar: tabBarSnapshot(),
+            dailyComponents: dailyComponentSnapshot()
+        });
 
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             if (window.__dailyHackAbort) break;
 
             if (attempt > 1) {
-                hlog(`Retry attempt ${attempt}/${MAX_ATTEMPTS} — closing windows and restarting...`, 'warn');
+                diag('solver.retry', `Retry attempt ${attempt}/${MAX_ATTEMPTS} — closing windows and restarting...`, null, 'warn');
                 await closeAppWindows(4);
                 await sleep(3000);
                 if (window.__dailyHackAbort) break;
             }
 
+            diag('solver.attempt', `Running attempt ${attempt}/${MAX_ATTEMPTS}`);
             const result = await attemptSolve();
+            diag('solver.result', `Attempt ${attempt}/${MAX_ATTEMPTS} finished`, result);
 
             if (result.abort) {
-                hlog('Solver aborted');
+                diag('solver.abort', 'Solver aborted', null, 'warn');
                 break;
             }
 
             if (result.success) {
                 hlog('✅ Daily hack completed successfully!', 'success');
-                // Auto-disable toggle after success
-                window.postMessage({ type: 'COR3_DAILY_HACK_DISABLE_TOGGLE' }, '*');
+                // Keep the persistent toggle enabled and let the scheduler pick the next check.
+                window.postMessage({ type: 'COR3_DAILY_HACK_RUN_FINISHED', success: true, reason: 'success' }, '*');
                 // Refresh daily ops data so UI reflects completion
                 window.postMessage({ type: 'COR3_FETCH_DAILY_OPS' }, '*');
                 cleanup();
@@ -610,9 +787,9 @@
             }
         }
 
-        // All attempts failed
-        hlog(`Daily hack failed after ${MAX_ATTEMPTS} attempts — disabling toggle`, 'error');
-        window.postMessage({ type: 'COR3_DAILY_HACK_DISABLE_TOGGLE' }, '*');
+        // All attempts failed — keep the persistent toggle enabled and retry later.
+        hlog(`Daily hack failed after ${MAX_ATTEMPTS} attempts — will retry later`, 'error');
+        window.postMessage({ type: 'COR3_DAILY_HACK_RUN_FINISHED', success: false, reason: 'attempts_exhausted' }, '*');
         cleanup();
     }
 

@@ -83,13 +83,14 @@ function renderValuableServers(data) {
     const selectAllLabel = document.createElement('label');
     selectAllLabel.className = 'job-type-label';
     selectAllLabel.setAttribute('for', selectAllCb.id);
-    selectAllLabel.textContent = 'Select All';
+    selectAllLabel.textContent = t('Select All Results', '全选结果');
     const selectAllCount = document.createElement('span');
     selectAllCount.className = 'job-type-count';
     selectAllCount.textContent = `(${data.servers.length} servers)`;
     selectAllDiv.appendChild(selectAllLabel);
     selectAllDiv.appendChild(selectAllCount);
     selectAllDiv.appendChild(selectAllCb);
+    valuableContentServers.appendChild(selectAllDiv);
 
     const checkboxes = [];
 
@@ -164,8 +165,6 @@ function renderValuableServers(data) {
         valuableContentServers.appendChild(row);
     }
 
-    valuableContentServers.appendChild(selectAllDiv);
-
     // Wire select-all
     selectAllCb.addEventListener('change', () => {
         for (const cb of checkboxes) cb.checked = selectAllCb.checked;
@@ -200,13 +199,14 @@ function renderValuableDownloads(data) {
     const selectAllLabel = document.createElement('label');
     selectAllLabel.className = 'job-type-label';
     selectAllLabel.setAttribute('for', selectAllCb.id);
-    selectAllLabel.textContent = 'Select All';
+    selectAllLabel.textContent = t('Select All Results', '全选结果');
     const selectAllCount = document.createElement('span');
     selectAllCount.className = 'job-type-count';
     selectAllCount.textContent = `(${data.files.length} files)`;
     selectAllDiv.appendChild(selectAllLabel);
     selectAllDiv.appendChild(selectAllCount);
     selectAllDiv.appendChild(selectAllCb);
+    valuableContentDownloads.appendChild(selectAllDiv);
 
     const checkboxes = [];
 
@@ -282,8 +282,6 @@ function renderValuableDownloads(data) {
 
         valuableContentDownloads.appendChild(groupDiv);
     }
-
-    valuableContentDownloads.appendChild(selectAllDiv);
 
     selectAllCb.addEventListener('change', () => {
         for (const cb of checkboxes) cb.checked = selectAllCb.checked;
