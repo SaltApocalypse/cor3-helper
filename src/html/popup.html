@@ -35,7 +35,7 @@
     </div>
 
     <!-- Helper Mode Toggle -->
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 10px;margin-bottom:4px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 10px;margin-bottom:10px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);">
         <span style="font-size:10px;color:var(--text-secondary);">🛡️ Helper-Only Mode <span style="color:var(--text-dim);font-size:9px;">(hides automation)</span></span>
         <label class="alarm-toggle-switch">
             <input type="checkbox" id="helperModeToggle">
@@ -75,7 +75,6 @@
                 </label>
             </div>
         </div>
-        <div id="dailyHackInfo" style="display:none;font-size:10px;color:var(--accent-cyan);margin-top:6px;"></div>
         <!-- Auto ICE Wall Hacking -->
         <div class="auto-decrypt-row" style="margin-top:8px;">
             <div style="display:flex;gap:6px;">
@@ -106,21 +105,6 @@
                 </div>
             </div>
             <div id="simpleDecryptSolverStatusLine" style="display:none;font-size:10px;margin-top:6px;padding:6px 8px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);color:var(--accent-cyan);"></div>
-            <!-- Auto Daily Hacking -->
-            <div class="auto-decrypt-row" style="margin-top:8px;">
-                <div style="display:flex;gap:6px;">
-                    <span class="decrypt-label" style="margin-bottom: 2px;">&#x1F513;</span>
-                    <span class="decrypt-label">Auto Daily Hacking</span>
-                </div>
-                <div style="display:flex;align-items:center;gap:8px;">
-                    <span class="decrypt-status" id="dailyHackStatus">Off</span>
-                    <label class="alarm-toggle-switch">
-                        <input type="checkbox" id="autoDailyHackToggle">
-                        <span class="slider-track"></span>
-                    </label>
-                </div>
-            </div>
-            <div id="dailyHackLog" style="display:none;font-size:10px;margin-top:6px;margin-bottom:6px;padding:6px 8px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);color:var(--accent-cyan);"></div>
             <!-- QoL Toggles -->
             <div class="auto-decrypt-title">
                 <span>Objective Automation Toggles</span>
@@ -215,13 +199,6 @@
                 <span>Info Panel Toggles</span>
             </div>
             <div class="auto-decrypt-row" style="margin-top:8px;">
-                <span class="decrypt-label">📅 Daily Ops</span>
-                <div style="display:flex;align-items:center;gap:8px;">
-                    <span class="decrypt-status" id="dailyOpsPanelStatus">On</span>
-                    <label class="alarm-toggle-switch"><input type="checkbox" id="dailyOpsPanelToggle" checked><span class="slider-track"></span></label>
-                </div>
-            </div>
-            <div class="auto-decrypt-row" style="margin-top:8px;">
                 <span class="decrypt-label">🏪 Markets</span>
                 <div style="display:flex;align-items:center;gap:8px;">
                     <span class="decrypt-status" id="marketsPanelStatus">On</span>
@@ -233,6 +210,39 @@
             <button id="togglesShowMoreBtn" style="width:100%;background:var(--btn-bg);border:1px solid var(--border);color:var(--text-secondary);font-size:12px;font-weight:600;padding:8px 12px;border-radius:8px;cursor:pointer;">Show toggles ▾</button>
         </div>
     </div>
+
+            <div class="daily-ops-panel" id="dailyOpsAutomationPanel">
+                <div class="daily-ops-header">
+                    <div>
+                        <div class="daily-ops-title">📅 Daily Ops</div>
+                        <div class="daily-ops-subtitle">Auto Daily Hacking</div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span class="decrypt-status" id="dailyHackStatus">Off</span>
+                        <label class="alarm-toggle-switch">
+                            <input type="checkbox" id="autoDailyHackToggle">
+                            <span class="slider-track"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="daily-ops-timer" id="dailyTimerLine">⏳ Next Task: --:--:--</div>
+                <div class="daily-ops-meta">Claimed: <span id="dailyClaimed">--</span> · Streak: <span id="dailyStreak">--</span> · Difficulty: <span id="dailyDifficulty">--</span> · Bonus: <span id="dailyStreakBonus">--</span></div>
+                <div class="daily-ops-actions">
+                    <span class="last-updated" id="dailyLastUpdated"></span>
+                    <button id="refreshDailyBtn" class="refresh-btn-small" title="Refresh Daily Ops">🔄</button>
+                    <button id="pinDailyBtn" class="refresh-btn-small pin-btn" title="Pin Daily Ops">📌</button>
+                </div>
+                <div id="dailyHackSchedule" style="display:none;font-size:9px;color:var(--text-dim);margin-top:6px;"></div>
+                <div id="dailyStatusLine" style="display:none;font-size:10px;margin-top:4px;"></div>
+                <details id="dailyHackDiagDetails" style="display:none;margin-top:6px;">
+                    <summary style="font-size:10px;color:var(--text-dim);cursor:pointer;">Diagnostics</summary>
+                    <div id="dailyHackLog" style="font-size:10px;margin-top:4px;padding:6px 8px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border);color:var(--accent-cyan);white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font-family:monospace;max-height:180px;max-width:100%;overflow-x:hidden;overflow-y:auto;box-sizing:border-box;line-height:1.45;"></div>
+                    <div id="dailyHackDiagActions" style="display:none;gap:4px;margin:4px 0 0;">
+                        <button id="copyDailyHackDiagBtn" class="refresh-btn-small" style="font-size:9px;padding:2px 6px;">📋 Copy log</button>
+                        <button id="clearDailyHackDiagBtn" class="refresh-btn-small" style="font-size:9px;padding:2px 6px;">🗑️ Clear</button>
+                    </div>
+                </details>
+            </div>
 
     <!-- Auto Job Solver Section -->
     <div class="auto-jobs-section" id="autoJobSolverSection" style="display:none;">
@@ -352,26 +362,6 @@
                 <div style="color:var(--text-dim);">No logs yet.</div>
             </div>
         </div>
-    </div>
-
-    <!-- Daily Ops -->
-    <div class="section" id="dailyOpsPanelSection">
-        <div class="daily-section-title">
-            <div>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" data-sentry-element="Icon" data-sentry-component="getTabBarIcon" data-sentry-source-file="get-tab-bar-icon.tsx" style="vertical-align: -3px;">
-                    <path d="M7.20996 0.991211C7.70113 0.711205 8.30375 0.711205 8.79492 0.991211L8.93457 1.07031V2.81445C8.93454 3.13267 8.80803 3.43807 8.58301 3.66309L8.1875 4.05859C7.81243 4.43367 7.60156 4.9432 7.60156 5.47363V6.32617C6.83729 6.50688 6.26758 7.19125 6.26758 8.01074C6.26775 8.96778 7.04394 9.74397 8.00098 9.74414C8.95816 9.74414 9.7342 8.96789 9.73438 8.01074C9.73438 7.19136 9.16548 6.50699 8.40137 6.32617V5.47363C8.40137 5.15542 8.52795 4.85003 8.75293 4.625L9.14844 4.22852C9.52348 3.85347 9.73435 3.34485 9.73438 2.81445V1.52637L11.6016 2.59082V3.6543C10.8373 3.835 10.2676 4.51937 10.2676 5.33887C10.2678 6.2959 11.0439 7.07209 12.001 7.07227C12.9582 7.07227 13.7342 6.29601 13.7344 5.33887C13.7344 4.51948 13.1655 3.83512 12.4014 3.6543V3.0459L13.8613 3.87891C14.3606 4.16356 14.6689 4.69478 14.6689 5.26953V10.7402C14.6689 11.3148 14.3614 11.8462 13.8623 12.1309L12.4033 12.9619V11.5391C12.869 11.3741 13.2031 10.9314 13.2031 10.4092C13.203 9.74653 12.6656 9.20898 12.0029 9.20898C11.3403 9.20909 10.8028 9.74659 10.8027 10.4092C10.8027 10.9316 11.1376 11.3742 11.6035 11.5391V13.418L8.79492 15.0205C8.6704 15.0915 8.53852 15.1437 8.40332 15.1787V13.6641C8.86897 13.4991 9.20312 13.0564 9.20312 12.5342C9.20302 11.8715 8.66561 11.334 8.00293 11.334C7.34034 11.3341 6.80284 11.8716 6.80273 12.5342C6.80273 13.0566 7.13759 13.4992 7.60352 13.6641V15.1787C7.46769 15.1437 7.33503 15.0918 7.20996 15.0205L4.40137 13.418V11.8223C5.16548 11.6414 5.73438 10.9571 5.73438 10.1377C5.7342 9.18055 4.95816 8.4043 4.00098 8.4043C3.04394 8.40447 2.26775 9.18066 2.26758 10.1377C2.26758 10.9572 2.83729 11.6416 3.60156 11.8223V12.9619L2.14355 12.1309C1.6444 11.8462 1.33594 11.3149 1.33594 10.7402V5.26953C1.33594 4.69478 1.64424 4.16356 2.14355 3.87891L3.60352 3.0459V4.47656C3.13759 4.64138 2.80273 5.08407 2.80273 5.60645C2.80284 6.26903 3.34034 6.80654 4.00293 6.80664C4.66561 6.80664 5.20302 6.2691 5.20312 5.60645C5.20312 5.08426 4.86897 4.64153 4.40332 4.47656V2.67285H4.25977L7.20996 0.991211ZM4.00098 9.20508C4.51633 9.20508 4.93439 9.62238 4.93457 10.1377C4.93457 10.6532 4.51644 11.0713 4.00098 11.0713C3.48566 11.0711 3.06836 10.6531 3.06836 10.1377C3.06854 9.62249 3.48577 9.20525 4.00098 9.20508ZM8.00098 7.07715C8.51644 7.07715 8.93457 7.49528 8.93457 8.01074C8.93439 8.52606 8.51633 8.94336 8.00098 8.94336C7.48577 8.94318 7.06854 8.52595 7.06836 8.01074C7.06836 7.49539 7.48566 7.07732 8.00098 7.07715ZM12.001 4.40527C12.5164 4.40527 12.9346 4.8234 12.9346 5.33887C12.9344 5.85418 12.5163 6.27148 12.001 6.27148C11.4858 6.27131 11.0685 5.85407 11.0684 5.33887C11.0684 4.82351 11.4857 4.40545 12.001 4.40527Z" fill="rgba(118, 193, 209, 1)"></path>
-                </svg>
-                <span> Daily Ops</span>
-            </div>
-            <div style="display:flex;gap:4px;">
-                <button id="refreshDailyBtn" class="refresh-btn-small" title="Refresh Daily Ops">🔄</button>
-                <button id="pinDailyBtn" class="refresh-btn-small pin-btn" title="Pin Daily Ops">📌</button>
-            </div>
-        </div>
-        <div class="last-updated" id="dailyLastUpdated"></div>
-        <div style="font-size:11px;color:var(--accent-orange);margin-bottom:4px;" id="dailyTimerLine">⏳ Next Task: --:--:--</div>
-        <div style="font-size:10px;margin-bottom:4px;display:none;" id="dailyStatusLine"></div>
-        <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;">Claimed: <span id="dailyClaimed">--</span> · Streak: <span id="dailyStreak">--</span> · Difficulty: <span id="dailyDifficulty">--</span> · Bonus: <span id="dailyStreakBonus">--</span></div>
     </div>
 
     <!-- Markets -->

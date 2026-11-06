@@ -15,13 +15,14 @@ import './log-writers.js';
 
 // Setup functions (register listeners)
 import { setupWsRelay } from './ws-relay.js';
-import { setupMessageListener } from './message-listener.js';
+import { setupMessageListener, autoStartDailyHackOnLoad } from './message-listener.js';
 import { setupEngineRelay } from './engine-relay.js';
 import { checkAutoSendOnExpeditionData } from './auto-send.js';
 
 setupWsRelay();
 setupMessageListener();
 setupEngineRelay();
+autoStartDailyHackOnLoad();
 
 // On page load: check cached expedition data for auto-send trigger
 setTimeout(() => {

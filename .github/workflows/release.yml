@@ -44,4 +44,5 @@ jobs:
           name: ${{ github.ref_name }} — Salta fork
           body_path: docs/releases/${{ github.ref_name }}.md
           files: cor3-helper-${{ github.ref_name }}.zip
-          prerelease: true
+          # Experimental tags use the `-salta-exp.N` suffix and stay pre-release.
+          prerelease: ${{ contains(github.ref_name, '-exp.') }}

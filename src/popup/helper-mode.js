@@ -17,7 +17,8 @@ export async function applyHelperMode(helper, mode) {
 
     const automationKeys = [
         'autoRefresh', 'autoJobSolverEnabled', 'autoFinishAllJobsEnabled',
-        'autoJobsDebugConsoleEnabled', 'autoUpdateMarkets', 'autoSendMerc', 'autoDrone'
+        'autoJobsDebugConsoleEnabled', 'autoUpdateMarkets', 'autoSendMerc', 'autoDrone',
+        'autoDailyHackEnabled'
     ];
 
     if (mode === 'update') {

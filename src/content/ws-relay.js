@@ -14,8 +14,29 @@ import {
     setAutoSendUsolSkipped, setAutoSendMercRetryCount, setInitialMercsReady
 } from './auto-send.js';
 import { setMarketRefreshInProgress, setAutoUpdateMarketsLastRefresh, setSeqRefreshRunning } from './auto-update-markets.js';
+import { handleDailyHackRunFinished } from './message-listener.js';
 
 let _containerOpenRetries = 0;
+
+const DAILY_HACK_DIAG_MAX = 200;
+let dailyHackDiagnostics = [];
+chrome.storage.local.get('dailyHackDiagnostics', (data) => {
+    if (dailyHackDiagnostics.length === 0 && Array.isArray(data.dailyHackDiagnostics)) {
+        dailyHackDiagnostics = data.dailyHackDiagnostics.slice(-DAILY_HACK_DIAG_MAX);
+    }
+});
+
+function recordDailyHackDiagnostic(entry) {
+    dailyHackDiagnostics.push(entry);
+    if (dailyHackDiagnostics.length > DAILY_HACK_DIAG_MAX) {
+        dailyHackDiagnostics.splice(0, dailyHackDiagnostics.length - DAILY_HACK_DIAG_MAX);
+    }
+    chrome.storage.local.set({
+        dailyHackDiagnostics,
+        dailyHackLog: entry.message || '',
+        dailyHackLogUpdatedAt: entry.ts || Date.now()
+    });
+}
 
 function fetchDailyRewards(token) {
     fetch('https://svc-corie.cor3.gg/api/user-daily-claim/rewards', {
@@ -490,16 +511,19 @@ export function setupWsRelay() {
                 }
             });
         }
-        // Daily hack log relay
+        // Daily hack diagnostic log relay
         if (event.data && event.data.type === 'COR3_DAILY_HACK_LOG') {
-            chrome.storage.local.set({
-                dailyHackLog: event.data.message,
-                dailyHackLogUpdatedAt: Date.now()
+            recordDailyHackDiagnostic({
+                ts: event.data.timestamp || Date.now(),
+                level: event.data.level || 'info',
+                step: event.data.step || 'log',
+                message: event.data.message || '',
+                details: event.data.details || null
             });
         }
-        // Auto-disable daily hack toggle
-        if (event.data && event.data.type === 'COR3_DAILY_HACK_DISABLE_TOGGLE') {
-            chrome.storage.sync.set({ autoDailyHackEnabled: false });
+        // Daily hack run finished (success/failure) — scheduler keeps the toggle enabled.
+        if (event.data && event.data.type === 'COR3_DAILY_HACK_RUN_FINISHED') {
+            handleDailyHackRunFinished(event.data);
         }
         // Auto-fetch daily ops on page load
         if (event.data && event.data.type === 'COR3_FETCH_DAILY_OPS') {

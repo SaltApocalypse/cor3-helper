@@ -46,6 +46,40 @@ function compareVersions(v1, v2) {
     return 0;
 }
 
+function pickNewer(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    return compareVersions(a, b) > 0 ? a : b;
+}
+
+async function getBundledVersions() {
+    try {
+        const resp = await fetch(chrome.runtime.getURL('versions.json'), { cache: 'no-store' });
+        if (!resp.ok) return null;
+        return await resp.json();
+    } catch (e) {
+        return null;
+    }
+}
+
+async function getReferenceVersions() {
+    let remote = null;
+    try {
+        const resp = await fetch(`https://raw.githubusercontent.com/${FORK_REPO}/main/versions.json`, { cache: 'no-store' });
+        if (resp.ok) remote = await resp.json();
+    } catch (e) { /* fall back to bundled */ }
+
+    const bundled = await getBundledVersions();
+    if (!remote) return bundled;
+    if (!bundled) return remote;
+
+    return {
+        web: pickNewer(bundled.web, remote.web),
+        system: pickNewer(bundled.system, remote.system),
+        patch: pickNewer(bundled.patch, remote.patch)
+    };
+}
+
 checkUpdateBtn.addEventListener('click', async () => {
     updateResult.textContent = t('Checking...', '检查中...');
     updateResult.style.color = 'var(--text-dim)';
@@ -161,17 +195,16 @@ async function autoCheckWebsiteUpdated() {
     const patchVersionData = document.getElementById('patchVersionData');
     if (!webVersionNotice || !webVersionData || !systemVersionNotice || !systemVersionData) return;
     try {
-        const resp = await fetch(`https://raw.githubusercontent.com/${FORK_REPO}/main/versions.json`, { cache: 'no-store' });
-        if (!resp.ok) return;
-        const remote = await resp.json();
+        const remote = await getReferenceVersions();
+        if (!remote) return;
         const { webVersion, systemVersion, patchVersion } = await chrome.storage.local.get(['webVersion', 'systemVersion', 'patchVersion']);
 
         if (webVersion && remote.web) {
             const comparison = compareVersions(webVersion, remote.web);
             if (comparison > 0) {
-                webVersionNotice.textContent = t('⚠️ Website is recently updated', '⚠️ 网页最近有更新');
+                webVersionNotice.textContent = t('⚠️ Game website version is newer than the extension reference', '⚠️ 游戏网页版本高于插件参考版本');
                 webVersionNotice.style.display = 'block';
-                webVersionData.textContent = t('Detected: ' + webVersion + ' · Old: ' + remote.web, '检测到：' + webVersion + ' · 旧版本：' + remote.web);
+                webVersionData.textContent = t('Detected: ' + webVersion + ' · Reference: ' + remote.web, '检测到：' + webVersion + ' · 参考版本：' + remote.web);
                 webVersionData.style.display = 'block';
             }
         }
@@ -179,19 +212,19 @@ async function autoCheckWebsiteUpdated() {
         if (systemVersion && remote.system) {
             const comparison = compareVersions(systemVersion, remote.system);
             if (comparison < 0) {
-                systemVersionNotice.textContent = t('⚠️ You are lagging behind in progress!', '⚠️ 你的进度落后了！');
+                systemVersionNotice.textContent = t('⚠️ Your System version is behind the extension reference!', '⚠️ 你的 System 进度低于插件参考版本！');
                 systemVersionNotice.style.display = 'block';
-                webVersionData.textContent = t('Aim for ' + remote.system + ' system version!', '目标系统版本：' + remote.system + '！');
-                webVersionData.style.display = 'block';
+                systemVersionData.textContent = t('Aim for ' + remote.system + ' system version!', '目标系统版本：' + remote.system + '！');
+                systemVersionData.style.display = 'block';
             }
         }
 
         if (patchVersion && remote.patch && patchVersionNotice && patchVersionData) {
             const comparison = compareVersions(patchVersion, remote.patch);
             if (comparison > 0) {
-                patchVersionNotice.textContent = t('⚠️ Patch version is changed. Check patch notes!', '⚠️ 补丁版本已变更，请查看更新说明！');
+                patchVersionNotice.textContent = t('⚠️ Game patch version differs from the extension reference. Check patch notes!', '⚠️ 游戏补丁版本与插件参考版本不一致，请查看更新说明！');
                 patchVersionNotice.style.display = 'block';
-                patchVersionData.textContent = t('Detected: ' + patchVersion + ' · Old: ' + remote.patch, '检测到：' + patchVersion + ' · 旧版本：' + remote.patch);
+                patchVersionData.textContent = t('Detected: ' + patchVersion + ' · Reference: ' + remote.patch, '检测到：' + patchVersion + ' · 参考版本：' + remote.patch);
                 patchVersionData.style.display = 'block';
             }
         }

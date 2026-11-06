@@ -1,7 +1,4 @@
-// Info Panel visibility toggles (Daily Ops / Markets) — information panels, not automation.
-const dailyOpsPanelToggle = document.getElementById('dailyOpsPanelToggle');
-const dailyOpsPanelStatus = document.getElementById('dailyOpsPanelStatus');
-const dailyOpsPanelSection = document.getElementById('dailyOpsPanelSection');
+// Info Panel visibility toggles (Markets) — information panels, not automation.
 const marketsPanelToggle = document.getElementById('marketsPanelToggle');
 const marketsPanelStatus = document.getElementById('marketsPanelStatus');
 const marketsPanelSection = document.getElementById('marketsPanelSection');
@@ -20,21 +17,13 @@ function applyPanelVisibility(toggleEl, statusEl, section, key) {
     chrome.storage.sync.set({ [key]: enabled });
 }
 
-chrome.storage.sync.get(['dailyOpsPanelEnabled', 'marketsPanelEnabled'], (data) => {
-    if (dailyOpsPanelToggle) dailyOpsPanelToggle.checked = data.dailyOpsPanelEnabled !== false;
+chrome.storage.sync.get('marketsPanelEnabled', (data) => {
     if (marketsPanelToggle) marketsPanelToggle.checked = data.marketsPanelEnabled !== false;
-    if (dailyOpsPanelToggle && dailyOpsPanelStatus && dailyOpsPanelSection) {
-        applyPanelVisibility(dailyOpsPanelToggle, dailyOpsPanelStatus, dailyOpsPanelSection, 'dailyOpsPanelEnabled');
-    }
     if (marketsPanelToggle && marketsPanelStatus && marketsPanelSection) {
         applyPanelVisibility(marketsPanelToggle, marketsPanelStatus, marketsPanelSection, 'marketsPanelEnabled');
     }
 });
 
-if (dailyOpsPanelToggle && dailyOpsPanelStatus && dailyOpsPanelSection) {
-    dailyOpsPanelToggle.addEventListener('change', () =>
-        applyPanelVisibility(dailyOpsPanelToggle, dailyOpsPanelStatus, dailyOpsPanelSection, 'dailyOpsPanelEnabled'));
-}
 if (marketsPanelToggle && marketsPanelStatus && marketsPanelSection) {
     marketsPanelToggle.addEventListener('change', () =>
         applyPanelVisibility(marketsPanelToggle, marketsPanelStatus, marketsPanelSection, 'marketsPanelEnabled'));
