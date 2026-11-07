@@ -11,7 +11,7 @@ import {
 } from './state.js';
 
 import {
-    calculateAnalysis, findBestHardware,
+    calculateAnalysis, findBestHardware, findBestSoftwareForAbility, sameHardware,
     findHackSoftwareForServerType, findSearchSoftwareForServerType,
     getServerTypeName
 } from '../shared/loadout-resolver.js';
@@ -139,96 +139,38 @@ export async function ensureHackOnlyLoadout(serverId, getLoginStatusFn) {
     }
 
     var allSw = loadout.ownedSoftware || [];
-    var equippedSwIds = (loadout.equippedSoftware || []).map(function (s) { return s.id; });
     var hackCandidates = findHackSoftwareForServerType(allSw, serverTypeName);
-    log('Loadout: found ' + hackCandidates.length + ' hack candidate(s) for ' + serverTypeName + (hackCandidates.length > 0 ? ' \u2014 best: ' + hackCandidates[0].sw.name + ' (power ' + (hackCandidates[0].spec.power || []).join('-') + ')' : ''));
-
+    log('Loadout: found ' + hackCandidates.length + ' hack candidate(s) for ' + serverTypeName);
     if (hackCandidates.length === 0) {
         log('Loadout: no HACK software available for ' + serverTypeName, 'warn');
         return { ok: false, reason: 'no-hack-software' };
     }
 
-    var bestHack = hackCandidates[0];
-    var targetSwIds = [bestHack.sw.id];
+    var plan = findBestSoftwareForAbility(loadout, hackCandidates, 'HACK', serverDefenceRate, serverTypeName);
+    if (!plan) {
+        log('Loadout: no bootable HACK plan found for ' + serverTypeName, 'warn');
+        return { ok: false, reason: 'cannot-boot' };
+    }
+
+    log('Loadout: best HACK plan "' + plan.software.name + '" \u2014 power: ' + plan.power +
+        (serverDefenceRate > 0 ? ' / required: ' + serverDefenceRate : '') +
+        (plan.sufficient ? ' \u2713' : ' \u2717'));
+
+    if (serverDefenceRate > 0 && !plan.sufficient) {
+        log('Loadout: best achievable HACK power is below serverDefenceRate (' + serverDefenceRate + ')', 'error');
+        return { ok: false, reason: 'insufficient-power', hackPower: plan.power, defenceRate: serverDefenceRate };
+    }
+
+    var currentSwIds = (loadout.equippedSoftware || []).map(function (s) { return s.id; });
     var currentHw = loadout.equippedHardware || {};
-    var analysis = calculateAnalysis(loadout, targetSwIds);
-    var targetHw = currentHw;
-    var alreadyBest = equippedSwIds.length === 1 && equippedSwIds[0] === bestHack.sw.id;
-
-    if (alreadyBest) {
-        log('Loadout: best HACK software "' + bestHack.sw.name + '" already equipped alone');
+    var sameSw = currentSwIds.length === 1 && currentSwIds[0] === plan.softwareId;
+    var sameHw = sameHardware(currentHw, plan.hardware);
+    if (!sameSw || !sameHw) {
+        log('Loadout: equipping HACK software "' + plan.software.name + '" (computed power: ' + plan.power + ') for ' + serverTypeName);
+        await applyLoadoutChange(loadout, plan.hardware, [plan.softwareId]);
     }
 
-    if (!analysis.canBoot) {
-        log('Loadout: current hardware cannot boot hack software \u2014 finding compatible hardware');
-        var betterHw = findBestHardware(loadout, targetSwIds);
-        if (betterHw) {
-            targetHw = betterHw;
-        } else {
-            log('Loadout: cannot boot hack software \u2014 skipping loadout change', 'warn');
-            return { ok: false, reason: 'cannot-boot' };
-        }
-    }
-
-    var checkLoadout = JSON.parse(JSON.stringify(loadout));
-    checkLoadout.equippedHardware = targetHw;
-    var checkAnalysis = calculateAnalysis(checkLoadout, targetSwIds);
-    var computedHackPower = 0;
-    var hackSa = checkAnalysis.swAnalysis[bestHack.sw.id];
-    if (hackSa) {
-        for (var ai = 0; ai < hackSa.abilities.length; ai++) {
-            if (hackSa.abilities[ai].type === 'HACK') {
-                computedHackPower = hackSa.abilities[ai].computedPower;
-                break;
-            }
-        }
-    }
-    if (serverDefenceRate > 0) {
-        log('Loadout: hack power comparison \u2014 hackPower: ' + computedHackPower + ' vs serverDefenceRate: ' + serverDefenceRate + (computedHackPower >= serverDefenceRate ? ' \u2713' : ' \u2717 INSUFFICIENT'));
-    } else {
-        log('Loadout: computed hack power: ' + computedHackPower + ' (serverDefenceRate unknown)');
-    }
-
-    if (serverDefenceRate > 0 && computedHackPower < serverDefenceRate) {
-        log('Loadout: hack power insufficient \u2014 trying hardware upgrade to boost power');
-        var hwUpgrade = findBestHardware(loadout, targetSwIds);
-        if (hwUpgrade) {
-            var upgradeLoadout = JSON.parse(JSON.stringify(loadout));
-            upgradeLoadout.equippedHardware = hwUpgrade;
-            var upgradeAnalysis = calculateAnalysis(upgradeLoadout, targetSwIds);
-            var upgradedPower = 0;
-            var upgradeSa = upgradeAnalysis.swAnalysis[bestHack.sw.id];
-            if (upgradeSa) {
-                for (var uai = 0; uai < upgradeSa.abilities.length; uai++) {
-                    if (upgradeSa.abilities[uai].type === 'HACK') {
-                        upgradedPower = upgradeSa.abilities[uai].computedPower;
-                        break;
-                    }
-                }
-            }
-            if (upgradedPower > computedHackPower) {
-                targetHw = hwUpgrade;
-                computedHackPower = upgradedPower;
-                log('Loadout: hardware upgrade found \u2014 hack power: ' + upgradedPower + ' vs serverDefenceRate: ' + serverDefenceRate + (upgradedPower >= serverDefenceRate ? ' \u2713' : ' \u2717 still insufficient'));
-                if (upgradedPower < serverDefenceRate) {
-                    log('Loadout: cannot reach required hack power (' + serverDefenceRate + ') \u2014 best achievable: ' + upgradedPower, 'error');
-                    return { ok: false, reason: 'insufficient-power', hackPower: upgradedPower, defenceRate: serverDefenceRate };
-                }
-            } else {
-                log('Loadout: no better hardware available \u2014 best hack power: ' + computedHackPower, 'warn');
-                return { ok: false, reason: 'insufficient-power', hackPower: computedHackPower, defenceRate: serverDefenceRate };
-            }
-        } else {
-            log('Loadout: no hardware upgrade available', 'warn');
-            return { ok: false, reason: 'insufficient-power', hackPower: computedHackPower, defenceRate: serverDefenceRate };
-        }
-    }
-
-    if (!alreadyBest || targetHw !== currentHw) {
-        log('Loadout: equipping HACK software "' + bestHack.sw.name + '" (power ' + (bestHack.spec.power || []).join('-') + ') for ' + serverTypeName);
-        await applyLoadoutChange(loadout, targetHw, targetSwIds);
-    }
-    return { ok: true, hackPower: computedHackPower, defenceRate: serverDefenceRate };
+    return { ok: true, hackPower: plan.power, defenceRate: serverDefenceRate };
 }
 
 // ---- Ensure search-only loadout for a server ----
@@ -248,47 +190,30 @@ export async function ensureSearchOnlyLoadout(serverId) {
     }
 
     var allSw = loadout.ownedSoftware || [];
-    var equippedSwIds = (loadout.equippedSoftware || []).map(function (s) { return s.id; });
     var searchCandidates = findSearchSoftwareForServerType(allSw, serverTypeName);
     if (searchCandidates.length === 0) {
         log('Loadout: no SEARCH software available for ' + serverTypeName);
         return;
     }
 
-    var bestSearch = searchCandidates[0];
-    var targetSwIds = [bestSearch.sw.id];
-    var bestHw = findBestHardware(loadout, targetSwIds);
-    var targetHw = bestHw || loadout.equippedHardware || {};
-    var finalAnalysis = calculateAnalysis(
-        Object.assign({}, loadout, { equippedHardware: targetHw }),
-        targetSwIds
-    );
-    if (!finalAnalysis.canBoot) {
-        log('Loadout: cannot boot search software \u2014 skipping loadout change', 'warn');
+    var plan = findBestSoftwareForAbility(loadout, searchCandidates, 'SEARCH', 0, serverTypeName);
+    if (!plan) {
+        log('Loadout: no bootable SEARCH plan found for ' + serverTypeName, 'warn');
         return;
     }
-    var searchPower = 0;
-    for (var swId in finalAnalysis.swAnalysis) {
-        var ab = finalAnalysis.swAnalysis[swId].abilities;
-        for (var ai = 0; ai < ab.length; ai++) {
-            if (ab[ai].type === 'SEARCH') searchPower = ab[ai].computedPower;
-        }
-    }
-    var swAlreadyOk = equippedSwIds.length === 1 && equippedSwIds[0] === bestSearch.sw.id;
-    var curHw = loadout.equippedHardware || {};
-    var hwAlreadyOk = (!bestHw) ||
-        ((curHw.cpu && curHw.cpu.id) === (targetHw.cpu && targetHw.cpu.id) &&
-         (curHw.gpu && curHw.gpu.id) === (targetHw.gpu && targetHw.gpu.id) &&
-         (curHw.ram && curHw.ram.id) === (targetHw.ram && targetHw.ram.id) &&
-         (curHw.psu && curHw.psu.id) === (targetHw.psu && targetHw.psu.id));
-    if (swAlreadyOk && hwAlreadyOk) {
-        log('Loadout: best SEARCH software "' + bestSearch.sw.name + '" already equipped with optimal hardware (power: ' + searchPower + '/' + bestSearch.spec.power[1] + ')');
-        return searchPower;
+
+    var currentSwIds = (loadout.equippedSoftware || []).map(function (s) { return s.id; });
+    var currentHw = loadout.equippedHardware || {};
+    var sameSw = currentSwIds.length === 1 && currentSwIds[0] === plan.softwareId;
+    var sameHw = sameHardware(currentHw, plan.hardware);
+    if (sameSw && sameHw) {
+        log('Loadout: best SEARCH software and hardware already equipped (power: ' + plan.power + ')');
+        return plan.power;
     }
 
-    log('Loadout: equipping SEARCH software "' + bestSearch.sw.name + '" (computed power: ' + searchPower + '/' + bestSearch.spec.power[1] + ') for ' + serverTypeName);
-    await applyLoadoutChange(loadout, targetHw, targetSwIds);
-    return searchPower;
+    log('Loadout: equipping SEARCH software "' + plan.software.name + '" (computed power: ' + plan.power + ') for ' + serverTypeName);
+    await applyLoadoutChange(loadout, plan.hardware, [plan.softwareId]);
+    return plan.power;
 }
 
 // ---- Try hack loadout swap after sai-hack-impossible ----

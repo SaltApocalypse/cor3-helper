@@ -177,18 +177,75 @@ export function findDecryptSoftwareForFileType(allSoftware, fileType) {
     return candidates;
 }
 
-// Find the best hardware set from owned hardware that maximizes power
-// while still booting with the given software set.
-export function findBestHardware(loadout, softwareIds) {
+// Return the computed power of one ability on one software.
+// `target` optionally narrows to a server type or file type.
+export function abilityPower(analysis, softwareId, abilityType, target) {
+    var sw = analysis && analysis.swAnalysis ? analysis.swAnalysis[softwareId] : null;
+    if (!sw || !sw.abilities) return 0;
+    var best = 0;
+    for (var i = 0; i < sw.abilities.length; i++) {
+        var ab = sw.abilities[i];
+        if (ab.type !== abilityType) continue;
+        if (target) {
+            var hasServer = Array.isArray(ab.serverTypes) && ab.serverTypes.length > 0;
+            var hasFile = Array.isArray(ab.fileTypes) && ab.fileTypes.length > 0;
+            var matches = (!hasServer && !hasFile) ||
+                (hasServer && ab.serverTypes.indexOf(target) >= 0) ||
+                (hasFile && ab.fileTypes.indexOf(target) >= 0);
+            if (!matches) continue;
+        }
+        if (ab.computedPower > best) best = ab.computedPower;
+    }
+    return best;
+}
+
+export function sameHardware(a, b) {
+    var slots = ['cpu', 'gpu', 'ram', 'psu'];
+    for (var i = 0; i < slots.length; i++) {
+        var slot = slots[i];
+        var aId = a && a[slot] ? a[slot].id : null;
+        var bId = b && b[slot] ? b[slot].id : null;
+        if (aId !== bId) return false;
+    }
+    return true;
+}
+
+export function countHardwareChanges(current, target) {
+    var slots = ['cpu', 'gpu', 'ram', 'psu'];
+    var count = 0;
+    for (var i = 0; i < slots.length; i++) {
+        var slot = slots[i];
+        var aId = current && current[slot] ? current[slot].id : null;
+        var bId = target && target[slot] ? target[slot].id : null;
+        if (aId !== bId) count++;
+    }
+    return count;
+}
+
+// Find the best hardware set from owned hardware for a software set.
+// When abilityType is supplied, score only that ability; otherwise retain the
+// legacy total-power score for callers that still need it.
+export function findBestHardware(loadout, softwareIds, abilityType, target) {
     var owned = loadout.ownedHardware || [];
+    var currentHw = loadout.equippedHardware || {};
     var byCat = { CPU: [], GPU: [], RAM: [], PSU: [] };
     for (var i = 0; i < owned.length; i++) {
         var cat = (owned[i].category || '').toUpperCase();
         if (byCat[cat]) byCat[cat].push(owned[i]);
     }
+    // Include the currently equipped parts even if the runtime inventory omits them.
+    var currentSlots = { cpu: 'CPU', gpu: 'GPU', ram: 'RAM', psu: 'PSU' };
+    for (var slot in currentSlots) {
+        var item = currentHw[slot];
+        if (!item) continue;
+        var list = byCat[currentSlots[slot]];
+        var exists = list.some(function (x) { return x.id === item.id; });
+        if (!exists) list.push(item);
+    }
     if (byCat.CPU.length === 0 || byCat.GPU.length === 0 || byCat.RAM.length === 0 || byCat.PSU.length === 0) return null;
+
     var bestHw = null;
-    var bestPower = -1;
+    var bestScore = -1;
     for (var ci = 0; ci < byCat.CPU.length; ci++) {
         for (var gi = 0; gi < byCat.GPU.length; gi++) {
             var psuNeed = (byCat.CPU[ci].specs.cpuConsuming || 0) + (byCat.GPU[gi].specs.gpuConsuming || 0);
@@ -200,21 +257,81 @@ export function findBestHardware(loadout, softwareIds) {
                     testLoadout.equippedHardware = testHw;
                     var analysis = calculateAnalysis(testLoadout, softwareIds);
                     if (!analysis.canBoot) continue;
-                    var totalPower = 0;
+                    var score = 0;
                     for (var swId in analysis.swAnalysis) {
-                        var ab = analysis.swAnalysis[swId].abilities;
-                        for (var ai = 0; ai < ab.length; ai++) totalPower += ab[ai].computedPower;
+                        if (abilityType) {
+                            score += abilityPower(analysis, swId, abilityType, target);
+                        } else {
+                            var ab = analysis.swAnalysis[swId].abilities;
+                            for (var ai = 0; ai < ab.length; ai++) score += ab[ai].computedPower;
+                        }
                     }
-                    if (totalPower > bestPower) {
-                        bestPower = totalPower;
+                    if (score > bestScore || (score === bestScore && sameHardware(testHw, currentHw))) {
+                        bestScore = score;
                         bestHw = testHw;
                     }
                 }
-                break;
             }
         }
     }
     return bestHw;
+}
+
+// Evaluate every matching software candidate with the best hardware for the
+// requested ability and return the best achievable plan.
+export function findBestSoftwareForAbility(loadout, candidates, abilityType, requiredPower, target) {
+    var best = null;
+    var seen = {};
+    var equipped = loadout.equippedSoftware || [];
+    var currentSoftwareId = equipped.length === 1 ? equipped[0].id : null;
+    var currentHw = loadout.equippedHardware || {};
+    var required = Number(requiredPower) || 0;
+
+    for (var i = 0; i < (candidates || []).length; i++) {
+        var candidate = candidates[i];
+        if (!candidate || !candidate.sw || seen[candidate.sw.id]) continue;
+        seen[candidate.sw.id] = true;
+
+        var softwareIds = [candidate.sw.id];
+        var hardware = findBestHardware(loadout, softwareIds, abilityType, target);
+        if (!hardware) continue;
+
+        var testLoadout = JSON.parse(JSON.stringify(loadout));
+        testLoadout.equippedHardware = hardware;
+        var analysis = calculateAnalysis(testLoadout, softwareIds);
+        if (!analysis.canBoot) continue;
+
+        var power = abilityPower(analysis, candidate.sw.id, abilityType, target);
+        var plan = {
+            candidate: candidate,
+            softwareId: candidate.sw.id,
+            software: candidate.sw,
+            spec: candidate.spec,
+            hardware: hardware,
+            power: power,
+            canBoot: true,
+            sufficient: required > 0 ? power >= required : true,
+            switchCost: countHardwareChanges(currentHw, hardware),
+            isCurrentSoftware: candidate.sw.id === currentSoftwareId
+        };
+
+        if (!best || isBetterPlan(plan, best, required)) best = plan;
+    }
+    return best;
+}
+
+function isBetterPlan(plan, best, requiredPower) {
+    if (requiredPower > 0) {
+        if (plan.sufficient !== best.sufficient) return plan.sufficient;
+        if (plan.sufficient && best.sufficient) {
+            if (plan.isCurrentSoftware !== best.isCurrentSoftware) return plan.isCurrentSoftware;
+            if (plan.switchCost !== best.switchCost) return plan.switchCost < best.switchCost;
+        }
+    }
+    if (plan.power !== best.power) return plan.power > best.power;
+    if (plan.isCurrentSoftware !== best.isCurrentSoftware) return plan.isCurrentSoftware;
+    if (plan.switchCost !== best.switchCost) return plan.switchCost < best.switchCost;
+    return false;
 }
 
 // Find the lowest-priority equipped software that can be removed (not the protected one)
