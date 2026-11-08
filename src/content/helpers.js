@@ -20,10 +20,21 @@ export function setAutomationActive(v) { _automationActive = v; }
 export function getAutomationQueue() { return _automationQueue; }
 export function setAutomationQueue(v) { _automationQueue = v; }
 
+function _postAutomationStatus(status) {
+    try {
+        window.postMessage({ type: 'COR3_AUTOMATION_STATUS', status: status }, '*');
+    } catch (e) { /* ignore */ }
+}
+
 export function _broadcastQueueStatus() {
     if (!isContextValid()) return;
-    try { chrome.storage.local.set({ automationQueueStatus: _automationQueueStatus() }); } catch (e) {}
+    var status = _automationQueueStatus();
+    try { chrome.storage.local.set({ automationQueueStatus: status }); } catch (e) {}
+    _postAutomationStatus(status);
 }
+
+// Publish the initial idle state so MAIN-world discovery can see it.
+_postAutomationStatus(_automationQueueStatus());
 
 export function _automationFinish(type) {
     if (_automationActive && _automationActive.type === type) {

@@ -1,6 +1,6 @@
 import { getCor3Tab, bgAutoJobLog } from './helpers.js';
 import { MARKET_IDS, LOG_JOB_TYPES } from '../shared/server-constants.js';
-import { FALLBACK_PATH_MAP, FALLBACK_SERVER_PRIORITY } from '../shared/server-map.js';
+import { ServerMap, FALLBACK_PATH_MAP, FALLBACK_SERVER_PRIORITY } from '../shared/server-map.js';
 
 const SUPPORTED_JOB_TYPES_BG = [
     'File Decryption', 'IP Injection', 'Data Download', 'Log Deletion',
@@ -29,8 +29,25 @@ function resolveRecentJobMarketBg(recentJob, fallbackKey, marketData, darkMarket
     return fallbackKey;
 }
 
-export function collectJobsBg(marketData, darkMarketData, completedResults, serverMaintenanceMap, soyuzMarketData, usolMarketData) {
-    const SERVER_PRIORITY = FALLBACK_SERVER_PRIORITY;
+export function collectJobsBg(marketData, darkMarketData, completedResults, serverMaintenanceMap, soyuzMarketData, usolMarketData, networkMapData) {
+    const graph = new ServerMap();
+    if (networkMapData && Array.isArray(networkMapData.servers)) {
+        const maintMap = serverMaintenanceMap || {};
+        const servers = networkMapData.servers.map((srv) => {
+            const info = maintMap[srv.id];
+            if (!info) return srv;
+            return Object.assign({}, srv, {
+                isInMaintenance: info.isInMaintenance !== undefined ? info.isInMaintenance : srv.isInMaintenance,
+                maintenanceEndsAt: info.maintenanceEndsAt !== undefined ? info.maintenanceEndsAt : srv.maintenanceEndsAt,
+                timeUntilMaintenance: info.timeUntilMaintenance !== undefined ? info.timeUntilMaintenance : srv.timeUntilMaintenance
+            });
+        });
+        graph.update({
+            servers: servers,
+            connections: networkMapData.connections || []
+        });
+    }
+    const SERVER_PRIORITY = graph.isReady() ? graph.getServerPriority() : FALLBACK_SERVER_PRIORITY;
     const JOB_TYPE_PRIORITY = ['IP Injection', 'IP Cleanup', 'Data Upload', 'Data Download', 'Log Deletion', 'Log Download', 'File Elimination', 'File Decryption', 'Decrypt & Extract'];
     const maint = serverMaintenanceMap || {};
     const now = Date.now();
@@ -43,6 +60,21 @@ export function collectJobsBg(marketData, darkMarketData, completedResults, serv
         }
     }
     function getPathBlocker(serverName) {
+        if (graph.isReady()) {
+            const check = graph.checkPathMaintenance(serverName);
+            if (!check.blocked) return { blocked: false };
+            let blockerId = null;
+            if (check.blockerName) {
+                const blocker = graph.getServerByName(check.blockerName);
+                if (blocker) blockerId = blocker.id;
+            }
+            return {
+                blocked: true,
+                blockerName: check.blockerName,
+                blockerId: blockerId,
+                maintenanceEndsAt: check.endsAt || null
+            };
+        }
         const path = SERVER_PATH_MAP[serverName];
         if (!path) return { blocked: false };
         for (const srv of path) {
@@ -136,14 +168,14 @@ export async function scheduleAutoFinishAllBg() {
         return;
     }
 
-    const { marketData, darkMarketData, soyuzMarketData, usolMarketData, autoJobsRunning, serverMaintenanceMap } = await chrome.storage.local.get(['marketData', 'darkMarketData', 'soyuzMarketData', 'usolMarketData', 'autoJobsRunning', 'serverMaintenanceMap']);
+    const { marketData, darkMarketData, soyuzMarketData, usolMarketData, autoJobsRunning, serverMaintenanceMap, networkMapData } = await chrome.storage.local.get(['marketData', 'darkMarketData', 'soyuzMarketData', 'usolMarketData', 'autoJobsRunning', 'serverMaintenanceMap', 'networkMapData']);
 
     if (autoJobsRunning) {
         return;
     }
 
     const { autoJobsCompletedResults: crSched } = await chrome.storage.local.get('autoJobsCompletedResults');
-    const availableNow = collectJobsBg(marketData, darkMarketData, crSched || [], serverMaintenanceMap, soyuzMarketData, usolMarketData);
+    const availableNow = collectJobsBg(marketData, darkMarketData, crSched || [], serverMaintenanceMap, soyuzMarketData, usolMarketData, networkMapData);
     if (availableNow.length > 0) {
         bgAutoJobLog('🔄 Auto Finish All: jobs available now — starting in 10s');
         await chrome.alarms.create('autoFinishAllJobs', { delayInMinutes: 10 / 60 });
@@ -311,8 +343,8 @@ export async function runAutoFinishAllBg() {
             }, 30000);
         });
 
-        const { marketData, darkMarketData, soyuzMarketData, usolMarketData, autoJobsCompletedResults: crRun, serverMaintenanceMap } = await chrome.storage.local.get(['marketData', 'darkMarketData', 'soyuzMarketData', 'usolMarketData', 'autoJobsCompletedResults', 'serverMaintenanceMap']);
-        const jobsToRun = collectJobsBg(marketData, darkMarketData, crRun || [], serverMaintenanceMap, soyuzMarketData, usolMarketData);
+        const { marketData, darkMarketData, soyuzMarketData, usolMarketData, autoJobsCompletedResults: crRun, serverMaintenanceMap, networkMapData } = await chrome.storage.local.get(['marketData', 'darkMarketData', 'soyuzMarketData', 'usolMarketData', 'autoJobsCompletedResults', 'serverMaintenanceMap', 'networkMapData']);
+        const jobsToRun = collectJobsBg(marketData, darkMarketData, crRun || [], serverMaintenanceMap, soyuzMarketData, usolMarketData, networkMapData);
 
         if (jobsToRun.length > 0) {
             const skippedList = jobsToRun._skippedMaintenance || [];

@@ -62,6 +62,15 @@ export function setupEngineRelay() {
         if (event.data && event.data.type === 'COR3_WS_NETWORK_MAP') {
             chrome.storage.local.set({ serverMaintenanceMap: event.data.servers });
         }
+        if (event.data && event.data.type === 'COR3_WS_MAP_DATA') {
+            chrome.storage.local.set({
+                networkMapData: {
+                    servers: event.data.servers || [],
+                    connections: event.data.connections || []
+                },
+                networkMapUpdatedAt: Date.now()
+            });
+        }
         if (event.data && event.data.type === 'COR3_DEV_TC_REACH_PROGRESS') {
             chrome.storage.local.set({ _devTcReachProgress: { log: event.data.log || [] } });
         }

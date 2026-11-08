@@ -13,11 +13,55 @@ import {
 } from './state.js';
 
 import { ensureHackOnlyLoadout, tryHackLoadoutSwap } from './loadout.js';
+import { ServerMap } from '../shared/server-map.js';
 import { isHackMinigameOpen } from '../shared/hack-utils.js';
+
+// ---- Dynamic network graph ----
+
+var _networkGraph = new ServerMap();
+var _networkGraphFetchedAt = 0;
+var _networkGraphPromise = null;
+var NETWORK_GRAPH_TTL_MS = 10000;
+
+async function ensureNetworkGraph(forceRefresh) {
+    var now = Date.now();
+    if (!forceRefresh && _networkGraph.isReady() && now - _networkGraphFetchedAt < NETWORK_GRAPH_TTL_MS) {
+        return _networkGraph;
+    }
+    if (_networkGraphPromise) return _networkGraphPromise;
+
+    _networkGraphPromise = (async function () {
+        sendCmd('get.map', {});
+        try {
+            var fullMap = await waitForEvent('COR3_WS_MAP_DATA', 10000);
+            if (fullMap && fullMap.servers) {
+                _networkGraph.update({
+                    servers: fullMap.servers,
+                    connections: fullMap.connections || []
+                });
+                _networkGraphFetchedAt = Date.now();
+                if (_networkGraph.isReady()) return _networkGraph;
+            }
+        } catch (e) {
+            log('Network graph fetch timed out — falling back to static paths', 'warn');
+        }
+        return null;
+    })();
+
+    try {
+        return await _networkGraphPromise;
+    } finally {
+        _networkGraphPromise = null;
+    }
+}
 
 // ---- Maintenance check ----
 
 export async function checkPathMaintenance(serverName) {
+    var graph = await ensureNetworkGraph();
+    if (graph && graph.isReady()) {
+        return graph.checkPathMaintenance(serverName);
+    }
     var path = SERVER_PATH_MAP[serverName];
     if (!path || path.length === 0) return { blocked: false };
     var mapData = _cachedMapData;
@@ -101,10 +145,11 @@ export async function setEndpoint(serverId) {
             log(name + ' is in maintenance — skipping', 'error');
             return false;
         }
-        // Try path-through: hack intermediate servers on the path
-        var path = getPathForServerName(name);
+        // Try path-through using the live graph first, then static fallback.
+        var graph = await ensureNetworkGraph(true);
+        var path = graph && graph.isReady() ? graph.findBestReachablePath(name) : getPathForServerName(name);
         if (!path || path.length <= 1) {
-            var noPathCheck = await checkPathMaintenance(name);
+            var noPathCheck = graph && graph.isReady() ? graph.checkPathMaintenance(name) : await checkPathMaintenance(name);
             if (noPathCheck.blocked) {
                 var nMins = Math.ceil(noPathCheck.remainingMs / 60000);
                 log(name + ' unreachable (' + noPathCheck.blockerName + ' in maintenance, ~' + nMins + 'm remaining)', 'error');

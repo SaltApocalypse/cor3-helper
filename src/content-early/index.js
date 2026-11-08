@@ -33,6 +33,12 @@ import './drone.js';
 // 8. Market requests (HOME, D4RK, SOYUZ, USOL — full, jobs-only, path-through, refresh)
 import { __cor3PostUnreachable } from './market-requests.js';
 
+// 8b. Read-only network graph diagnostics for live path/hidden-link investigation
+import './network-diagnostics.js';
+
+// 8c. Resumable hidden-connection discovery
+import './network-discovery.js';
+
 // 9. Initial data fetch orchestration
 import './initial-fetch.js';
 

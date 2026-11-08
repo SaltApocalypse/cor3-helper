@@ -6,6 +6,7 @@ import {
     getMarketRefreshAbortId
 } from './state.js';
 import { wsSend } from './ws-send.js';
+import { ServerMap } from '../shared/server-map.js';
 
 function trackMarketRequest(marketId) {
     window.__cor3CurrentMarketFetch = marketId;
@@ -128,111 +129,24 @@ export function __cor3FetchMapData() {
 // each path being an array of { id, name } objects (excluding Home, including target).
 // Paths are sorted shortest-first.
 export function __cor3FindPathsToServer(servers, connections, targetServerId) {
-    var serverLookup = {};
-    var adjacency = {};
-    var homeId = null;
-    for (var i = 0; i < servers.length; i++) {
-        var s = servers[i];
-        serverLookup[s.id] = s;
-        adjacency[s.id] = [];
-        if (s.serverTypeName === 'Home' || s.serverName === 'Home Server') {
-            homeId = s.id;
-        }
-    }
-    for (var j = 0; j < connections.length; j++) {
-        var c = connections[j];
-        if (adjacency[c.serverA] && adjacency[c.serverB]) {
-            adjacency[c.serverA].push(c.serverB);
-            adjacency[c.serverB].push(c.serverA);
-        }
-    }
-    if (!homeId) return [];
-
-    var allPaths = [];
-    var visited = {};
-    var now = Date.now();
-    function dfs(currentId, path) {
-        if (currentId === targetServerId) {
-            allPaths.push(path.slice());
-            return;
-        }
-        var neighbors = adjacency[currentId] || [];
-        for (var ni = 0; ni < neighbors.length; ni++) {
-            var nb = neighbors[ni];
-            if (!visited[nb]) {
-                if (nb !== targetServerId) {
-                    var nbInfo = serverLookup[nb];
-                    if (nbInfo && nbInfo.isInMaintenance) {
-                        var mEnd = nbInfo.maintenanceEndsAt ? new Date(nbInfo.maintenanceEndsAt).getTime() - now : 0;
-                        if (mEnd > 0) continue;
-                    }
-                }
-                visited[nb] = true;
-                var nbSrv = serverLookup[nb];
-                path.push({ id: nb, name: nbSrv ? nbSrv.serverName : nb.substring(0, 8) });
-                dfs(nb, path);
-                path.pop();
-                visited[nb] = false;
-            }
-        }
-    }
-    visited[homeId] = true;
-    dfs(homeId, []);
-    allPaths.sort(function (a, b) { return a.length - b.length; });
-    return allPaths;
+    var graph = new ServerMap();
+    graph.update({ servers: servers || [], connections: connections || [] });
+    if (!graph.isReady() || !graph.getHomeId()) return [];
+    return graph.findAllPaths(targetServerId);
 }
 
 // Find the first maintenance blocker on any path to target using map data.
 // Returns { blockerName, maintenanceEndsAt } or null.
 function __cor3FindMaintenanceBlocker(servers, connections, targetServerId) {
-    var serverLookup = {};
-    var adjacency = {};
-    var homeId = null;
-    for (var i = 0; i < servers.length; i++) {
-        var s = servers[i];
-        serverLookup[s.id] = s;
-        adjacency[s.id] = [];
-        if (s.serverTypeName === 'Home' || s.serverName === 'Home Server') homeId = s.id;
-    }
-    for (var j = 0; j < connections.length; j++) {
-        var c = connections[j];
-        if (adjacency[c.serverA] && adjacency[c.serverB]) {
-            adjacency[c.serverA].push(c.serverB);
-            adjacency[c.serverB].push(c.serverA);
-        }
-    }
-    if (!homeId) return null;
-    // Find any path (including through maintenance servers) to identify the blocker
-    var visited = {};
-    var queue = [homeId];
-    var parent = {};
-    visited[homeId] = true;
-    while (queue.length > 0) {
-        var cur = queue.shift();
-        if (cur === targetServerId) break;
-        var nbrs = adjacency[cur] || [];
-        for (var ni = 0; ni < nbrs.length; ni++) {
-            if (!visited[nbrs[ni]]) {
-                visited[nbrs[ni]] = true;
-                parent[nbrs[ni]] = cur;
-                queue.push(nbrs[ni]);
-            }
-        }
-    }
-    if (!visited[targetServerId]) return { blockerName: 'no-path', maintenanceEndsAt: null };
-    // Walk the BFS path and find first maintenance server
-    var pathIds = [];
-    var at = targetServerId;
-    while (at && at !== homeId) { pathIds.unshift(at); at = parent[at]; }
-    var now = Date.now();
-    for (var pi = 0; pi < pathIds.length; pi++) {
-        var srv = serverLookup[pathIds[pi]];
-        if (srv && srv.isInMaintenance) {
-            var rem = srv.maintenanceEndsAt ? new Date(srv.maintenanceEndsAt).getTime() - now : 0;
-            if (rem > 0) return { blockerName: srv.serverName, maintenanceEndsAt: srv.maintenanceEndsAt };
-        }
-    }
-    return null;
+    var graph = new ServerMap();
+    graph.update({ servers: servers || [], connections: connections || [] });
+    if (!graph.isReady() || !graph.getHomeId()) return null;
+    var check = graph.checkPathMaintenance(targetServerId);
+    if (!check.blocked) return null;
+    return {
+        blockerName: check.blockerName || 'no-path',
+        maintenanceEndsAt: check.endsAt || null
+    };
 }
 
 // Post an UNREACHABLE message with maintenance info fetched dynamically from network-map
@@ -288,6 +202,26 @@ function __cor3MarketPathThroughRetry(marketType) {
 
         var paths = __cor3FindPathsToServer(mapData.servers, mapData.connections, cfg.serverId);
         if (paths.length === 0) {
+            if (window.__cor3NetworkDiscovery && window.__cor3NetworkDiscovery.discoverIfIdle) {
+                console.log('[COR3 Helper] Path-through: no known path to ' + label + ' — trying idle discovery');
+                window.__cor3NetworkDiscovery.discoverIfIdle({
+                    reason: 'market-no-path',
+                    maxDurationMs: 180000
+                }).then(function (result) {
+                    if (result && result.ok && result.newConnections && result.newConnections.length > 0) {
+                        console.log('[COR3 Helper] Path-through: discovery found new connections — retrying ' + label);
+                        __cor3MarketPathThroughRetry(marketType);
+                        return;
+                    }
+                    window[cfg.flag] = false;
+                    console.log('[COR3 Helper] Path-through: no viable paths to ' + label + ' after discovery');
+                    __cor3PostUnreachable(marketType, null);
+                }).catch(function () {
+                    window[cfg.flag] = false;
+                    __cor3PostUnreachable(marketType, null);
+                });
+                return;
+            }
             window[cfg.flag] = false;
             console.log('[COR3 Helper] Path-through: no viable paths to ' + label + ' (all blocked by maintenance)');
             __cor3PostUnreachable(marketType, null);
