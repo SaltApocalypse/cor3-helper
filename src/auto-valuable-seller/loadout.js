@@ -23,7 +23,7 @@ export async function getLoadoutData(forceRefresh) {
         return _cachedLoadout;
     }
     var sinceLastFetch = Date.now() - _lastLoadoutFetchAt;
-    if (sinceLastFetch < LOADOUT_COOLDOWN_MS && _cachedLoadout) {
+    if (!forceRefresh && sinceLastFetch < LOADOUT_COOLDOWN_MS && _cachedLoadout) {
         return _cachedLoadout;
     }
     log('Loadout: requesting fresh data via WS...');
@@ -42,6 +42,18 @@ export async function getLoadoutData(forceRefresh) {
 }
 
 // ---- Apply loadout change (unequip/equip hardware+software) ----
+
+async function waitForEquippedSoftware(targetSwIds) {
+    for (var attempt = 0; attempt < 3; attempt++) {
+        var fresh = await getLoadoutData(true);
+        var equipped = (fresh && fresh.equippedSoftware) || [];
+        var ids = equipped.map(function (s) { return s.id; });
+        var ok = targetSwIds.every(function (id) { return ids.indexOf(id) >= 0; });
+        if (ok) return fresh;
+        if (attempt < 2) await delay(1000);
+    }
+    return null;
+}
 
 export async function applyLoadoutChange(loadout, targetHw, targetSwIds) {
     log('Loadout: applying change — target sw count: ' + targetSwIds.length);
@@ -109,7 +121,18 @@ export async function applyLoadoutChange(loadout, targetHw, targetSwIds) {
     }
 
     if (changed) {
-        return await getLoadoutData(true);
+        var verified = await waitForEquippedSoftware(targetSwIds);
+        if (!verified) {
+            log('Loadout: target software not visible after apply — re-equipping once', 'warn');
+            for (var rei = 0; rei < targetSwIds.length; rei++) {
+                sendCmd('loadout.equip.software', { moduleConfigId: targetSwIds[rei] });
+                await waitForEvent('COR3_AUTOJOB_LOADOUT', 5000).catch(function () {});
+                await delay(500);
+            }
+            verified = await waitForEquippedSoftware(targetSwIds);
+        }
+        if (verified) log('Loadout: verified target software is equipped');
+        return verified || await getLoadoutData(true);
     }
     return loadout;
 }

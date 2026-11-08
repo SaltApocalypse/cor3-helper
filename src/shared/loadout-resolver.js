@@ -266,7 +266,24 @@ export function findBestHardware(loadout, softwareIds, abilityType, target) {
                             for (var ai = 0; ai < ab.length; ai++) score += ab[ai].computedPower;
                         }
                     }
-                    if (score > bestScore || (score === bestScore && sameHardware(testHw, currentHw))) {
+                    var better = score > bestScore;
+                    if (score === bestScore) {
+                        var testPsuPower = testHw.psu && testHw.psu.specs ? (testHw.psu.specs.psuPower || 0) : 0;
+                        var bestPsuPower = bestHw && bestHw.psu && bestHw.psu.specs ? (bestHw.psu.specs.psuPower || 0) : -1;
+                        if (testPsuPower > bestPsuPower) {
+                            better = true;
+                        } else if (testPsuPower === bestPsuPower) {
+                            var testProtection = testHw.psu && testHw.psu.specs ? (testHw.psu.specs.psuProtection || 0) : 0;
+                            var bestProtection = bestHw && bestHw.psu && bestHw.psu.specs ? (bestHw.psu.specs.psuProtection || 0) : -1;
+                            if (testProtection > bestProtection) {
+                                better = true;
+                            } else if (testProtection === bestProtection &&
+                                sameHardware(testHw, currentHw) && !sameHardware(bestHw, currentHw)) {
+                                better = true;
+                            }
+                        }
+                    }
+                    if (better) {
                         bestScore = score;
                         bestHw = testHw;
                     }

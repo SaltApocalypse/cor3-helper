@@ -582,6 +582,13 @@ function addValuableLog(msg, level = 'info') {
     chrome.storage.local.set({ valuableDebugLogs });
 }
 
+function formatLocalLogTime(ts) {
+    if (!ts) return '';
+    var date = new Date(ts);
+    if (isNaN(date.getTime())) return String(ts).slice(11, 19);
+    return date.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 function renderValuableDebugLogs() {
     if (valuableDebugLogs.length === 0) {
         valuableDebugLogsBody.replaceChildren(_h('div', {style: 'color:var(--text-dim);'}, t('No logs yet.', '暂无日志。')));
@@ -595,7 +602,7 @@ function renderValuableDebugLogs() {
         else if (log.level === 'success') levelClass = ' log-success';
         else if (log.level === 'warn') levelClass = ' log-warn';
         row.className = 'debug-log-row' + levelClass;
-        const displayTime = log.timestamp ? log.timestamp.slice(11, 19) : (log.time || '');
+        const displayTime = formatLocalLogTime(log.timestamp) || log.time || '';
         row.appendChild(_h('span', {className: 'log-time'}, '[' + displayTime + ']'));
         row.appendChild(document.createTextNode(' ' + log.msg));
         frag.appendChild(row);
