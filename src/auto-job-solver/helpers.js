@@ -156,7 +156,7 @@ export async function getLoadoutData(forceRefresh) {
         return state._cachedLoadout;
     }
     var now = Date.now();
-    if (now - state._lastLoadoutFetchAt < state.LOADOUT_COOLDOWN_MS) {
+    if (!forceRefresh && now - state._lastLoadoutFetchAt < state.LOADOUT_COOLDOWN_MS) {
         log('Loadout: fetch cooldown active (' + Math.round(state.LOADOUT_COOLDOWN_MS - (now - state._lastLoadoutFetchAt)) + 'ms remaining) — using cached', 'warn');
         return state._cachedLoadout;
     }
@@ -176,6 +176,18 @@ export async function getLoadoutData(forceRefresh) {
         log('Loadout: fetch timed out — ' + e.message, 'warn');
     }
     log('Loadout: no data available', 'warn');
+    return null;
+}
+
+async function waitForEquippedSoftware(targetSwIds) {
+    for (var attempt = 0; attempt < 3; attempt++) {
+        var fresh = await getLoadoutData(true);
+        var equipped = (fresh && fresh.equippedSoftware) || [];
+        var ids = equipped.map(function (s) { return s.id; });
+        var ok = targetSwIds.every(function (id) { return ids.indexOf(id) >= 0; });
+        if (ok) return fresh;
+        if (attempt < 2) await delay(1000);
+    }
     return null;
 }
 
@@ -216,6 +228,22 @@ export async function applyLoadoutChange(loadout, targetHw, targetSwIds) {
 
     invalidateLoadoutCache();
     await delay(humanDelay());
+
+    if (changed) {
+        var verified = await waitForEquippedSoftware(targetSwIds);
+        if (!verified) {
+            log('Loadout: target software not visible after apply — re-equipping once', 'warn');
+            for (var rei = 0; rei < targetSwIds.length; rei++) {
+                sendCmd('loadout.equip.software', { moduleConfigId: targetSwIds[rei] });
+                try { await waitForEvent('COR3_AUTOJOB_LOADOUT', 5000); } catch (e) { /* continue */ }
+                await delay(500);
+            }
+            verified = await waitForEquippedSoftware(targetSwIds);
+        }
+        if (verified) log('Loadout: verified target software is equipped');
+        return verified || await getLoadoutData(true);
+    }
+    return loadout;
 }
 
 export async function ensureLoadoutForJob(job) {
