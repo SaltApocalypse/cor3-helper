@@ -1,48 +1,78 @@
 name: Release
 
-# Fork release workflow. Push ONLY the specific fork tag, never `git push --tags`:
-# the repository also carries all upstream tags, and each would trigger a release.
+# Release by pushing a tag that matches package.json version + releaseLabel:
+#   git tag v2.1.0-salta
+#   git push origin v2.1.0-salta
 on:
   push:
-    tags: ['v*']
+    tags: ['v2.*-salta']
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-
-      - name: Check versions.json freshness
-        run: |
-          set +e
-          node scripts/sync-versions.js --check
-          status=$?
-          if [ "$status" -eq 2 ]; then
-            echo "::warning::versions.json is stale — run 'npm run sync-versions' and commit it before tagging."
-          elif [ "$status" -ne 0 ]; then
-            echo "::warning::versions.json freshness check failed (network/upstream error); continuing with the tagged file."
-          fi
-          exit 0
+          node-version: 24
+          cache: npm
 
       - run: npm ci
 
-      - run: npm run build
+      - name: Typecheck
+        run: npm run typecheck
 
-      - name: Zip dist
-        run: cd dist && zip -r ../cor3-helper-${{ github.ref_name }}.zip . && cd ..
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Resolve and verify version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          RELEASE_LABEL="$(node -p "require('./package.json').cor3Fork.releaseLabel || ''")"
+          if [ -z "$RELEASE_LABEL" ]; then
+            echo "package.json cor3Fork.releaseLabel is required" >&2
+            exit 1
+          fi
+          EXPECTED="${PKG_VERSION}-${RELEASE_LABEL}"
+          if [ "$VERSION" != "$EXPECTED" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package version $EXPECTED" >&2
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          COR3_CHANNEL=release COR3_VERSION_NAME="$VERSION" npm run build
+
+      - name: Verify manifest identity
+        run: |
+          node -e "const m=require('./dist/manifest.json');if(m.version_name!==process.env.VERSION){console.error('version_name',m.version_name,'!=',process.env.VERSION);process.exit(1)}if(m.name!=='COR3 Helper 2.0'){console.error('unexpected manifest name',m.name);process.exit(1)}"
+
+      - name: Package
+        run: |
+          ZIP="COR3 Helper ${GITHUB_REF_NAME}.zip"
+          (cd dist && zip -r -X "../${ZIP}" .)
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.ref_name }} — Salta fork
-          body_path: docs/releases/${{ github.ref_name }}.md
-          files: cor3-helper-${{ github.ref_name }}.zip
-          # Experimental tags use the `-salta-exp.N` suffix and stay pre-release.
-          prerelease: ${{ contains(github.ref_name, '-exp.') }}
+          tag_name: ${{ github.ref_name }}
+          name: "COR3 Helper ${{ github.ref_name }}"
+          files: |
+            COR3 Helper ${{ github.ref_name }}.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
