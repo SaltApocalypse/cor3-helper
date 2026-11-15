@@ -47,7 +47,7 @@ export class MarketPathService {
             owner: request.owner,
             reason: request.reason,
             now: this.clock.now(),
-            currentEndpoint: snapshot.value.endpointId,
+            currentEndpoint: snapshot.value.endpointId ?? snapshot.value.homeId,
         });
         if (!route.ok || !route.route) {
             return err({ code: 'ROUTE_FAILED', message: route.error?.message ?? 'No usable route' });

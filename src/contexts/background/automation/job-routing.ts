@@ -47,10 +47,13 @@ export class JobRouting {
             reason,
             now: Date.now(),
             currentEndpoint: snapshot.value.endpointId,
+            skipDirect: true,
         });
-        return route.ok
-            ? ok(undefined)
-            : { ok: false as const, error: { code: route.error?.code ?? direct.error.code, message: route.error?.message ?? direct.error.message } };
+        if (route.ok) return ok(undefined);
+        const message = route.error
+            ? `${route.error.message} (direct: ${direct.error.code} ${direct.error.message})`
+            : direct.error.message;
+        return { ok: false as const, error: { code: route.error?.code ?? direct.error.code, message } };
     }
 
     async routeJobToMarket(job: JobOffer, reason: string): Promise<Result<void, GameError>> {

@@ -3,6 +3,7 @@ import { err, ok, type Result } from '../../kernel/result.js';
 import type { NetworkServer, NetworkSnapshot, RouteNode, RoutePlan } from './model.js';
 
 export type NetworkErrorCode =
+    | 'UNKNOWN_START'
     | 'UNKNOWN_TARGET'
     | 'TARGET_IN_MAINTENANCE'
     | 'MAINTENANCE_BLOCKED'
@@ -96,6 +97,17 @@ export class NetworkGraph {
     }
 
     findRoute(targetId: ServerId, now = Date.now()): Result<RoutePlan, NetworkError> {
+        return this.findRouteFrom(this.homeId, targetId, now);
+    }
+
+    /**
+     * Plans from an explicit start node. Direct endpoint routing can leave the
+     * player on an intermediate server; path-through should continue from there
+     * instead of re-walking the whole route from home.
+     */
+    findRouteFrom(startId: ServerId, targetId: ServerId, now = Date.now()): Result<RoutePlan, NetworkError> {
+        const start = this.servers.get(startId);
+        if (!start) return err({ code: 'UNKNOWN_START', message: `Unknown start: ${startId}` });
         const target = this.servers.get(targetId);
         if (!target) return err({ code: 'UNKNOWN_TARGET', message: `Unknown target: ${targetId}` });
         if (maintenanceActive(target, now)) {
@@ -105,10 +117,11 @@ export class NetworkGraph {
                 blockerName: target.name,
             });
         }
+        if (startId === targetId) return ok(this.toPlan({ nodes: [startId], edgeIds: [], hiddenCount: 0 }));
 
-        const path = this.bfs(targetId, true, now, new Set<EdgeId>());
+        const path = this.bfs(startId, targetId, true, now, new Set<EdgeId>());
         if (path) return ok(this.toPlan(path));
-        const unfiltered = this.bfs(targetId, false, now, new Set<EdgeId>());
+        const unfiltered = this.bfs(startId, targetId, false, now, new Set<EdgeId>());
         if (!unfiltered) {
             return err({ code: 'NO_ROUTE', message: `No route to ${target.name}` });
         }
@@ -129,13 +142,19 @@ export class NetworkGraph {
      * the route executor should only need a small number of fallbacks.
      */
     findRoutes(targetId: ServerId, limit = 3, now = Date.now()): Result<RoutePlan[], NetworkError> {
-        const first = this.findRoute(targetId, now);
+        return this.findRoutesFrom(this.homeId, targetId, limit, now);
+    }
+
+    findRoutesFrom(startId: ServerId, targetId: ServerId, limit = 3, now = Date.now()): Result<RoutePlan[], NetworkError> {
+        const start = this.servers.get(startId);
+        if (!start) return err({ code: 'UNKNOWN_START', message: `Unknown start: ${startId}` });
+        const first = this.findRouteFrom(startId, targetId, now);
         if (!first.ok) return first;
         const routes = [first.value];
         const seen = new Set([routeKey(first.value)]);
         for (const edgeId of first.value.edgeIds) {
             if (routes.length >= limit) break;
-            const path = this.bfs(targetId, true, now, new Set<EdgeId>([edgeId]));
+            const path = this.bfs(startId, targetId, true, now, new Set<EdgeId>([edgeId]));
             if (!path) continue;
             const plan = this.toPlan(path);
             const key = routeKey(plan);
@@ -156,10 +175,10 @@ export class NetworkGraph {
         };
     }
 
-    private bfs(targetId: ServerId, skipMaintenance: boolean, now: number, forbidden: ReadonlySet<EdgeId>): FoundPath | null {
-        if (targetId === this.homeId) return { nodes: [this.homeId], edgeIds: [], hiddenCount: 0 };
-        const queue: ServerId[] = [this.homeId];
-        const visited = new Set<ServerId>([this.homeId]);
+    private bfs(startId: ServerId, targetId: ServerId, skipMaintenance: boolean, now: number, forbidden: ReadonlySet<EdgeId>): FoundPath | null {
+        if (targetId === startId) return { nodes: [startId], edgeIds: [], hiddenCount: 0 };
+        const queue: ServerId[] = [startId];
+        const visited = new Set<ServerId>([startId]);
         const parent = new Map<ServerId, { readonly from: ServerId; readonly edgeId: EdgeId; readonly hidden: boolean }>();
 
         while (queue.length > 0) {

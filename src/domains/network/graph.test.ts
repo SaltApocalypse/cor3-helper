@@ -106,6 +106,21 @@ describe('NetworkGraph', () => {
         expect(result).toEqual({ ok: false, error: { code: 'UNKNOWN_TARGET', message: 'Unknown target: missing' } });
     });
 
+    it('plans from an explicit start node', () => {
+        const result = graph({
+            edges: [['home', 'a'], ['a', 'b'], ['b', target]],
+        }).findRoutesFrom(b, target, 2, 1);
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.value[0]?.nodes.map((node) => node.name)).toEqual(['B', 'Target']);
+        }
+    });
+
+    it('reports an unknown start node', () => {
+        const result = graph().findRoutesFrom(asServerId('missing-start'), target, 2, 1);
+        expect(result).toEqual({ ok: false, error: { code: 'UNKNOWN_START', message: 'Unknown start: missing-start' } });
+    });
+
     it('returns bounded alternatives when the best route has alternatives', () => {
         const result = graph({
             edges: [['home', 'a'], ['a', target], ['home', 'b'], ['b', target]],

@@ -77,7 +77,7 @@ describe('Phase 3 Chrome tab adapters', () => {
             ensure: async () => { loadoutCalls++; return { ok: true, value: {} }; },
         });
         expect(await adapter.ensureAccess(asServerId('s1'), { serverTypeName: 'CEDRT' })).toEqual({ ok: true, value: undefined });
-        expect(loadoutCalls).toBe(2);
+        expect(loadoutCalls).toBe(1);
         expect(hackCalls).toBe(2);
     });
 

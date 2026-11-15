@@ -35,8 +35,10 @@ export class ChromeTabServerAccessAdapter implements ServerAccessPort {
             if (!status.ok) return status;
             let access = this.firstAccess(status.value);
             if (!access) {
-                const loadout = await this.ensureHackLoadout(status.value, context);
-                if (!loadout.ok) return loadout;
+                // Try the current loadout first, like v1. Equipping a HACK
+                // loadout before the attempt made direct/unneeded routes fail
+                // with LOADOUT_NO_PLAN even when the server was auto-hackable
+                // or the current module was sufficient.
                 let hack = await this.hackStart(tabId, serverId);
                 if (!hack.ok && this.isRetryableHack(hack.error.code)) {
                     const retryLoadout = await this.ensureHackLoadout(status.value, context);

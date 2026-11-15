@@ -98,7 +98,7 @@ describe('ValuableSellerService', () => {
             'search-files:server-b', 'search-logs:server-b', 'download-file:server-b:f1', 'download-log:server-b:7',
             'search-files:server-a', 'search-logs:server-a', 'download-file:server-a:f1', 'download-log:server-a:7',
         ]);
-        expect(endpoints).toEqual(['server-a', 'market', 'server-a', 'server-b', 'server-a']);
+        expect(endpoints).toEqual(['market', 'server-b', 'server-a']);
     });
 
     it('sells downloaded items market by market and reports actual proceeds', async () => {

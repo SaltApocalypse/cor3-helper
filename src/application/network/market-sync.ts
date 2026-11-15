@@ -29,6 +29,8 @@ export interface MarketSyncError {
 export interface MarketSyncResult {
     readonly snapshot: NetworkSnapshot;
     readonly route: readonly { readonly id: ServerId; readonly name: string }[];
+    readonly direct: boolean;
+    readonly directError?: GameError;
     readonly market: RawMarketSnapshot;
 }
 
@@ -50,6 +52,7 @@ export class MarketSyncService {
             owner: request.owner,
             reason: request.reason,
             now: this.clock.now(),
+            currentEndpoint: snapshot.value.endpointId ?? snapshot.value.homeId,
         });
         if (!route.ok || !route.route) {
             // Keep the route-specific reason in the message. The market panel
@@ -75,6 +78,8 @@ export class MarketSyncService {
         return ok({
             snapshot: snapshot.value,
             route: route.route.nodes.map((node) => ({ id: node.id, name: node.name })),
+            direct: route.direct === true,
+            ...(route.directError ? { directError: route.directError } : {}),
             market: market.value,
         });
     }
