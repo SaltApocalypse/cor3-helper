@@ -1,19 +1,21 @@
 # COR3 WS / mailbox / stash protocol notes
 
-Last updated: 2026-11-03
+Last updated: 2026-11-15 (v2 bridge/storage); game captures 2026-11-03
 Source captures: `cor3-ws-export_1.json` … `cor3-ws-export_5.json` (headers contain the recorded player actions).
 
 > **Security note:** the capture files are local-only and are ignored by git
 > (`cor3-ws-export*.json`) because they contain `jwtToken` values. Never commit
 > them or paste them into a public issue/release.
 
-This document records the live-game events used by the helper, the payload shapes observed in the captures, and the internal bridge messages that connect the page-world interceptor, the content script, and the popup.
+This document records the live-game events used by the helper and the payload shapes observed in the captures.
+
+> **Scope:** sections 1–5 document live-game protocol observations and are kept as reference. Sections 6–7 describe the current v2 extension bridge and persistence. Revalidate game events against a fresh capture after game updates.
 
 ---
 
 ## 1. Frame format
 
-All game events use Socket.IO v4 frames:
+Game events use Socket.IO v5 / Engine.IO 4 framing; binary payloads are msgpack-encoded. Text frames still use packet prefixes such as `42` (Engine.IO message + Socket.IO event):
 
 ```text
 42["<eventName>",{"event":{"name":"<eventName>","action":"<action>"},"data":{...},"requestId":"..."}]
@@ -83,6 +85,7 @@ Key facts:
   - `QUEST_REWARD` / other sources are **not** auto-claimed by this helper.
 - Attachments carry `width`/`height`/`canRotate`, so stash capacity can be estimated.
 - The server pushes a fresh `update.state` when entering the stash room and after claims.
+- In v2 the background joins the dedicated `mail` room and requests `mail get.state` explicitly; it does not rely on stash-room pushes. The payload shape above is unchanged.
 
 ### 2.2 `mail claim.all`
 
@@ -401,71 +404,63 @@ Transient errors are detected by keyword matching (English and Chinese) and must
 
 ---
 
-## 6. Internal bridge (extension ↔ page world)
+## 6. Extension bridge (v2)
 
-### 6.1 content-early → content (`window.postMessage`)
+### 6.1 Page world ↔ content
 
-| Type | Payload | Meaning |
-|---|---|---|
-| `COR3_WS_MAIL` | `{ action, data, error, requestId }` | Any `mail` event (`update.state`, `claim.all`, `claim.item`) |
-| `COR3_WS_GAMEPLAY` | `{ data }` | `gameplay update.state` (block reason) |
-| `COR3_WS_STASH_MOVE` | `{ data, error, requestId }` | `stash move.item` response |
-| `COR3_WS_DRONE_UPDATE` | `{ data }` | `drone-missions update` push |
-| `COR3_WS_CONTAINER_OPENED` | `{ data, error, requestId }` | `open.container` response (error is now forwarded) |
-| `COR3_WS_EXPEDITION_LAUNCH_ERROR` | `{ error, transient, requestId }` | Any launch error that is not one of the known special cases |
+The MAIN-world hub and the content script use `WindowBridgeTransport` over `window.postMessage`.
 
-### 6.2 content → content-early (`window.postMessage`)
+- Envelope: `contracts/bridge.ts` (`version: 1`, `source`, `target`, `type`, `payload`, optional `replyTo`/`timeoutMs`/`bridgeToken`).
+- Content generates a per-page capability token and sends `V2_BRIDGE_HELLO`; the MAIN world rejects bridge envelopes until the token is established.
+- Requests and responses must carry the matching token.
+- Residual risk: a malicious same-origin script can observe page-world messages. The token raises the bar but does not replace a privileged execution world.
 
-| Type | Payload | WS command |
-|---|---|---|
-| `COR3_MAIL_CLAIM_ALL` | `{ messageId }` | `mail claim.all` |
-| `COR3_MAIL_CLAIM_ITEM` | `{ attachmentId, x, y, rotated }` | `mail claim.item` |
-| `COR3_STASH_MOVE_ITEM` | `{ itemId, location, x, y, rotated }` | `stash move.item` |
-| `COR3_CHECK_MAIL` | `{ source, sourceId, timeoutMs? }` | internal: watch a mailbox source and claim it |
-| `COR3_REQUEST_STASH` | – | re-join stash room (also triggers a fresh `mail update.state`) |
+### 6.2 Content ↔ background
 
-Internal content event:
+Tab commands use the versioned `v2-tab` envelope from `contracts/tab.ts`.
 
-| Type | Payload | Meaning |
-|---|---|---|
-| `COR3_MAIL_CLAIMED` | `{ source, sourceId, assumed }` | All PENDING mail for this source is claimed (or assumed done after a timeout) |
+- Request: `{ protocol: "v2-tab", version: 2, requestId, type, payload }`.
+- Response: `{ protocol: "v2-tab", version: 2, requestId, response }`, where `response` is the command result (`{ ok, value | error }` or a raw game result).
+- Payload schemas live in `contracts/tab-commands.ts`.
+- Content notices use the same envelope and are parsed at the background boundary:
+  - `V2_GAME_READY` — per-tab readiness snapshot.
+  - `V2_MARKET_CACHE` — raw market snapshot for cache warming.
+  - `V2_WS_NOTICE` — redacted WebSocket diagnostic notice.
+- Legacy raw `V2_*` messages without the envelope are rejected by both the content listener and the background message handler.
 
-### 6.3 popup → content (`chrome.tabs.sendMessage`)
+### 6.3 Background ↔ extension UI
 
-| Action | Payload | Meaning |
-|---|---|---|
-| `sortStash` | `{ mode: "default" \| "horizontal" }` | Start the warehouse sorter; progress is stored in `stashSortProgress` |
-| `claimDrone` | `{ missionId }` | Claim drone rewards via the mailbox |
-| `sellItem` | `{ itemId, quantity, skipStashRefresh? }` | Sell one item |
-| `batchSellItems` | `{ items: [{ itemId, quantity }] }` | Batch sell (one request per item) |
-| `requestStash` | – | Refresh stash |
+Popup, side panel and DevTools talk to the background through `BridgeClient` / `BridgeServer` over `chrome.runtime` messaging.
 
----
+- Bridge types are string commands such as `settings.get`, `job.syncMarket`, `network.map`.
+- Requests are correlated by `id` and validated with Zod on both sides.
+- Domain events are broadcast on the `v2-events` runtime port; `chrome-popup-portal.ts` reconnects with capped exponential backoff.
+- UI code depends on `application/popup/portal.ts` and never calls `chrome.*` directly.
 
-## 7. Storage keys used by these features
+### 6.4 DevTools
+
+`application/devtools/portal.ts` exposes the DevTools surface; `infrastructure/browser/chrome-devtools-portal.ts` owns `chrome.devtools.inspectedWindow.eval` and storage inspection. The panel supports export, per-category clear, WS send and an offline log viewer.
+
+## 7. Persistence (v2)
+
+All persistent state uses `chrome.storage.local`; transient session logs use `chrome.storage.session`. The current 2.0 build does not use `chrome.storage.sync`.
 
 | Key | Area | Meaning |
 |---|---|---|
-| `mailData` / `mailDataUpdatedAt` | local | Last `mail update.state` payload |
-| `gameplayData` / `gameplayDataUpdatedAt` | local | Last `gameplay update.state` payload |
-| `stashData` / `stashDataUpdatedAt` | local | Last stash state (grid + items) |
-| `stashSorting` | local | `true` while the sorter is running; mailbox auto-claim is paused |
-| `stashSortProgress` | local | `{ mode, phase, done, total, text, error?, startedAt, finishedAt? }` |
-| `droneData` / `droneDataUpdatedAt` | local | Last `get.options`/`repair` state |
-| `droneCompleted` / `droneCompletedUpdatedAt` | local | Last drone completion push |
-| `droneWarning` | local | Human-readable drone warning/status |
-| `mailWarning` | local | Human-readable mailbox claim warning/status |
-| `mercWarning` | local | Human-readable mercenary pause reason (no available merc, missing config, transient busy, …) |
-| `autoDrone` | sync | Drone automation (`enabled`, `paused`, `repairEnabled`) |
-| `autoSendMerc` | sync | Mercenary automation (`enabled`, `hasInsurance`, `disabledReason`) |
-
-
-`autoSendMerc.disabledReason` values currently include `stash_full` and
-`insufficient_credits`. Other temporary pauses are reported through
-`mercWarning` and are shown in the Mercenaries panel.
-
-
----
+| `v2.settings` | local | Versioned settings envelope (UI, automation, QoL, Helper Mode snapshot) |
+| `v2.auto-finish` | local | Auto Finish last-run report and completed market resets |
+| `v2.auto-jobs.snapshot` | local | Persisted Auto Jobs job/market snapshot |
+| `v2.automationState` | local | Per-automation run state, leases and locks |
+| `v2.dailyOpsCache` | local | Daily ops cache |
+| `v2.discovery.progress` | local | Resumable network discovery progress |
+| `v2.droneDataCache` | local | Drone config/data cache |
+| `v2.expeditionConfigCache` | local | Expedition config cache |
+| `v2.featureAvailability` | local | Feature availability probes |
+| `v2.job.history` | local | Capped job history |
+| `v2.mail.sources` | local | Claimed mailbox source bookkeeping |
+| `v2.market.cache` | local | Market options/lots/jobs cache |
+| `v2.network.snapshot` | local | Last network map snapshot |
+| `v2.sessionLogs` | session | Redacted session log ring buffer (24 h retention) |
 
 ## 8. Error classification
 

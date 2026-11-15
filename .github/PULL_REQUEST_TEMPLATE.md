@@ -1,22 +1,34 @@
 ## Summary
+
 Brief description of the changes.
 
 ## Changes
+
 - Change 1
 - Change 2
 
 ## Related Issues
+
 Closes #
 
 ## Testing
+
 How were these changes tested?
-- [ ] Loaded extension in Chrome and tested on cor3.gg
-- [ ] Verified no console errors on `chrome://extensions` and DevTools console logs
-- [ ] Tested with automation features enabled
-- [ ] Tested for each feature available under this extension to see if they still work as expected
+
+- [ ] `npm run typecheck`
+- [ ] `npm run lint`
+- [ ] `npm test`
+- [ ] `npm run build`
+- [ ] Loaded `dist/` in Chrome and tested on cor3.gg
+- [ ] Verified no new console errors on `chrome://extensions` or the game page
+- [ ] Tested affected automation features with automation enabled
+- [ ] Checked the related feature or regression path
 
 ## Checklist
-- [ ] Code follows existing style (no build step, vanilla JS)
-- [ ] No unnecessary comments added
-- [ ] Checked README.md for necessary changes related to this PR and applied them
-- [ ] manifest.json version bumped (if applicable)
+
+- [ ] Source follows the layering and TypeScript rules in `AGENTS.md`
+- [ ] External data is validated with Zod at the boundary
+- [ ] No bearer token, JWT, cookie or session ID is persisted or logged
+- [ ] Docs updated when behavior, architecture or decisions changed
+- [ ] `cor3Fork.build` incremented when the change affects the release build
+- [ ] PR targets the `v2` branch
