@@ -917,3 +917,31 @@ select:not([multiple]) {
     border-color: #e5b567;
     background: rgba(229, 181, 103, .1);
 }
+
+/* Overview extension status */
+.v2-extension-status-head { display:flex; align-items:center; gap:8px; margin-bottom:7px; }
+.v2-extension-status-head .v2-activity-title { flex:1; margin:0; }
+.v2-status-badge { padding:2px 7px; border:1px solid var(--v2-border); border-radius:999px; color:var(--v2-muted); font-size:9px; font-weight:700; white-space:nowrap; }
+.v2-status-badge.is-ok { color:var(--v2-ok); border-color:var(--v2-ok); background:rgba(67,209,122,.1); }
+.v2-status-badge.is-warn { color:#e5b567; border-color:#e5b567; background:rgba(229,181,103,.1); }
+.v2-status-badge.is-error { color:var(--v2-error); border-color:var(--v2-error); background:rgba(255,107,107,.1); }
+.v2-status-badge.is-idle { color:var(--v2-muted); border-color:var(--v2-border); }
+.v2-extension-status-details { margin-top:10px; padding-top:9px; border-top:1px solid var(--v2-border); display:grid; gap:9px; }
+.v2-status-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:5px 12px; }
+.v2-status-row { display:flex; align-items:baseline; justify-content:space-between; gap:8px; min-width:0; font-size:10px; }
+.v2-status-row > span { flex:0 0 auto; color:var(--v2-muted); }
+.v2-status-row > strong { min-width:0; overflow:hidden; text-align:right; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+.v2-status-row > strong.v2-muted { color: var(--v2-muted); }
+.v2-status-automations { display:grid; gap:5px; }
+.v2-status-section-title { color:var(--v2-muted); font-size:9px; letter-spacing:.08em; text-transform:uppercase; }
+.v2-status-chips { display:flex; flex-wrap:wrap; gap:4px; }
+.v2-status-chip { display:inline-flex; align-items:center; gap:5px; padding:3px 6px; border:1px solid var(--v2-border); border-radius:999px; color:var(--v2-muted); font-size:9px; }
+.v2-status-chip.is-ok { border-color:rgba(67,209,122,.5); }
+.v2-status-chip.is-warn { border-color:rgba(229,181,103,.5); }
+.v2-status-chip.is-error { border-color:var(--v2-error); color:var(--v2-error); }
+.v2-status-dot { width:6px; height:6px; flex:0 0 auto; border-radius:50%; background:var(--v2-muted); }
+.v2-status-chip.is-ok .v2-status-dot { background:var(--v2-ok); }
+.v2-status-chip.is-warn .v2-status-dot { background:#e5b567; }
+.v2-status-chip.is-error .v2-status-dot { background:var(--v2-error); }
+.v2-status-chip-state { color:var(--v2-muted); font-size:8px; }
+.v2-status-last-error { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding-top:8px; border-top:1px dashed var(--v2-border); font-size:10px; }

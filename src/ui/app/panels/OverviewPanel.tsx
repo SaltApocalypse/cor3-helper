@@ -33,6 +33,7 @@ export function OverviewPanel({
     now,
 }: OverviewPanelProps) {
     const autoJobsStatus = autoJobs.autoJobs;
+    const autoJobsEnabled = autoJobsStatus?.enabled ?? settings.settings?.autoJobsEnabled ?? false;
     return (
         <OverviewPage
             jobHistory={jobs.jobHistory}
@@ -41,10 +42,12 @@ export function OverviewPanel({
             now={now}
             autoJobsRunning={autoJobsStatus?.running ?? false}
             autoJobsStage={autoJobsStatus?.stage ?? 'idle'}
+            autoJobsEnabled={autoJobsEnabled}
             hasSnapshot={jobs.autoJobsMarkets.length > 0}
             nextMarketRefreshAt={autoJobsStatus?.nextRefreshAt ?? null}
             marketRefreshReason={autoJobsStatus?.refreshReason ?? null}
             activity={gameStatus.activity}
+            overview={gameStatus.overview}
             credits={gameStatus.credits}
             daily={daily.daily}
             specialists={inventory.specialists}

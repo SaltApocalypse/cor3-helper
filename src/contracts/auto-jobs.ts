@@ -24,6 +24,7 @@ export const autoJobsMarketSchema = z.object({
     skippedJobs: z.array(autoJobsSkippedJobSchema).default([]),
     resetAt: z.string().nullable().optional(),
     error: z.string().optional(),
+    errorCode: z.string().optional(),
 }).strict();
 
 export const autoJobsSnapshotSchema = z.object({
@@ -54,6 +55,7 @@ export interface AutoJobsMarket {
     readonly skippedJobs?: readonly AutoJobsSkippedJob[];
     readonly resetAt?: string | null;
     readonly error?: string;
+    readonly errorCode?: string;
 }
 
 export interface AutoJobsSnapshot {

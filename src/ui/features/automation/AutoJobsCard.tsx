@@ -7,7 +7,7 @@ import { InfoTip } from '../../components/InfoTip.js';
 import { RefreshButton } from '../../components/RefreshButton.js';
 import { JobMarketList, type JobMarketView } from '../../components/JobMarketList.js';
 import { formatRemaining } from '../../format.js';
-import { useT } from '../../i18n-context.js';
+import { useT, type TranslateSource } from '../../i18n-context.js';
 
 export interface AutoJobsReportRow {
     readonly marketKey: string;
@@ -21,6 +21,16 @@ export interface AutoJobsReportRow {
     readonly pending: number;
     readonly skipped?: number;
     readonly error?: string;
+    readonly errorCode?: string;
+}
+
+function marketErrorLabel(code: string | undefined, hasError: string | undefined, tr: TranslateSource): string {
+    switch (code) {
+        case 'ROUTE_FAILED': return tr('Route failed');
+        case 'MARKET_FETCH_FAILED': return tr('Market data fetch failed');
+        case 'SNAPSHOT_FAILED': return tr('Network snapshot failed');
+        default: return hasError ? tr('Data fetch failed') : tr('Market refresh failed');
+    }
 }
 
 export interface AutoJobsCardProps {
@@ -121,6 +131,7 @@ export function AutoJobsCard(props: AutoJobsCardProps) {
         expired: 0,
         pending: 0,
         ...(market.ok ? {} : { error: market.error }),
+        ...(market.ok ? {} : (market.errorCode ? { errorCode: market.errorCode } : {})),
     }));
     const reportRows = shownJobReport.length > 0 ? shownJobReport : syncRows;
     return (
@@ -300,7 +311,7 @@ export function AutoJobsCard(props: AutoJobsCardProps) {
                                 <li key={market.marketKey}>
                                     <span class="v2-item-name">{market.label}</span>
                                     <span class="v2-tag v2-tag-error">{tr('failed')}</span>
-                                    <span class="v2-muted">{market.error ?? tr('Market refresh failed')}</span>
+                                    <span class="v2-muted">{marketErrorLabel(market.errorCode, market.error, tr)}</span>
                                 </li>
                             ))}
                         </ul>

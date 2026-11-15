@@ -45,6 +45,10 @@ export class AutoDroneCoordinator {
         this.lastViewAt = this.deps.clock.now();
     }
 
+    lastViewedAt(): number {
+        return this.lastViewAt;
+    }
+
     restore(payload: Readonly<Record<string, unknown>>): void {
         const stored = payload.last;
         if (!stored || typeof stored !== 'object') return;

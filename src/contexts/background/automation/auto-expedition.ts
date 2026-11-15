@@ -37,6 +37,10 @@ export class AutoExpeditionCoordinator {
         this.state.lastViewAt = this.deps.clock.now();
     }
 
+    lastViewedAt(): number {
+        return this.state.lastViewAt;
+    }
+
     restore(state: AutomationState): void {
         const storedLast = state.payload.last;
         if (storedLast && typeof storedLast === 'object') {

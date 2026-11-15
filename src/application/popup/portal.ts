@@ -427,7 +427,17 @@ export interface OverviewAutomation {
     readonly label: string;
     readonly enabled: boolean;
     readonly running: boolean;
+    readonly lastAt: number | null;
     readonly lastError: string | null;
+}
+
+export interface OverviewAutoJobs {
+    readonly nextRefreshAt: number | null;
+    readonly refreshReason: 'interval' | 'reset' | 'fallback';
+    readonly lastRefreshAt: number | null;
+    readonly lastError: string | null;
+    readonly lastSkipReason: string | null;
+    readonly lastAttemptAt: number;
 }
 
 export interface OverviewTimer {
@@ -439,8 +449,11 @@ export interface OverviewTimer {
 export interface OverviewState {
     readonly auth: AuthStatus;
     readonly network: NetworkMapSummary | null;
+    readonly networkAgeMs: number | null;
     readonly queue: NetworkOperationQueueStatus;
     readonly readiness: readonly { readonly tabId: number; readonly readiness: GameReadiness }[];
+    readonly helperMode: boolean;
+    readonly autoJobs: OverviewAutoJobs;
     readonly automations: readonly OverviewAutomation[];
     readonly timers: readonly OverviewTimer[];
     readonly jobReport: AutoFinishLastRun | null;

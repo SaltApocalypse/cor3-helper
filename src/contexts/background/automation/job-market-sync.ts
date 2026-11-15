@@ -24,6 +24,7 @@ export interface JobMarketSyncEntry {
     readonly pending?: number;
     readonly jobs?: readonly import('../../../contracts/auto-finish.js').AutoFinishJobResult[];
     readonly error?: string;
+    readonly errorCode?: string;
 }
 
 export interface JobMarketSyncDeps {
@@ -87,7 +88,14 @@ export class JobMarketSync {
                     code: synced.error.code,
                     message: synced.error.message,
                 });
-                markets.push({ marketKey: market.key, label: market.label, ok: false, skipped: 0, error: synced.error.message });
+                markets.push({
+                    marketKey: market.key,
+                    label: market.label,
+                    ok: false,
+                    skipped: 0,
+                    error: synced.error.message,
+                    errorCode: synced.error.code,
+                });
             } else {
                 const mapped = mapMarketSnapshotJobs(synced.value.market, market.marketId, market.key, market.completionServerId ?? market.routeServerId);
                 const view = mapMarketView(synced.value.market);
@@ -104,6 +112,10 @@ export class JobMarketSync {
                     failed: mapped.failed,
                     expired: mapped.expired,
                     resetAt: mapped.resetAt ?? null,
+                    direct: synced.value.direct,
+                    ...(synced.value.directError ? {
+                        directError: `${synced.value.directError.code}: ${synced.value.directError.message}`,
+                    } : {}),
                     route: synced.value.route.map((node) => node.name).join(' > '),
                 });
                 markets.push({

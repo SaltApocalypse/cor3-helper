@@ -175,6 +175,12 @@ export function registerSystemHandlers(server: CoreRuntime['server'], deps: Syst
         const snapshot = await game.snapshots.get();
         const authStatus = await core.auth.status();
         const autoFinishLast = automation.autoFinish.lastRun();
+        const autoJobsStatus = await automation.autoJobs.status();
+        const autoJobsLastAttemptAt = automation.autoJobs.lastAttemptAtValue();
+        const droneLast = automation.drone.lastRun();
+        const droneViewedAt = automation.drone.lastViewedAt();
+        const expeditionLast = automation.expedition.lastRun();
+        const expeditionViewedAt = automation.expedition.lastViewedAt();
         const valuable = automation.valuable;
         const timers = [
             ...(snapshot.ok
@@ -189,15 +195,46 @@ export function registerSystemHandlers(server: CoreRuntime['server'], deps: Syst
         return ok({
             auth: authStatus,
             network: snapshot.ok ? summarizeNetworkSnapshot(snapshot.value) : null,
+            networkAgeMs: game.snapshots.getCachedAgeMs(),
             queue: core.networkOps.status(),
             readiness: automation.readiness.summary(),
+            helperMode: currentSettings.helperMode,
+            autoJobs: {
+                nextRefreshAt: autoJobsStatus.nextRefreshAt,
+                refreshReason: autoJobsStatus.refreshReason,
+                lastRefreshAt: autoJobsStatus.lastRefreshAt,
+                lastError: automation.autoJobs.lastErrorText(),
+                lastSkipReason: automation.autoJobs.lastSkipReasonText(),
+                lastAttemptAt: autoJobsLastAttemptAt,
+            },
             automations: [
-                { key: 'auto-jobs', label: 'Auto Jobs', enabled: currentSettings.autoJobsEnabled, running: automation.autoJobs.isRunning() || automation.autoFinish.isRunning(), lastError: autoFinishLast?.failures[0]?.message ?? null },
-                { key: 'auto-drone', label: 'Auto Drone', enabled: currentSettings.autoDroneEnabled, running: automation.drone.isRunning(), lastError: automation.drone.lastRun()?.message ?? null },
-                { key: 'auto-expedition', label: 'Auto Expedition', enabled: currentSettings.autoExpeditionEnabled, running: automation.expedition.isRunning(), lastError: automation.expedition.lastRun()?.error ?? null },
-                { key: 'auto-mail', label: 'Mailbox collect', enabled: currentSettings.mailAutoClaimEnabled, running: automation.mail.isRunning(), lastError: automation.mail.lastRun()?.error ?? null },
-                { key: 'auto-daily', label: 'Auto Daily', enabled: currentSettings.dailyHackEnabled, running: automation.daily.isRunning(), lastError: automation.daily.lastRun() && !automation.daily.lastRun()!.solved ? automation.daily.lastRun()!.message : null },
-                { key: 'seller', label: 'Valuable Search & Sale', enabled: false, running: valuable.isRunning(), lastError: valuable.lastError() },
+                {
+                    key: 'auto-jobs',
+                    label: 'Auto Jobs',
+                    enabled: currentSettings.autoJobsEnabled,
+                    running: automation.autoJobs.isRunning() || automation.autoFinish.isRunning(),
+                    lastAt: autoJobsLastAttemptAt || autoFinishLast?.finishedAt || null,
+                    lastError: automation.autoJobs.lastErrorText() ?? autoFinishLast?.failures[0]?.message ?? null,
+                },
+                {
+                    key: 'auto-drone',
+                    label: 'Auto Drone',
+                    enabled: currentSettings.autoDroneEnabled,
+                    running: automation.drone.isRunning(),
+                    lastAt: droneLast?.at ?? null,
+                    lastError: droneLast?.status === 'error' && droneLast.at > droneViewedAt ? droneLast.message : null,
+                },
+                {
+                    key: 'auto-expedition',
+                    label: 'Auto Expedition',
+                    enabled: currentSettings.autoExpeditionEnabled,
+                    running: automation.expedition.isRunning(),
+                    lastAt: expeditionLast?.at ?? null,
+                    lastError: expeditionLast?.error && expeditionLast.at > expeditionViewedAt ? expeditionLast.error : null,
+                },
+                { key: 'auto-mail', label: 'Mailbox collect', enabled: currentSettings.mailAutoClaimEnabled, running: automation.mail.isRunning(), lastAt: automation.mail.lastRun()?.at ?? null, lastError: automation.mail.lastRun()?.error ?? null },
+                { key: 'auto-daily', label: 'Auto Daily', enabled: currentSettings.dailyHackEnabled, running: automation.daily.isRunning(), lastAt: automation.daily.lastRun()?.at ?? null, lastError: automation.daily.lastRun() && !automation.daily.lastRun()!.solved ? automation.daily.lastRun()!.message : null },
+                { key: 'seller', label: 'Valuable Search & Sale', enabled: false, running: valuable.isRunning(), lastAt: null, lastError: valuable.lastError() },
             ],
             timers,
             jobReport: autoFinishLast,

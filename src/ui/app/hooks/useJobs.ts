@@ -84,7 +84,7 @@ export function useJobs(portal: PopupPortal, deps: JobsDeps): JobsState {
                 setMarketReport(response.value.markets);
                 setJobStatus(tt('Synced {jobs} job(s) across {markets} market(s)', { jobs: response.value.jobs.length, markets: response.value.markets.length }));
             } else {
-                setJobStatus(response.error.message);
+                setJobStatus(tt('Market refresh failed'));
             }
         } else {
             const market = jobMarketByKey(marketKey);
@@ -103,7 +103,7 @@ export function useJobs(portal: PopupPortal, deps: JobsDeps): JobsState {
                 setMarketReport(null);
                 setJobStatus(tt('Synced {jobs} job(s) from {market}; skipped {skipped}', { jobs: response.value.jobs.length, market: market.label, skipped: response.value.skipped }));
             } else {
-                setJobStatus(response.error.message);
+                setJobStatus(tt('Market refresh failed'));
             }
         }
         setJobBusy(false);
@@ -118,7 +118,7 @@ export function useJobs(portal: PopupPortal, deps: JobsDeps): JobsState {
         if (jobRunId !== null) return;
         const response = await portal.autoJobsSnapshot();
         if (!response.ok) {
-            setJobStatus(tt('Auto Jobs snapshot failed: {message}', { message: response.error.message }));
+            setJobStatus(tt('Auto Jobs snapshot failed'));
             return;
         }
         if (!response.value) return;

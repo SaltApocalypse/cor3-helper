@@ -34,7 +34,15 @@ describe('jobStatusTone', () => {
         expect(jobStatusTone('failed')).toBe('v2-text-error');
         expect(jobStatusTone('complete')).toBe('v2-text-ok');
         expect(jobStatusTone('running')).toBe('v2-text-warn');
-        expect(jobStatusTone('synced')).toBe('');
+        expect(jobStatusTone('synced')).toBe('v2-text-ok');
+    });
+
+    it('maps translated status text to the same tones', () => {
+        expect(jobStatusTone('同步中...')).toBe('v2-text-warn');
+        expect(jobStatusTone('就绪同步：2 个市场中共 4 个任务')).toBe('v2-text-ok');
+        expect(jobStatusTone('已同步 4 个市场中的 12 个任务')).toBe('v2-text-ok');
+        expect(jobStatusTone('市场刷新失败')).toBe('v2-text-error');
+        expect(jobStatusTone('尚未同步市场')).toBe('');
     });
 });
 

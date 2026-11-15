@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'preact/hooks';
-import type { ActivityState, PopupPortal } from '../../../application/popup/portal.js';
+import type { ActivityState, OverviewState, PopupPortal } from '../../../application/popup/portal.js';
 import { JOB_MARKETS } from '../../../application/popup/catalog.js';
 import { isGameReady } from '../../../application/game/readiness.js';
 import type { PopupPage } from '../AppShell.js';
@@ -17,16 +17,18 @@ export interface GameStatusDeps {
 
 export interface GameStatusState {
     readonly activity: ActivityState | null;
+    readonly overview: OverviewState | null;
     readonly credits: number | null;
     readonly gameTabReady: boolean;
     readonly loadActivity: () => Promise<void>;
     readonly loadCredits: () => Promise<void>;
-    readonly loadReadiness: () => Promise<void>;
+    readonly loadOverview: () => Promise<void>;
 }
 
 export function useGameStatus(portal: PopupPortal, deps: GameStatusDeps): GameStatusState {
     const { activePage, loadNetwork } = deps;
     const [activity, setActivity] = useState<ActivityState | null>(null);
+    const [overview, setOverview] = useState<OverviewState | null>(null);
     const [credits, setCredits] = useState<number | null>(null);
     const [gameTabReady, setGameTabReady] = useState(false);
 
@@ -47,12 +49,15 @@ export function useGameStatus(portal: PopupPortal, deps: GameStatusDeps): GameSt
         if (cached.ok && cached.value) setCredits(cached.value.view.credits);
     }, [portal]);
 
-    const loadReadiness = useCallback(async () => {
+    const loadOverview = useCallback(async () => {
         const response = await portal.overviewState();
-        if (response.ok) setGameTabReady(response.value.readiness.some((entry) => isGameReady(entry.readiness)));
+        if (!response.ok) return;
+        setOverview(response.value);
+        setGameTabReady(response.value.readiness.some((entry) => isGameReady(entry.readiness)));
     }, [portal]);
 
     usePolling(loadActivity, 3000, { enabled: activePage === 'overview' });
+    usePolling(loadOverview, 10000, { enabled: activePage === 'overview' });
     usePolling(loadCredits, 60000, { enabled: activePage === 'overview' });
 
     // Opening the settings page also refreshes the network summary once; the
@@ -61,7 +66,7 @@ export function useGameStatus(portal: PopupPortal, deps: GameStatusDeps): GameSt
         if (activePage !== 'settings') return;
         void loadNetwork();
     }, [activePage, loadNetwork]);
-    usePolling(loadReadiness, 15000, { enabled: activePage === 'settings' });
+    usePolling(loadOverview, 15000, { enabled: activePage === 'settings' });
 
-    return { activity, credits, gameTabReady, loadActivity, loadCredits, loadReadiness };
+    return { activity, overview, credits, gameTabReady, loadActivity, loadCredits, loadOverview };
 }

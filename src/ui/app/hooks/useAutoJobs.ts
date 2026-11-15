@@ -49,7 +49,7 @@ export function useAutoJobs(portal: PopupPortal, deps: AutoJobsDeps): AutoJobsSt
         const response = await portal.autoJobsStatus();
         if (sequence !== autoJobsRequestSeq.current) return;
         if (response.ok) setAutoJobs(response.value);
-        else setJobStatus(tt('Auto Jobs status failed: {message}', { message: response.error.message }));
+        else setJobStatus(tt('Auto Jobs status failed'));
     }, [portal, setJobStatus, tt]);
 
     useEffect(() => {

@@ -1,19 +1,13 @@
 import type { DailyOpsState } from '../../domains/daily-ops/model.js';
 import type { SpecialistState } from '../../domains/specialists/model.js';
-import type { ActivityState, JobHistoryEntry, NetworkDiagnostics } from '../../application/popup/portal.js';
+import type { ActivityState, JobHistoryEntry, NetworkDiagnostics, OverviewState } from '../../application/popup/portal.js';
 import { formatRemaining } from '../format.js';
+import { ExtensionStatusCard } from '../components/ExtensionStatusCard.js';
 import { GameSection } from '../components/GameSection.js';
 import { InfoPanel } from '../components/InfoPanel.js';
 import { MARKET_SYMBOL } from '../market-icons.js';
 import type { JobMarketView } from '../components/JobMarketList.js';
-import { useT, type TranslateSource } from '../i18n-context.js';
-
-function activityDetail(detail: string | undefined, tr: TranslateSource): string {
-    if (!detail) return tr('No automation is running');
-    const match = detail.match(/^Fetching market information \((\d+)\/(\d+)\)$/);
-    if (match) return tr('Fetching market information ({index}/{total})', { index: match[1] ?? '', total: match[2] ?? '' });
-    return tr(detail);
-}
+import { useT } from '../i18n-context.js';
 
 export interface OverviewPageProps {
     readonly jobHistory: readonly JobHistoryEntry[];
@@ -22,10 +16,12 @@ export interface OverviewPageProps {
     readonly now: number;
     readonly autoJobsRunning: boolean;
     readonly autoJobsStage: string;
+    readonly autoJobsEnabled: boolean;
     readonly hasSnapshot: boolean;
     readonly nextMarketRefreshAt: number | null;
     readonly marketRefreshReason: 'interval' | 'reset' | 'fallback' | null;
     readonly activity: ActivityState | null;
+    readonly overview: OverviewState | null;
     readonly credits: number | null;
     readonly daily: DailyOpsState | null;
     readonly specialists: SpecialistState | null;
@@ -42,10 +38,12 @@ export function OverviewPage({
     now,
     autoJobsRunning,
     autoJobsStage,
+    autoJobsEnabled,
     hasSnapshot,
     nextMarketRefreshAt,
     marketRefreshReason,
     activity,
+    overview,
     credits,
     daily,
     specialists,
@@ -55,28 +53,16 @@ export function OverviewPage({
     onPanelOpenChange,
 }: OverviewPageProps) {
     const tr = useT();
-    const activityProgress = activity?.progress ?? null;
+    const extensionStatusExpanded = panelOpen['overview.extension-status.more'] ?? false;
     return (
         <>
-            <section class="v2-card v2-overview-card v2-activity-panel">
-                <h2 class="v2-activity-title">{tr('Extension Status')}</h2>
-                <div class="v2-activity-head">
-                    <span class={`v2-activity-dot ${activity?.running ? 'active' : ''}`} />
-                    <span class="v2-activity-label">{tr(activity?.label ?? 'Idle')}</span>
-                </div>
-                <p class="v2-activity-detail">{activityDetail(activity?.detail, tr)}</p>
-                {activityProgress ? (
-                    <div class="v2-activity-progress">
-                        <div class="v2-activity-progress-bar">
-                            <div
-                                class="v2-activity-progress-fill"
-                                style={{ width: `${Math.min(100, (activityProgress.index / Math.max(1, activityProgress.total)) * 100)}%` }}
-                            />
-                        </div>
-                        <span class="v2-muted">{activityProgress.index}/{activityProgress.total} {activityProgress.label}</span>
-                    </div>
-                ) : null}
-            </section>
+            <ExtensionStatusCard
+                activity={activity}
+                overview={overview}
+                now={now}
+                expanded={extensionStatusExpanded}
+                onToggleExpanded={() => onPanelOpenChange('overview.extension-status.more', !extensionStatusExpanded)}
+            />
 
             <GameSection
                 title={tr('Recent jobs')}
@@ -106,51 +92,53 @@ export function OverviewPage({
                 </span>
             </section>
 
-            <section class="v2-card v2-overview-card">
-                <div class="v2-card-header">
-                    <h2>{tr('Market jobs')}</h2>
-                    <span class={`v2-muted ${autoJobsRunning ? 'v2-text-warn' : hasSnapshot ? 'v2-text-ok' : ''}`}>
-                        {autoJobsRunning
-                            ? (autoJobsStage === 'idle' ? tr('Syncing...') : tr('Syncing · {stage}', { stage: autoJobsStage }))
-                            : hasSnapshot ? tr('Synced') : tr('Waiting...')}
-                    </span>
-                </div>
-                <div class="v2-market-refresh-line">
-                    <span class="v2-muted">
-                        {marketRefreshReason === 'reset'
-                            ? tr('Waiting for market reset')
-                            : marketRefreshReason === 'fallback'
-                                ? tr('All markets complete · fallback refresh')
-                                : tr('Next market refresh')}
-                    </span>
-                    <span class="v2-muted">
-                        {nextMarketRefreshAt !== null
-                            ? formatRemaining(new Date(nextMarketRefreshAt).toISOString(), now)
-                            : '--'}
-                    </span>
-                </div>
-                <div class="v2-market-summary-grid">
-                    {markets.map((entry) => {
-                        const failed = entry.failed + entry.jobs.filter((job) => statusById[job.id] === 'failed').length;
-                        return (
-                            <article key={entry.market.key} class="v2-market-summary-card">
-                                <div class="v2-market-summary-head">
-                                    <div class="v2-market-summary-title">
-                                        <span class="v2-market-summary-symbol">{MARKET_SYMBOL[entry.market.key] ?? '◈'}</span>
-                                        <strong>{entry.market.label}</strong>
+            {autoJobsEnabled ? (
+                <section class="v2-card v2-overview-card">
+                    <div class="v2-card-header">
+                        <h2>{tr('Market jobs')}</h2>
+                        <span class={`v2-muted ${autoJobsRunning ? 'v2-text-warn' : hasSnapshot ? 'v2-text-ok' : ''}`}>
+                            {autoJobsRunning
+                                ? (autoJobsStage === 'idle' ? tr('Syncing...') : tr('Syncing · {stage}', { stage: autoJobsStage }))
+                                : hasSnapshot ? tr('Synced') : tr('Waiting...')}
+                        </span>
+                    </div>
+                    <div class="v2-market-refresh-line">
+                        <span class="v2-muted">
+                            {marketRefreshReason === 'reset'
+                                ? tr('Waiting for market reset')
+                                : marketRefreshReason === 'fallback'
+                                    ? tr('All markets complete · fallback refresh')
+                                    : tr('Next market refresh')}
+                        </span>
+                        <span class="v2-muted">
+                            {nextMarketRefreshAt !== null
+                                ? formatRemaining(new Date(nextMarketRefreshAt).toISOString(), now)
+                                : '--'}
+                        </span>
+                    </div>
+                    <div class="v2-market-summary-grid">
+                        {markets.map((entry) => {
+                            const failed = entry.failed + entry.jobs.filter((job) => statusById[job.id] === 'failed').length;
+                            return (
+                                <article key={entry.market.key} class="v2-market-summary-card">
+                                    <div class="v2-market-summary-head">
+                                        <div class="v2-market-summary-title">
+                                            <span class="v2-market-summary-symbol">{MARKET_SYMBOL[entry.market.key] ?? '◈'}</span>
+                                            <strong>{entry.market.label}</strong>
+                                        </div>
+                                        <span>{entry.resetAt ? formatRemaining(entry.resetAt, now) : '--'}</span>
                                     </div>
-                                    <span>{entry.resetAt ? formatRemaining(entry.resetAt, now) : '--'}</span>
-                                </div>
-                                <div class="v2-market-summary-stats">
-                                    <span>{tr('{count} jobs', { count: entry.jobs.length })}</span>
-                                    <span>{tr('{count} skipped', { count: entry.skipped })}</span>
-                                    <span class={failed > 0 ? 'v2-text-error' : ''}>{tr('{count} failed', { count: failed })}</span>
-                                </div>
-                            </article>
-                        );
-                    })}
-                </div>
-            </section>
+                                    <div class="v2-market-summary-stats">
+                                        <span>{tr('{count} jobs', { count: entry.jobs.length })}</span>
+                                        <span>{tr('{count} skipped', { count: entry.skipped })}</span>
+                                        <span class={failed > 0 ? 'v2-text-error' : ''}>{tr('{count} failed', { count: failed })}</span>
+                                    </div>
+                                </article>
+                            );
+                        })}
+                    </div>
+                </section>
+            ) : null}
 
             {hasTimerData ? (
                 <section class="v2-card v2-overview-card">

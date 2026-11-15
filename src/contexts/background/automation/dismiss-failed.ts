@@ -70,6 +70,7 @@ export class FailedJobDismisser {
                         failed: 0,
                         skippedJobs: [],
                         error: synced.error.message,
+                        errorCode: synced.error.code,
                     }],
                 });
                 continue;

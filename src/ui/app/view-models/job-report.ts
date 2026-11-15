@@ -26,12 +26,16 @@ export interface UiJobReport {
     readonly pending: number;
     readonly skipped?: number;
     readonly error?: string;
+    readonly errorCode?: string;
 }
 
 export function jobStatusTone(status: string): string {
-    if (/fail|error|invalid/i.test(status)) return 'v2-text-error';
-    if (/complete|done|success/i.test(status)) return 'v2-text-ok';
-    if (/stop|cancel|select|running|wait|busy/i.test(status)) return 'v2-text-warn';
+    const text = status.trim();
+    if (/^(idle|空闲)$/i.test(text)) return '';
+    if (/no market synced|尚未同步/i.test(text)) return '';
+    if (/fail|error|invalid|unknown market|no game websocket|unavailable|timeout|timed out|失败|错误|无效|未知市场|不可用|超时/i.test(text)) return 'v2-text-error';
+    if (/complete|done|success|synced|ready|已同步|已完成|成功|就绪/i.test(text)) return 'v2-text-ok';
+    if (/stop|cancel|select|running|wait|busy|syncing|停止|取消|选择|运行|等待|同步中|正在同步/i.test(text)) return 'v2-text-warn';
     return '';
 }
 
@@ -71,6 +75,7 @@ export function autoJobsSnapshotToJobReport(markets: readonly AutoJobsMarket[]):
         pending: 0,
         skipped: market.skipped,
         ...(market.error ? { error: market.error } : {}),
+        ...(market.errorCode ? { errorCode: market.errorCode } : {}),
     }));
 }
 

@@ -476,7 +476,16 @@ const overviewAutomationSchema = z.object({
     label: z.string(),
     enabled: z.boolean(),
     running: z.boolean(),
+    lastAt: z.number().int().nonnegative().nullable(),
     lastError: z.string().nullable(),
+}).strict();
+const overviewAutoJobsSchema = z.object({
+    nextRefreshAt: z.number().int().nonnegative().nullable(),
+    refreshReason: z.enum(['interval', 'reset', 'fallback']),
+    lastRefreshAt: z.number().int().nonnegative().nullable(),
+    lastError: z.string().nullable(),
+    lastSkipReason: z.string().nullable(),
+    lastAttemptAt: z.number().int().nonnegative(),
 }).strict();
 const overviewTimerSchema = z.object({
     kind: z.enum(['maintenance', 'jobs-reset']),
@@ -486,8 +495,11 @@ const overviewTimerSchema = z.object({
 const overviewStateSchema = z.object({
     auth: authStatusSchema,
     network: networkMapSummarySchema.nullable(),
+    networkAgeMs: z.number().int().nonnegative().nullable(),
     queue: networkOperationQueueStatusSchema,
     readiness: z.array(z.object({ tabId: z.number(), readiness: gameReadinessSchema }).strict()),
+    helperMode: z.boolean(),
+    autoJobs: overviewAutoJobsSchema,
     automations: z.array(overviewAutomationSchema),
     timers: z.array(overviewTimerSchema),
     jobReport: autoFinishLastSchema.nullable(),
