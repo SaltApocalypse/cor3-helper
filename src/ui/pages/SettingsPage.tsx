@@ -7,10 +7,12 @@ import { Modal } from '../components/Modal.js';
 import { ToggleSwitch } from '../components/ToggleSwitch.js';
 import { FORK_ISSUES_URL, FORK_RELEASES_URL, FORK_REPO_URL, UPSTREAM_REPO_URL } from '../app/fork-info.js';
 import { t, type UiLanguage } from '../i18n.js';
+import { displayVersion } from '../app/view-models/version.js';
 
 export interface SettingsPageProps {
     readonly language: UiLanguage;
     readonly versionName: string | null;
+    readonly versionBuild: string | null;
     readonly settings: SettingsV1 | null;
     readonly auth: AuthStatus | null;
     readonly hasEndpoint: boolean;
@@ -46,6 +48,7 @@ function formatAge(language: UiLanguage, ageMs: number | null): string {
 export function SettingsPage({
     language,
     versionName,
+    versionBuild,
     settings,
     auth,
     hasEndpoint,
@@ -313,14 +316,14 @@ export function SettingsPage({
             <footer class="v2-about">
                 <div class="v2-about-line">
                     <span>COR3 Helper</span>
-                    <span class="v2-muted">{versionName ?? '2.0'}</span>
+                    <span class="v2-muted">{displayVersion(versionName, versionBuild)}</span>
                 </div>
                 <div class="v2-about-update">
                     <button type="button" disabled={updateChecking} onClick={() => void onCheckUpdates()}>
                         {updateChecking ? t(language, 'settings.about.checking') : t(language, 'settings.about.check')}
                     </button>
                     {updateError ? (
-                        <span class="v2-text-error">{t(language, 'settings.about.checkFailed')}</span>
+                        <span class="v2-text-error" title={updateError}>{t(language, 'settings.about.checkFailed')}</span>
                     ) : updateInfo ? (
                         updateInfo.updateAvailable ? (
                             <span class="v2-text-warn">

@@ -236,6 +236,9 @@ server.register('game.unequipSoftware', z.object({ moduleConfigId: z.string().mi
 server.register('game.getCachedMarket', z.object({ marketId: z.string().min(1) }).strict(), async ({ marketId }) => {
     return ok(hub.cachedMarket(marketId));
 });
+server.register('game.saiFiles', z.object({}).strict(), async () => {
+    return ok(hub.saiFilesSnapshot());
+});
 server.register('game.requestMarketOptions', z.object({ marketId: z.string().min(1) }).strict(), async ({ marketId }) => {
     const result = await hub.requestMarketOptions(marketId);
     return result.ok ? ok(result.value) : err(result.error);

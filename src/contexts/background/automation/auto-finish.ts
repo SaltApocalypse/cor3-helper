@@ -25,6 +25,7 @@ export class AutoFinishCoordinator {
     private live: AutoFinishLiveRun | null = null;
     private progress: AutoJobProgress | null = null;
     private completedResets: Readonly<Record<string, string>> = {};
+    private completedJobs: Readonly<Record<string, string>> = {};
     private cancelRequested = false;
     private autoJobs: AutoJobsSink | null = null;
     private readonly humanDelay: (minMs?: number, maxMs?: number) => Promise<void>;
@@ -53,6 +54,10 @@ export class AutoFinishCoordinator {
         return this.completedResets;
     }
 
+    completedJobsSnapshot(): Readonly<Record<string, string>> {
+        return this.completedJobs;
+    }
+
     progressValue(): AutoJobProgress | null {
         return this.progress;
     }
@@ -65,6 +70,7 @@ export class AutoFinishCoordinator {
         const state = await this.deps.store.get();
         this.last = state.last;
         this.completedResets = state.completedResets;
+        this.completedJobs = state.completedJobs;
         await this.scheduleNextRefresh();
     }
 
@@ -128,9 +134,14 @@ export class AutoFinishCoordinator {
                 if (!preAllowed.has(job.type)) return false;
                 if (this.deps.locks.isLocked(job.id)) return false;
                 const resetAt = preResets.get(job.marketKey) ?? null;
-                return !(resetAt !== null && preStored.completedResets[job.marketKey] === resetAt);
+                return !(resetAt !== null && preStored.completedJobs[job.id] === resetAt);
             });
             if (preRunnable.length === 0) {
+                this.deps.logger.info('auto-jobs', 'Auto Finish selection skipped every job', {
+                    jobs: prefetched.jobs.length,
+                    allowedTypes: [...preAllowed],
+                    completedJobs: Object.keys(preStored.completedJobs).length,
+                });
                 return {
                     jobs: prefetched.jobs.length,
                     done: 0,
@@ -161,6 +172,7 @@ export class AutoFinishCoordinator {
             const allowedTypes = new Set(currentSettings.autoCompleteJobTypes);
             const stored = await this.deps.store.get();
             const completedResets = force ? {} : stored.completedResets;
+            const completedJobs = force ? {} : stored.completedJobs;
             const resetByMarket = new Map(synced.markets.filter((market) => market.ok).map((market) => [market.marketKey, market.resetAt ?? null]));
             if (force) this.deps.locks.clearAttempts();
             this.deps.locks.reconcileResets(resetByMarket);
@@ -170,8 +182,24 @@ export class AutoFinishCoordinator {
                 if (this.deps.locks.isRetryExhausted(job.id)) return false;
                 if (this.deps.locks.isLocked(job.id)) return false;
                 const resetAt = resetByMarket.get(job.marketKey) ?? null;
-                return !(resetAt !== null && completedResets[job.marketKey] === resetAt);
+                return !(resetAt !== null && completedJobs[job.id] === resetAt);
             });
+            const runnableIds = new Set(runnable.map((job) => job.id));
+            const skipped = { noServer: 0, typeDisabled: 0, locked: 0, retryExhausted: 0, completed: 0 };
+            for (const job of synced.jobs) {
+                if (runnableIds.has(job.id)) continue;
+                if (!job.serverId && !isServerlessJob(job.type)) skipped.noServer += 1;
+                else if (!allowedTypes.has(job.type)) skipped.typeDisabled += 1;
+                else if (this.deps.locks.isLocked(job.id)) skipped.locked += 1;
+                else if (this.deps.locks.isRetryExhausted(job.id)) skipped.retryExhausted += 1;
+                else skipped.completed += 1;
+            }
+            if (runnable.length < synced.jobs.length) {
+                this.deps.runLogs.add(runId, 'info', 'auto-jobs', `Selection: ${runnable.length}/${synced.jobs.length} runnable; skipped ${synced.jobs.length - runnable.length}`, {
+                    ...skipped,
+                    allowedTypes: [...allowedTypes],
+                });
+            }
             this.live = {
                 ...(this.live ?? { runId, startedAt: this.now() }),
                 markets: buildLiveMarkets(synced, runnable, allowedTypes, this.deps.locks, this.now()),
@@ -203,27 +231,31 @@ export class AutoFinishCoordinator {
                         this.deps.runLogs.add(runId, 'info', 'auto-jobs', `Completed ${jobLocation(job.name, job.serverName)}`, { jobId: job.id, marketKey: job.marketKey });
                         completedMarketIds.add(job.marketId);
                     } else {
-                        if (jobResult.error.lockExpiresAt !== undefined && jobResult.error.lockExpiresAt > this.now()) {
-                            this.deps.locks.setLock(job.id, jobResult.error.lockExpiresAt);
+                        const jobError = jobResult.error ?? {
+                            code: 'JOB_FAILED' as const,
+                            message: 'Job failed without error details',
+                        };
+                        if (jobError.lockExpiresAt !== undefined && jobError.lockExpiresAt > this.now()) {
+                            this.deps.locks.setLock(job.id, jobError.lockExpiresAt);
                             void this.deps.locks.persist('running');
                         }
                         const outcome = classifyJobFailure({
-                            code: jobResult.error.code,
-                            ...(jobResult.error.detailCode !== undefined ? { detailCode: jobResult.error.detailCode } : {}),
-                            message: jobResult.error.message,
-                            ...(jobResult.error.stage !== undefined ? { stage: jobResult.error.stage } : {}),
-                            ...(jobResult.error.retryable !== undefined ? { retryable: jobResult.error.retryable } : {}),
-                            ...(jobResult.error.retryAt !== undefined ? { retryAt: jobResult.error.retryAt } : {}),
-                            ...(jobResult.error.lockExpiresAt !== undefined ? { lockExpiresAt: jobResult.error.lockExpiresAt } : {}),
+                            code: jobError.code,
+                            ...(jobError.detailCode !== undefined ? { detailCode: jobError.detailCode } : {}),
+                            message: jobError.message,
+                            ...(jobError.stage !== undefined ? { stage: jobError.stage } : {}),
+                            ...(jobError.retryable !== undefined ? { retryable: jobError.retryable } : {}),
+                            ...(jobError.retryAt !== undefined ? { retryAt: jobError.retryAt } : {}),
+                            ...(jobError.lockExpiresAt !== undefined ? { lockExpiresAt: jobError.lockExpiresAt } : {}),
                         });
                         this.updateLiveJob(job.id, {
                             status: outcome.status === 'expired' ? 'expired' : outcome.status,
-                            error: jobResult.error.message,
-                            code: jobResult.error.detailCode ?? jobResult.error.code,
-                            ...(jobResult.error.retryable !== undefined ? { retryable: jobResult.error.retryable } : {}),
-                            ...(jobResult.error.retryAt !== undefined ? { retryAt: jobResult.error.retryAt } : {}),
-                            ...(jobResult.error.lockExpiresAt !== undefined ? { lockExpiresAt: jobResult.error.lockExpiresAt } : {}),
-                            ...(jobResult.error.stage !== undefined ? { stage: jobResult.error.stage } : {}),
+                            error: jobError.message,
+                            code: jobError.detailCode ?? jobError.code,
+                            ...(jobError.retryable !== undefined ? { retryable: jobError.retryable } : {}),
+                            ...(jobError.retryAt !== undefined ? { retryAt: jobError.retryAt } : {}),
+                            ...(jobError.lockExpiresAt !== undefined ? { lockExpiresAt: jobError.lockExpiresAt } : {}),
+                            ...(jobError.stage !== undefined ? { stage: jobError.stage } : {}),
                         });
                     }
                 },
@@ -270,7 +302,7 @@ export class AutoFinishCoordinator {
                 synced,
                 allowedTypes,
                 doneIds,
-                completedResets,
+                completedJobs,
                 resetByMarket,
                 locks: this.deps.locks,
                 outcomes,
@@ -316,9 +348,10 @@ export class AutoFinishCoordinator {
                 snapshots: this.deps.snapshots,
                 autoJobs: this.autoJobs!,
                 now: () => this.now(),
-                onPersisted: (last, completedResets) => {
+                onPersisted: (last, completedResets, completedJobs) => {
                     this.last = last;
                     this.completedResets = completedResets;
+                    this.completedJobs = completedJobs;
                     void this.scheduleNextRefresh();
                 },
             }, {
@@ -330,6 +363,7 @@ export class AutoFinishCoordinator {
                 retryEntries,
                 retryFailuresForSchedule,
                 completedResets,
+                completedJobs,
                 runDoneCount: runDone.length,
                 runnableCount: runnable.length,
                 totalRetry,
@@ -341,6 +375,7 @@ export class AutoFinishCoordinator {
             });
             this.last = finalized.last;
             this.completedResets = finalized.completedResets;
+            this.completedJobs = finalized.completedJobs;
             this.nextRetryAt = finalized.nextRetryAt;
             this.retryReason = finalized.retryReason;
             return finalized.result;

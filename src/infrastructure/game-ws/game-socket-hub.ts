@@ -1,5 +1,6 @@
 import type { RawNetworkMap } from '../../contracts/map.js';
 import { rawMarketSnapshotSchema, type RawMarketSnapshot } from '../../contracts/market.js';
+import { normalizeSaiFile, normalizeSaiFiles, type SaiFileEntry } from '../../contracts/sai.js';
 import type { GameError } from '../../application/game/ports.js';
 import { isGameReady, type GameReadiness } from '../../contracts/game-readiness.js';
 import { err, ok, type Result } from '../../kernel/result.js';
@@ -147,6 +148,34 @@ export interface WsLogEntry {
  */
 export function isMinigameSocketUrl(url: string): boolean {
     return /ice-wall-break|minigame|hack|games/i.test(url);
+}
+
+export interface OutgoingMarketRequest {
+    readonly action: 'get.options' | 'get.lots' | 'get.jobs';
+    readonly marketId: string;
+}
+
+/**
+ * Detects market refresh frames sent by the game itself. The extension only
+ * cached responses for its own requests before, so a manual in-game refresh
+ * never reached the Auto Jobs snapshot.
+ */
+export function parseOutgoingMarketRequest(data: unknown): OutgoingMarketRequest | null {
+    if (typeof data !== 'string' || !data.startsWith('42')) return null;
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(data.substring(2));
+    } catch {
+        return null;
+    }
+    if (!Array.isArray(parsed) || parsed[0] !== 'event') return null;
+    const payload = parsed[1] as { event?: { name?: unknown; action?: unknown }; data?: { marketId?: unknown } } | undefined;
+    if (payload?.event?.name !== 'market') return null;
+    const action = payload.event.action;
+    if (action !== 'get.options' && action !== 'get.lots' && action !== 'get.jobs') return null;
+    const marketId = payload.data?.marketId;
+    if (typeof marketId !== 'string' || marketId.length === 0) return null;
+    return { action, marketId };
 }
 
 export interface SocketCandidate {
@@ -321,6 +350,7 @@ export class GameSocketHub {
         jobs?: unknown;
         updatedAt: number;
     }>();
+    private saiFiles: SaiFileEntry[] = [];
 
     install(): void {
         if (this.installed) return;
@@ -414,6 +444,49 @@ export class GameSocketHub {
         if (!entry || entry.options === undefined || entry.lots === undefined || entry.jobs === undefined) return null;
         const parsed = rawMarketSnapshotSchema.safeParse({ options: entry.options, lots: entry.lots, jobs: entry.jobs });
         return parsed.success ? parsed.data : null;
+    }
+
+    saiFilesSnapshot(): { readonly files: readonly SaiFileEntry[] } {
+        return { files: this.saiFiles };
+    }
+
+    private setSaiFiles(files: SaiFileEntry[]): void {
+        this.saiFiles = files;
+        try {
+            window.postMessage({ version: 2, type: 'V2_SAI_FILES', files }, '*');
+        } catch {
+            // The game page may be tearing down.
+        }
+    }
+
+    private handleSaiEvent(action: string | undefined, data: unknown): void {
+        if (!data || typeof data !== 'object') return;
+        const record = data as Record<string, unknown>;
+        if (action === 'get.files' || (action === undefined && Array.isArray(record.files))) {
+            this.setSaiFiles(normalizeSaiFiles(data));
+            return;
+        }
+        if (action === 'file.delete') {
+            const fileId = record.deletedFileId;
+            if (typeof fileId !== 'string') return;
+            this.setSaiFiles(this.saiFiles.filter((file) => file.fileId !== fileId));
+            return;
+        }
+        if (action === 'file.upload') {
+            const uploaded = normalizeSaiFile(record.file);
+            if (uploaded) this.setSaiFiles([uploaded, ...this.saiFiles]);
+            return;
+        }
+        if (action === 'file.search-valuable') {
+            const hits = normalizeSaiFiles({ files: Array.isArray(record.found) ? record.found : [] });
+            if (hits.length === 0) return;
+            const prices = new Map(hits.map((hit) => [hit.fileId, hit.basePrice]));
+            this.setSaiFiles(this.saiFiles.map((file) => {
+                const price = prices.get(file.fileId);
+                if (price === undefined) return file;
+                return { ...file, isValuableMarked: true, basePrice: Math.max(file.basePrice, price) };
+            }));
+        }
     }
 
     private updateMarketCache(action: string, data: unknown): void {
@@ -843,13 +916,25 @@ export class GameSocketHub {
     }
 
     private inspectOutgoing(data: unknown): void {
-        if (typeof data === 'string' && data.startsWith('40{')) {
+        if (typeof data !== 'string') return;
+        if (data.startsWith('40{')) {
             try {
                 const payload = JSON.parse(data.substring(2)) as { token?: unknown };
                 this.captureToken(payload.token);
             } catch {
                 // Ignore malformed connect payloads.
             }
+            return;
+        }
+        const market = parseOutgoingMarketRequest(data);
+        if (market) {
+            // The game's own market refresh uses the same frames as the helper.
+            // Remember which market is loading so its responses can update the
+            // Auto Jobs snapshot as well.
+            this.pendingMarketActions.set(market.action, {
+                marketId: market.marketId,
+                expiresAt: Date.now() + 20_000,
+            });
         }
     }
 
@@ -1364,9 +1449,10 @@ export class GameSocketHub {
             void this.handleIncoming(event.data, ws);
         });
         ws.addEventListener('close', () => {
+            const wasActive = this.active === ws;
             record.readyState = WebSocket.CLOSED;
             this.sockets.delete(ws);
-            if (this.active === ws) this.active = null;
+            if (wasActive) this.active = null;
             const next = pickActiveSocket(this.sockets.values())?.ws ?? null;
             if (next) this.setActive(next);
             this.socketOpen = this.hasOpenGameSocket();
@@ -1374,6 +1460,7 @@ export class GameSocketHub {
                 this.mapLoadedAt = null;
                 this.readyAt = null;
             }
+            if (!minigame && wasActive && this.saiFiles.length > 0) this.setSaiFiles([]);
             if (!minigame) this.notifyHost('info', 'Game socket closed', { url: sanitizeSocketUrl(url), remaining: this.sockets.size });
             this.notifyReadiness();
         });
@@ -1450,6 +1537,7 @@ export class GameSocketHub {
             }
         }
         const action = payload?.event?.action;
+        if (eventName === 'sai') this.handleSaiEvent(action, payload.data);
         if (eventName === 'expeditions'
             && action !== 'get.mercenaries'
             && action !== 'get.config'

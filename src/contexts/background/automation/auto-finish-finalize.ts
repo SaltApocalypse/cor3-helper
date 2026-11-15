@@ -17,7 +17,11 @@ export interface FinalizeAutoFinishDeps {
     readonly snapshots: Pick<NetworkSnapshotService, 'get'>;
     readonly autoJobs: AutoJobsSink;
     readonly now: () => number;
-    readonly onPersisted?: (last: AutoFinishLastRun, completedResets: Readonly<Record<string, string>>) => void;
+    readonly onPersisted?: (
+        last: AutoFinishLastRun,
+        completedResets: Readonly<Record<string, string>>,
+        completedJobs: Readonly<Record<string, string>>,
+    ) => void;
 }
 
 export interface FinalizeAutoFinishInput {
@@ -29,6 +33,7 @@ export interface FinalizeAutoFinishInput {
     readonly retryEntries: readonly AutoJobQueueFailure[];
     readonly retryFailuresForSchedule: readonly AutoFinishFailure[];
     readonly completedResets: Readonly<Record<string, string>>;
+    readonly completedJobs: Readonly<Record<string, string>>;
     readonly runDoneCount: number;
     readonly runnableCount: number;
     readonly totalRetry: number;
@@ -42,6 +47,7 @@ export interface FinalizeAutoFinishInput {
 export interface FinalizedAutoFinish {
     readonly last: AutoFinishLastRun;
     readonly completedResets: Readonly<Record<string, string>>;
+    readonly completedJobs: Readonly<Record<string, string>>;
     readonly nextRetryAt: number | null;
     readonly retryReason: string | null;
     readonly result: AutoFinishRunResult;
@@ -53,16 +59,26 @@ export async function finalizeAutoFinish(
     input: FinalizeAutoFinishInput,
 ): Promise<FinalizedAutoFinish> {
     const completedMarketResets = { ...input.completedResets };
+    const completedJobResets = { ...input.completedJobs };
     for (const market of input.markets) {
         if (!market.ok || !market.resetAt) continue;
         const total = market.jobTotal ?? 0;
         const success = market.success ?? 0;
         // Do not mark a market complete just because every remaining job was
         // skipped/expired/retrying: that would hide newly claimable work in
-        // the same market reset until the next reset.
-        if ((market.pending ?? 0) === 0 && (market.failed ?? 0) === 0 && (market.retry ?? 0) === 0 && (total === 0 || success === total)) {
+        // the same market reset until the next reset. A zero-job market is not
+        // complete either; new jobs can appear later in the same reset.
+        if (total > 0 && (market.pending ?? 0) === 0 && (market.failed ?? 0) === 0 && (market.retry ?? 0) === 0 && success === total) {
             completedMarketResets[market.marketKey] = market.resetAt;
         }
+        for (const job of market.jobs ?? []) {
+            if (job.status === 'done') completedJobResets[job.jobId] = market.resetAt;
+        }
+    }
+    const now = deps.now();
+    for (const [jobId, resetAt] of Object.entries(completedJobResets)) {
+        const resetTime = Date.parse(resetAt);
+        if (!Number.isFinite(resetTime) || resetTime <= now) delete completedJobResets[jobId];
     }
     const last: AutoFinishLastRun = {
         runId: input.runId,
@@ -77,8 +93,8 @@ export async function finalizeAutoFinish(
         markets: [...input.markets],
         failures: [...input.failures],
     };
-    await deps.store.set({ last, completedResets: completedMarketResets });
-    deps.onPersisted?.(last, completedMarketResets);
+    await deps.store.set({ last, completedResets: completedMarketResets, completedJobs: completedJobResets });
+    deps.onPersisted?.(last, completedMarketResets, completedJobResets);
     deps.events.publish('auto.jobs.done', last);
     if (input.currentSettings.autoDismissFailedJobsEnabled && !input.stopped) {
         try {
@@ -112,8 +128,8 @@ export async function finalizeAutoFinish(
     let retryReason: string | null = null;
     if (!input.stopped) {
         const maintenanceFailure = input.retryEntries.some((entry) =>
-            entry.error.code === 'ROUTE_FAILED'
-            || /maintenance|unreachable|no route/i.test(entry.error.message),
+            entry.error?.code === 'ROUTE_FAILED'
+            || /maintenance|unreachable|no route/i.test(entry.error?.message ?? ''),
         );
         const decision = await computeAutoFinishRetry(deps.settings, deps.snapshots, deps.now(), input.retryFailuresForSchedule, maintenanceFailure);
         if (decision) {
@@ -133,5 +149,5 @@ export async function finalizeAutoFinish(
         markets: [...input.markets],
         failures: [...input.failures],
     };
-    return { last, completedResets: completedMarketResets, nextRetryAt, retryReason, result };
+    return { last, completedResets: completedMarketResets, completedJobs: completedJobResets, nextRetryAt, retryReason, result };
 }

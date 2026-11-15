@@ -17,6 +17,15 @@ export interface AutoDailyLast {
     readonly message: string;
 }
 
+/**
+ * "Already claimed" is the normal end state after a successful run. It is not
+ * an error, even though the run itself did not solve a puzzle.
+ */
+export function isAutoDailyWaiting(last: AutoDailyLast | null): boolean {
+    if (!last) return false;
+    return last.puzzle === 'claimed' || /already (claimed|completed)|waiting for next reset|task.*completed/i.test(last.message);
+}
+
 export interface AutoDailyDeps {
     readonly settings: SettingsPort;
     readonly scheduler: SchedulerPort;
@@ -219,6 +228,17 @@ export class AutoDailyCoordinator {
             const stateAfter = after.ok ? mapDailyOps(after.value, rewardsAfter.ok ? rewardsAfter.value : []) : null;
             this.state = stateAfter ?? this.state;
             if (stateAfter) await this.deps.cache.persist(stateAfter);
+            if (!this.last.solved && stateAfter?.hasClaimedToday) {
+                // The game may report the daily as already claimed right after
+                // the solve response. Treat that as the normal end state, not
+                // as a failed run.
+                this.last = {
+                    at: this.last.at,
+                    solved: false,
+                    puzzle: 'claimed',
+                    message: 'Already claimed today; waiting for next reset',
+                };
+            }
             await this.deps.state.set('auto-daily', {
                 phase: this.last.solved ? 'done' : 'waiting',
                 lastError: this.last.solved ? null : this.last.message,

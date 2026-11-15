@@ -5,9 +5,11 @@ import { rawNetworkMapSchema, type RawNetworkMap } from '../../contracts/map.js'
 import { rawMarketSnapshotSchema, type RawMarketSnapshot } from '../../contracts/market.js';
 import type { BridgeResult } from '../../contracts/bridge.js';
 import { gameReadinessSchema } from '../../application/game/readiness.js';
+import { saiFileSnapshotSchema } from '../../contracts/sai.js';
 import { encodeTabRequest, encodeTabResponse, tabRequestSchema } from '../../contracts/tab.js';
 import { parseTabCommand } from '../../contracts/tab-commands.js';
 import { startQol } from './qol.js';
+import { startSaiHighlighter } from './sai-highlighter.js';
 
 function sendToBackground(message: Record<string, unknown>): void {
     try {
@@ -85,6 +87,10 @@ async function fetchMarket(marketId: string): Promise<BridgeResult<RawMarketSnap
 
 console.info('[cor3-helper 2.0] content bridge loaded');
 void startQol();
+const saiHighlighter = startSaiHighlighter();
+void game.request('game.saiFiles', {}, saiFileSnapshotSchema, 5000).then((result) => {
+    if (result.ok) saiHighlighter.setFiles(result.value.files);
+});
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
     const request = tabRequestSchema.safeParse(message);

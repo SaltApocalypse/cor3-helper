@@ -54,6 +54,7 @@ export interface JobMarketFailure {
     readonly expired?: number;
     readonly skippedJobs?: readonly AutoJobsSkippedJob[];
     readonly error: string;
+    readonly errorCode?: string;
 }
 
 export interface JobAllMarketsResult {
@@ -469,6 +470,8 @@ export interface PopupVersionInfo {
     readonly name: string;
     readonly version: string;
     readonly versionName: string;
+    /** Build counter from the bundle; releases keep it out of the tag/manifest version. */
+    readonly build: string | null;
 }
 
 export interface SettingsExportData {
@@ -492,6 +495,8 @@ export interface PopupPortal {
     subscribeEvents(listener: (event: BackgroundEvent) => void): () => void;
     versionInfo(): PopupVersionInfo;
     openSidePanel(): Promise<boolean>;
+    /** Opens the full workspace in a detached Chrome popup window. */
+    openWindow(): Promise<boolean>;
     ping(): Promise<BridgeResult<{ readonly version: string; readonly phase: string }>>;
     updateCheck(): Promise<BridgeResult<UpdateCheckView>>;
     getSettings(): Promise<BridgeResult<SettingsV1>>;

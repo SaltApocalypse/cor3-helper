@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectDecisionObjects, collectExpeditionObjects, isMinigameSocketUrl, looksLikeExpeditionData, looksLikeSpecialistState, pickActiveSocket } from './game-socket-hub.js';
+import { collectDecisionObjects, collectExpeditionObjects, isMinigameSocketUrl, looksLikeExpeditionData, looksLikeSpecialistState, parseOutgoingMarketRequest, pickActiveSocket } from './game-socket-hub.js';
 
 describe('isMinigameSocketUrl', () => {
     it('excludes minigame sockets from active selection', () => {
@@ -102,5 +102,23 @@ describe('expedition event extraction', () => {
             messageId: 'msg-2',
             event: { id: 'event-2', options: [{ id: 'b' }] },
         })).toHaveLength(1);
+    });
+});
+
+describe('parseOutgoingMarketRequest', () => {
+    it('captures manual market refresh frames', () => {
+        expect(parseOutgoingMarketRequest('42' + JSON.stringify([
+            'event',
+            { event: { name: 'market', action: 'get.jobs' }, data: { marketId: 'usol-market' } },
+        ]))).toEqual({ action: 'get.jobs', marketId: 'usol-market' });
+    });
+
+    it('ignores other events and malformed frames', () => {
+        expect(parseOutgoingMarketRequest('42' + JSON.stringify([
+            'event',
+            { event: { name: 'market', action: 'take.job' }, data: { marketId: 'usol-market' } },
+        ]))).toBeNull();
+        expect(parseOutgoingMarketRequest('42not-json')).toBeNull();
+        expect(parseOutgoingMarketRequest('40{"token":"x"}')).toBeNull();
     });
 });

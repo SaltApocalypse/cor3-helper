@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { UpdateChecker, compareVersions, versionNameFromPackage } from './update-checker.js';
 
 describe('compareVersions', () => {
@@ -73,6 +73,26 @@ describe('UpdateChecker', () => {
         });
         const result = await checker.check('2.0.0-salta');
         expect(result.ok && result.value.updateAvailable).toBe(false);
+    });
+
+    it('falls back to another mirror when the first endpoint is blocked', async () => {
+        const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+            if (String(input).includes('raw.githubusercontent.com')) throw new Error('blocked');
+            return new Response(JSON.stringify({
+                version: '2.1.0',
+                cor3Fork: { releaseLabel: 'salta', build: 249 },
+            }));
+        }) as unknown as typeof fetch;
+        const checker = new UpdateChecker({
+            urls: ['https://raw.githubusercontent.com/test/package.json', 'https://cdn.example.test/package.json'],
+            fetchImpl,
+        });
+        const result = await checker.check('2.0.1-salta');
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.value.latest).toBe('2.1.0-salta');
+            expect(result.value.source).toBe('https://cdn.example.test/package.json');
+        }
     });
 
     it('surfaces a network failure', async () => {

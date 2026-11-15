@@ -17,7 +17,7 @@ type PingState = 'idle' | 'checking' | 'ok' | 'error';
 
 /**
  * Small launcher shown from the browser toolbar. The full workspace lives in
- * the side panel so the popup can stay lightweight.
+ * the side panel or a detached window so the popup can stay lightweight.
  */
 export function WelcomeApp({ portal }: WelcomeAppProps) {
     const [ping, setPing] = useState<PingState>('idle');
@@ -66,6 +66,11 @@ export function WelcomeApp({ portal }: WelcomeAppProps) {
     const openSidePanel = useCallback(async () => {
         const opened = await portal.openSidePanel();
         if (!opened) setMessage(t(language, 'welcome.openFailed'));
+    }, [portal, language]);
+
+    const openWindow = useCallback(async () => {
+        const opened = await portal.openWindow();
+        if (!opened) setMessage(t(language, 'welcome.openWindowFailed'));
     }, [portal, language]);
 
     const applyHelperMode = useCallback(async (enabled: boolean) => {
@@ -118,6 +123,9 @@ export function WelcomeApp({ portal }: WelcomeAppProps) {
                 <div class="v2-actions">
                     <button type="button" class="v2-primary" onClick={() => void openSidePanel()}>
                         {t(language, 'welcome.open')}
+                    </button>
+                    <button type="button" onClick={() => void openWindow()}>
+                        {t(language, 'welcome.openWindow')}
                     </button>
                 </div>
             </section>

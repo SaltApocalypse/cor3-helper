@@ -5,6 +5,7 @@ import { PHASE, VERSION, isFreshLogEvent, type CoreRuntime } from '../compositio
 import type { GameRuntime } from '../composition/game.js';
 import type { AutomationRuntime } from '../composition/automation.js';
 import { jobLocation } from '../automation/job-outcome.js';
+import { isAutoDailyWaiting } from '../automation/auto-daily.js';
 
 export interface SystemHandlerDeps {
     readonly core: CoreRuntime;
@@ -178,6 +179,7 @@ export function registerSystemHandlers(server: CoreRuntime['server'], deps: Syst
         const autoJobsStatus = await automation.autoJobs.status();
         const autoJobsLastAttemptAt = automation.autoJobs.lastAttemptAtValue();
         const droneLast = automation.drone.lastRun();
+        const dailyLast = automation.daily.lastRun();
         const droneViewedAt = automation.drone.lastViewedAt();
         const expeditionLast = automation.expedition.lastRun();
         const expeditionViewedAt = automation.expedition.lastViewedAt();
@@ -233,7 +235,7 @@ export function registerSystemHandlers(server: CoreRuntime['server'], deps: Syst
                     lastError: expeditionLast?.error && expeditionLast.at > expeditionViewedAt ? expeditionLast.error : null,
                 },
                 { key: 'auto-mail', label: 'Mailbox collect', enabled: currentSettings.mailAutoClaimEnabled, running: automation.mail.isRunning(), lastAt: automation.mail.lastRun()?.at ?? null, lastError: automation.mail.lastRun()?.error ?? null },
-                { key: 'auto-daily', label: 'Auto Daily', enabled: currentSettings.dailyHackEnabled, running: automation.daily.isRunning(), lastAt: automation.daily.lastRun()?.at ?? null, lastError: automation.daily.lastRun() && !automation.daily.lastRun()!.solved ? automation.daily.lastRun()!.message : null },
+                { key: 'auto-daily', label: 'Auto Daily', enabled: currentSettings.dailyHackEnabled, running: automation.daily.isRunning(), lastAt: dailyLast?.at ?? null, lastError: dailyLast && !dailyLast.solved && !isAutoDailyWaiting(dailyLast) ? dailyLast.message : null },
                 { key: 'seller', label: 'Valuable Search & Sale', enabled: false, running: valuable.isRunning(), lastAt: null, lastError: valuable.lastError() },
             ],
             timers,

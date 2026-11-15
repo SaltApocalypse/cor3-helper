@@ -39,7 +39,7 @@ export interface SettingsState {
     readonly changeHelperMode: (enabled: boolean) => Promise<void>;
     readonly changeDeveloperMode: (enabled: boolean) => Promise<void>;
     readonly changeQol: (
-        key: 'disableNetworkFog' | 'disableBackground' | 'moveNotificationsLeft' | 'antiAfkEnabled',
+        key: 'disableNetworkFog' | 'disableBackground' | 'moveNotificationsLeft' | 'antiAfkEnabled' | 'saiFileHighlightEnabled',
         enabled: boolean,
     ) => Promise<void>;
     readonly changeLanguage: (next: UiLanguage) => Promise<void>;
@@ -144,7 +144,7 @@ export function useSettings(portal: PopupPortal, deps: SettingsDeps): SettingsSt
     }, [portal, reportDetail]);
 
     const changeQol = useCallback(async (
-        key: 'disableNetworkFog' | 'disableBackground' | 'moveNotificationsLeft' | 'antiAfkEnabled',
+        key: 'disableNetworkFog' | 'disableBackground' | 'moveNotificationsLeft' | 'antiAfkEnabled' | 'saiFileHighlightEnabled',
         enabled: boolean,
     ) => {
         const response = await portal.updateSettings({ [key]: enabled } as SettingsPatch);

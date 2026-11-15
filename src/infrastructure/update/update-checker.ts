@@ -11,7 +11,10 @@ import { err, ok } from '../../kernel/result.js';
  */
 const REMOTE_URLS = [
     'https://raw.githubusercontent.com/SaltApocalypse/cor3-helper/v2/package.json',
+    'https://cdn.jsdelivr.net/gh/SaltApocalypse/cor3-helper@latest/package.json',
+    'https://github.com/SaltApocalypse/cor3-helper/raw/v2/package.json',
 ] as const;
+const DEFAULT_TIMEOUT_MS = 6_000;
 
 const remotePackageSchema = z.object({
     version: z.string().min(1),
@@ -89,6 +92,7 @@ export interface UpdateCheckerOptions {
     readonly now?: () => number;
     readonly fetchImpl?: typeof fetch;
     readonly releaseUrl?: string;
+    readonly timeoutMs?: number;
 }
 
 export class UpdateChecker {
@@ -96,41 +100,48 @@ export class UpdateChecker {
     private readonly now: () => number;
     private readonly fetchImpl: typeof fetch;
     private readonly releaseUrl: string;
+    private readonly timeoutMs: number;
 
     constructor(options: UpdateCheckerOptions = {}) {
         this.urls = options.urls ?? REMOTE_URLS;
         this.now = options.now ?? (() => Date.now());
         this.fetchImpl = options.fetchImpl ?? fetch;
         this.releaseUrl = options.releaseUrl ?? 'https://github.com/SaltApocalypse/cor3-helper/releases';
+        this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     }
 
     async check(current: string): Promise<Result<UpdateCheckResult, { readonly code: string; readonly message: string }>> {
-        const errors: string[] = [];
-        for (const url of this.urls) {
+        type Attempt = { readonly ok: true; readonly value: UpdateCheckResult } | { readonly ok: false; readonly error: string };
+        const attempts = await Promise.all(this.urls.map(async (url): Promise<Attempt> => {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), this.timeoutMs);
             try {
-                const response = await this.fetchImpl(url, { cache: 'no-store' });
-                if (!response.ok) {
-                    errors.push(`${url}: HTTP ${response.status}`);
-                    continue;
-                }
+                const response = await this.fetchImpl(url, { cache: 'no-store', signal: controller.signal });
+                if (!response.ok) return { ok: false, error: `${url}: HTTP ${response.status}` };
                 const parsed = remotePackageSchema.safeParse(await response.json());
-                if (!parsed.success) {
-                    errors.push(`${url}: invalid package metadata`);
-                    continue;
-                }
+                if (!parsed.success) return { ok: false, error: `${url}: invalid package metadata` };
                 const latest = versionNameFromPackage(parsed.data);
-                return ok({
-                    current,
-                    latest,
-                    updateAvailable: compareVersions(latest, current) > 0,
-                    releaseUrl: this.releaseUrl,
-                    checkedAt: this.now(),
-                    source: url,
-                });
+                return {
+                    ok: true,
+                    value: {
+                        current,
+                        latest,
+                        updateAvailable: compareVersions(latest, current) > 0,
+                        releaseUrl: this.releaseUrl,
+                        checkedAt: this.now(),
+                        source: url,
+                    },
+                };
             } catch (error) {
-                errors.push(`${url}: ${error instanceof Error ? error.message : String(error)}`);
+                const message = error instanceof Error ? error.message : String(error);
+                return { ok: false, error: `${url}: ${message}` };
+            } finally {
+                clearTimeout(timer);
             }
-        }
+        }));
+        const success = attempts.find((attempt): attempt is Extract<Attempt, { ok: true }> => attempt.ok);
+        if (success) return ok(success.value);
+        const errors = attempts.flatMap((attempt) => attempt.ok ? [] : [attempt.error]);
         return err({
             code: 'UPDATE_CHECK_FAILED',
             message: errors[0] ?? 'Could not reach the update server',

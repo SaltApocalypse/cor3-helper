@@ -62,6 +62,12 @@ export const autoFinishLastRunSchema = z.object({
 export const autoFinishStateSchema = z.object({
     last: autoFinishLastRunSchema.nullable(),
     completedResets: z.record(z.string(), z.string()).default({}),
+    /**
+     * Job id -> the market reset it was completed for. This is deliberately
+     * job-level: a market can gain new jobs inside the same reset, and those
+     * must not be skipped as "already completed".
+     */
+    completedJobs: z.record(z.string(), z.string()).default({}),
 }).strict();
 
 export const autoFinishRunResultSchema = z.object({

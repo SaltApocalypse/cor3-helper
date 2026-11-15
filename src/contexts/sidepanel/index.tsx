@@ -10,5 +10,6 @@ if (!root) throw new Error('Missing #app root');
 const transport = new ChromeRuntimeBridgeTransport('background');
 const client = new BridgeClient(transport, 'popup', 'background');
 const portal = new ChromePopupPortal(client);
+const windowMode = new URLSearchParams(window.location.search).get('mode') === 'window';
 
-render(<SidePanelApp portal={portal} />, root);
+render(<SidePanelApp portal={portal} windowMode={windowMode} />, root);

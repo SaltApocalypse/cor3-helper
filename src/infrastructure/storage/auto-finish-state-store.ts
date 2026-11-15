@@ -20,7 +20,7 @@ export class AutoFinishStateStore {
     }
 
     async get(): Promise<AutoFinishState> {
-        return (await this.repository.get()) ?? { last: null, completedResets: {} };
+        return (await this.repository.get()) ?? { last: null, completedResets: {}, completedJobs: {} };
     }
 
     async set(state: AutoFinishState): Promise<void> {

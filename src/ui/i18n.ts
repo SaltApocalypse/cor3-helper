@@ -146,10 +146,13 @@ const EN = {
     'developer.scanning': 'Scanning known IPs...',
 
     'welcome.title': 'Welcome',
-    'welcome.description': 'Manage markets, automation and game tools from the side panel.',
+    'welcome.description': 'Manage markets, automation and game tools from the side panel or a separate window.',
     'welcome.open': 'Open side panel',
     'welcome.opening': 'Opening side panel...',
+    'welcome.openWindow': 'Open in window',
     'welcome.openFailed': 'Could not open the side panel from this context.',
+    'welcome.openWindowFailed': 'Could not open the window from this context.',
+    'header.openWindow': 'Open in a separate window',
 
     'helper.title': 'Helper Mode',
     'helper.description': 'Lock every automation until you are ready.',
@@ -294,10 +297,13 @@ const ZH: Dictionary = {
     'developer.scanning': '正在扫描已知 IP...',
 
     'welcome.title': '欢迎',
-    'welcome.description': '在侧边栏中管理市场、自动化与游戏工具。',
+    'welcome.description': '在侧边栏或独立窗口中管理市场、自动化与游戏工具。',
     'welcome.open': '打开侧边栏',
     'welcome.opening': '正在打开侧边栏...',
+    'welcome.openWindow': '在独立窗口中打开',
     'welcome.openFailed': '无法在当前上下文打开侧边栏。',
+    'welcome.openWindowFailed': '无法在当前上下文打开独立窗口。',
+    'header.openWindow': '在独立窗口中打开',
 
     'helper.title': '辅助模式',
     'helper.description': '在你准备好之前锁定所有自动化功能。',

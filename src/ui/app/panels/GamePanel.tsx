@@ -1,6 +1,7 @@
 import type { PopupPortal } from '../../../application/popup/portal.js';
 import { GameSection } from '../../components/GameSection.js';
 import { InfoTip } from '../../components/InfoTip.js';
+import { ToggleSwitch } from '../../components/ToggleSwitch.js';
 import { useT } from '../../i18n-context.js';
 import { InventoryPage } from '../../pages/InventoryPage.js';
 import { LoadoutNotes, LoadoutPage } from '../../pages/LoadoutPage.js';
@@ -89,6 +90,41 @@ export function GamePanel({ portal, inventory, loadout, mail, settings, now }: G
                     panelOpen={settings.panelOpen}
                     onPanelOpenChange={settings.updatePanelOpen}
                 />
+            </GameSection>
+
+            <GameSection
+                title={tt('Assist tools')}
+                expanded={settings.panelOpen['game.assist'] ?? false}
+                onOpenChange={(open) => settings.updatePanelOpen('game.assist', open)}
+            >
+                <div class="v2-settings-row">
+                    <div class="v2-settings-copy">
+                        <strong class="v2-sai-highlight-title">
+                            {tt('SAI file highlight')}
+                            <InfoTip title={tt('SAI highlight colors')}>
+                                <div class="v2-sai-color-legend">
+                                    <p class="v2-muted">{tt('Colors follow the original userscript highlighter:')}</p>
+                                    <ul>
+                                        <li><span class="v2-sai-swatch is-user" />{tt('User files')}</li>
+                                        <li><span class="v2-sai-swatch is-system" />{tt('System files')}</li>
+                                        <li><span class="v2-sai-swatch is-job" />{tt('Job files')}</li>
+                                        <li><span class="v2-sai-swatch is-valuable" />{tt('Marked valuable')}</li>
+                                        <li><span class="v2-sai-swatch is-priced" />{tt('Credit value or tags')}</li>
+                                        <li><span class="v2-sai-swatch is-other" />{tt('Other special sources')}</li>
+                                    </ul>
+                                    <p class="v2-muted">{tt('Normal generated files are not highlighted.')}</p>
+                                    <p class="v2-muted">{tt('Value badges show credit value, detection rate and tags.')}</p>
+                                </div>
+                            </InfoTip>
+                        </strong>
+                    </div>
+                    <ToggleSwitch
+                        checked={settings.settings?.saiFileHighlightEnabled ?? false}
+                        disabled={!settings.settings}
+                        label={tt('SAI file highlight')}
+                        onChange={(enabled) => void settings.changeQol('saiFileHighlightEnabled', enabled)}
+                    />
+                </div>
             </GameSection>
         </>
     );

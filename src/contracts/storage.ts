@@ -88,6 +88,7 @@ export const settingsV1Schema = z.object({
     disableBackground: z.boolean().default(false),
     moveNotificationsLeft: z.boolean().default(false),
     antiAfkEnabled: z.boolean().default(false),
+    saiFileHighlightEnabled: z.boolean().default(false),
 }).strip();
 
 /**

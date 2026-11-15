@@ -26,6 +26,18 @@ export interface AutoDroneDeps {
 const AUTO_DRONE_ACTIVE_RETRY_MS = 60_000;
 const AUTO_DRONE_MAINTENANCE_RETRY_MS = 30 * 60_000;
 
+const TRANSIENT_DRONE_ERROR = /no game websocket|not ready|socket|timed? ?out|timeout|connection|network|route|unreachable|not[-\s]?reachable|bridge|drone view/i;
+
+/**
+ * Startup and tab-switch races produce socket/bridge failures before the game
+ * data is available. They are not actionable Auto Drone errors; retry them as
+ * "waiting" instead of painting the Overview status red.
+ */
+export function isTransientDroneFailure(code: string, message: string): boolean {
+    return /GAME_NO_SOCKET|GAME_TIMEOUT|BRIDGE_TIMEOUT|BRIDGE_TRANSPORT_ERROR|ENDPOINT_COMMAND_FAILED|GAME_SET_ENDPOINT_FAILED/i.test(code)
+        || TRANSIENT_DRONE_ERROR.test(message);
+}
+
 export class AutoDroneCoordinator {
     private running = false;
     private last: AutoDroneLast | null = null;
@@ -42,7 +54,7 @@ export class AutoDroneCoordinator {
     }
 
     markViewSeen(): void {
-        this.lastViewAt = this.deps.clock.now();
+        this.lastViewAt = Math.max(this.deps.clock.now(), this.last?.at ?? 0);
     }
 
     lastViewedAt(): number {
@@ -55,6 +67,9 @@ export class AutoDroneCoordinator {
         const entry = stored as { at?: unknown; status?: unknown; message?: unknown };
         if (typeof entry.at === 'number' && typeof entry.status === 'string' && typeof entry.message === 'string') {
             this.last = { at: entry.at, status: entry.status, message: entry.message };
+            // A restarted worker should not flash an error from the previous
+            // session before the drone panel has a chance to refresh.
+            this.lastViewAt = Math.max(this.lastViewAt, entry.at);
         }
     }
 
@@ -125,10 +140,11 @@ export class AutoDroneCoordinator {
                 autoSendEnabled: current.droneAutoSendEnabled,
                 processedEventIds: new Set(storedEvents),
             });
+            const transient = !result.ok && isTransientDroneFailure(result.error.code, result.error.message);
             this.last = result.ok
                 ? { at: this.deps.clock.now(), status: result.value.status, message: result.value.message }
-                : { at: this.deps.clock.now(), status: 'error', message: result.error.message };
-            this.deps.logger[result.ok && this.last.status !== 'error' ? 'info' : 'warn'](
+                : { at: this.deps.clock.now(), status: transient ? 'waiting' : 'error', message: result.error.message };
+            this.deps.logger[result.ok || transient ? 'info' : 'warn'](
                 'auto-drone',
                 `Auto Drone run finished: ${this.last.status} — ${this.last.message}`,
                 { status: this.last.status, message: this.last.message },
@@ -141,11 +157,11 @@ export class AutoDroneCoordinator {
                     || result.value.blockedReason === 'active-mission' || result.value.blockedReason === 'repairing'
                     ? 'running'
                     : result.value.status === 'blocked' ? 'blocked' : 'idle')
-                : 'blocked';
+                : transient ? 'idle' : 'blocked';
             await this.deps.state.set('auto-drone', {
                 phase,
                 nextActionAt: null,
-                lastError: result.ok ? null : result.error.message,
+                lastError: result.ok || transient ? null : result.error.message,
                 payload: {
                     processedEventIds: processedEvents,
                     last: this.last,
@@ -185,6 +201,10 @@ export class AutoDroneCoordinator {
                 || result.value.blockedReason === 'active-mission'
             )) {
                 // Check back soon for in-flight decisions and completion.
+                this.deps.scheduler.create(AUTO_DRONE_RETRY_ALARM, { when: this.deps.clock.now() + AUTO_DRONE_ACTIVE_RETRY_MS });
+            } else if (!result.ok && transient) {
+                // Startup and transient socket failures are retried instead of
+                // being left as a permanent red status.
                 this.deps.scheduler.create(AUTO_DRONE_RETRY_ALARM, { when: this.deps.clock.now() + AUTO_DRONE_ACTIVE_RETRY_MS });
             }
         } finally {

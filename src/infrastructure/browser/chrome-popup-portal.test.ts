@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BridgeClient } from '../bridge/bridge-client.js';
 import { ChromePopupPortal, droneStateSchema, expeditionOverviewSchema } from './chrome-popup-portal.js';
 
@@ -76,5 +76,105 @@ describe('portal response schemas', () => {
             archived: [],
         });
         expect(result.success).toBe(true);
+    });
+});
+
+describe('ChromePopupPortal detached window', () => {
+    const baseUrl = 'chrome-extension://test-id/sidepanel.html';
+    const portal = (): ChromePopupPortal => portalWithRequest(vi.fn());
+
+    function stubChrome(options: {
+        readonly windows?: readonly { readonly id: number; readonly type: string; readonly tabs?: readonly { readonly url?: string }[] }[];
+        readonly create?: ReturnType<typeof vi.fn>;
+        readonly update?: ReturnType<typeof vi.fn>;
+        readonly sidePanelOpen?: ReturnType<typeof vi.fn>;
+        readonly currentWindowId?: number;
+    } = {}) {
+        const create = options.create ?? vi.fn().mockResolvedValue({ id: 2 });
+        const update = options.update ?? vi.fn().mockResolvedValue({ id: 1 });
+        vi.stubGlobal('chrome', {
+            runtime: { getURL: (path: string) => `chrome-extension://test-id/${path}` },
+            windows: {
+                getCurrent: vi.fn().mockResolvedValue({ id: options.currentWindowId ?? 1 }),
+                getAll: vi.fn().mockResolvedValue(options.windows ?? []),
+                create,
+                update,
+            },
+            sidePanel: { open: options.sidePanelOpen ?? vi.fn().mockResolvedValue(undefined) },
+        });
+        return { create, update };
+    }
+
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('opens the workspace in a dedicated popup window', async () => {
+        const { create } = stubChrome();
+        await expect(portal().openWindow()).resolves.toBe(true);
+        expect(create).toHaveBeenCalledWith({
+            url: `${baseUrl}?mode=window`,
+            type: 'popup',
+            width: 430,
+            height: 800,
+            focused: true,
+        });
+    });
+
+    it('focuses an existing workspace window instead of creating another one', async () => {
+        const { create, update } = stubChrome({
+            windows: [{ id: 7, type: 'popup', tabs: [{ url: `${baseUrl}?mode=window` }] }],
+        });
+        await expect(portal().openWindow()).resolves.toBe(true);
+        expect(update).toHaveBeenCalledWith(7, { focused: true });
+        expect(create).not.toHaveBeenCalled();
+    });
+
+    it('ignores the workspace document in a normal browser tab', async () => {
+        const { create, update } = stubChrome({
+            windows: [{ id: 7, type: 'normal', tabs: [{ url: `${baseUrl}?mode=window` }] }],
+        });
+        await expect(portal().openWindow()).resolves.toBe(true);
+        expect(update).not.toHaveBeenCalled();
+        expect(create).toHaveBeenCalled();
+    });
+
+    it('reports failure when Chrome blocks the window', async () => {
+        stubChrome({ create: vi.fn().mockRejectedValue(new Error('blocked')) });
+        await expect(portal().openWindow()).resolves.toBe(false);
+    });
+
+    it('falls back to the window when the side panel API is unavailable', async () => {
+        const { create } = stubChrome({
+            sidePanelOpen: vi.fn().mockRejectedValue(new Error('sidePanel unavailable')),
+        });
+        await expect(portal().openSidePanel()).resolves.toBe(true);
+        expect(create).toHaveBeenCalledWith(expect.objectContaining({ url: `${baseUrl}?mode=window` }));
+    });
+});
+
+describe('Auto Jobs snapshot compatibility', () => {
+    it('keeps the short error code for failed markets', async () => {
+        const request = vi.fn().mockResolvedValue({
+            ok: true,
+            value: {
+                at: 1,
+                jobs: [],
+                markets: [{
+                    marketKey: 'usol',
+                    label: 'USOL',
+                    ok: false,
+                    skipped: 0,
+                    failed: 0,
+                    expired: 0,
+                    skippedJobs: [],
+                    resetAt: null,
+                    error: 'market-not-reachable',
+                    errorCode: 'MARKET_FETCH_FAILED',
+                }],
+            },
+        });
+        const result = await portalWithRequest(request).autoJobsSnapshot();
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.value?.markets[0]?.errorCode).toBe('MARKET_FETCH_FAILED');
     });
 });

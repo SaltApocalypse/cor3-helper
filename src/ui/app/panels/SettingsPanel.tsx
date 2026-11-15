@@ -24,6 +24,7 @@ export function SettingsPanel({
         <SettingsPage
             language={settings.language}
             versionName={connection.version?.versionName ?? null}
+            versionBuild={connection.version?.build ?? null}
             settings={settings.settings}
             auth={settings.auth}
             hasEndpoint={Boolean(network.network?.endpoint)}

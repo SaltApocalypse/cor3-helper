@@ -594,6 +594,7 @@ const jobAllMarketsSchema = z.object({
         skippedJobs: z.array(skippedJobSchema).default([]),
         resetAt: z.string().nullable().optional(),
         error: z.string().optional(),
+        errorCode: z.string().optional(),
     }).strict()),
 }).strict();
 const autoJobsSnapshotSchema = z.object({
@@ -706,12 +707,13 @@ export class ChromePopupPortal implements PopupPortal {
         };
     }
 
-    versionInfo(): { readonly name: string; readonly version: string; readonly versionName: string } {
+    versionInfo(): { readonly name: string; readonly version: string; readonly versionName: string; readonly build: string | null } {
         const manifest = chrome.runtime.getManifest();
         return {
             name: manifest.name,
             version: manifest.version,
             versionName: (manifest as { version_name?: string }).version_name ?? manifest.version,
+            build: typeof __COR3_BUILD_NUMBER__ === 'string' ? __COR3_BUILD_NUMBER__ : null,
         };
     }
 
@@ -722,17 +724,37 @@ export class ChromePopupPortal implements PopupPortal {
             await chrome.sidePanel.open({ windowId: current.id });
             return true;
         } catch {
-            try {
-                await chrome.windows.create({
-                    url: chrome.runtime.getURL('sidepanel.html'),
-                    type: 'popup',
-                    width: 430,
-                    height: 800,
-                });
-                return true;
-            } catch {
-                return false;
+            return this.openWindow();
+        }
+    }
+
+    async openWindow(): Promise<boolean> {
+        try {
+            const baseUrl = chrome.runtime.getURL('sidepanel.html');
+            const windows = await chrome.windows.getAll({ populate: true });
+            const existing = windows.find((window) => (
+                window.type === 'popup'
+                && typeof window.id === 'number'
+                && window.tabs?.some((tab) => tab.url?.startsWith(baseUrl))
+            ));
+            if (existing && typeof existing.id === 'number') {
+                try {
+                    await chrome.windows.update(existing.id, { focused: true });
+                    return true;
+                } catch {
+                    // The window may have closed between the query and the focus.
+                }
             }
+            await chrome.windows.create({
+                url: `${baseUrl}?mode=window`,
+                type: 'popup',
+                width: 430,
+                height: 800,
+                focused: true,
+            });
+            return true;
+        } catch {
+            return false;
         }
     }
 
@@ -741,7 +763,7 @@ export class ChromePopupPortal implements PopupPortal {
     }
 
     updateCheck() {
-        return this.client.request('system.updateCheck', {}, updateCheckSchema);
+        return this.client.request('system.updateCheck', {}, updateCheckSchema, 20_000);
     }
 
     getSettings() {
@@ -800,6 +822,7 @@ export class ChromePopupPortal implements PopupPortal {
                             skipped: market.skipped,
                             resetAt: null,
                             error: market.error ?? 'Market sync failed',
+                            ...(market.errorCode ? { errorCode: market.errorCode } : {}),
                         }),
                 },
             };
@@ -847,6 +870,7 @@ export class ChromePopupPortal implements PopupPortal {
                 skippedJobs: market.skippedJobs ?? [],
                 resetAt: null,
                 error: market.error ?? 'Market sync failed',
+                ...(market.errorCode ? { errorCode: market.errorCode } : {}),
             });
         return {
             ok: true,

@@ -1,10 +1,10 @@
-import { settingsV1Schema, type SettingsV1 } from '../../contracts/storage.js';
+import type { SettingsV1 } from '../../contracts/storage.js';
+import { CONTENT_SETTINGS_KEY, parseContentSettings } from './settings.js';
 
 /**
  * v1 QoL DOM tweaks. These run in the isolated content world against the live
  * game page and react to settings changes without a background round-trip.
  */
-const SETTINGS_KEY = 'v2.settings';
 const BACKGROUND_SELECTORS = ['#app-background', '#glitch-background', '#video-glitch', '#video-waves'];
 const NOTIFICATION_STYLE_ID = 'cor3-helper-notifications-left';
 const ANTI_AFK_INTERVAL_MS = 3 * 60 * 1000;
@@ -132,24 +132,17 @@ function apply(settings: SettingsV1): void {
     setAntiAfk(settings.antiAfkEnabled);
 }
 
-function parseSettings(raw: unknown): SettingsV1 | null {
-    if (raw === null || typeof raw !== 'object') return null;
-    const envelope = raw as { data?: unknown };
-    const parsed = settingsV1Schema.safeParse(envelope.data);
-    return parsed.success ? parsed.data : null;
-}
-
 export async function startQol(): Promise<void> {
     try {
-        const stored = await chrome.storage.local.get(SETTINGS_KEY);
-        const settings = parseSettings(stored[SETTINGS_KEY]);
+        const stored = await chrome.storage.local.get(CONTENT_SETTINGS_KEY);
+        const settings = parseContentSettings(stored[CONTENT_SETTINGS_KEY]);
         if (settings) apply(settings);
     } catch {
         // The content script can outlive an extension reload.
     }
     chrome.storage.onChanged.addListener((changes, area) => {
-        if (area !== 'local' || !changes[SETTINGS_KEY]) return;
-        const settings = parseSettings(changes[SETTINGS_KEY].newValue);
+        if (area !== 'local' || !changes[CONTENT_SETTINGS_KEY]) return;
+        const settings = parseContentSettings(changes[CONTENT_SETTINGS_KEY].newValue);
         if (settings) apply(settings);
     });
     // Re-apply style/background after SPA renders settle.

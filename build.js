@@ -87,6 +87,9 @@ async function build() {
         jsx: 'automatic',
         jsxImportSource: 'preact',
         outdir: DIST,
+        define: {
+            __COR3_BUILD_NUMBER__: JSON.stringify(String(buildNumber)),
+        },
     };
 
     await esbuild.build({

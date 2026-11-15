@@ -6,10 +6,14 @@ import type { JobLockRegistry } from './job-locks.js';
 import type { JobMarketSyncEntry } from './job-market-sync.js';
 import { codeForOutcome, outcomeReasonText } from './job-outcome.js';
 
-export function autoFinishMarketBase(market: JobMarketSyncEntry): Omit<JobMarketSyncEntry, 'skippedJobs' | 'expired'> {
-    const { skippedJobs, expired, ...base } = market;
+export function autoFinishMarketBase(market: JobMarketSyncEntry): Omit<JobMarketSyncEntry, 'skippedJobs' | 'expired' | 'errorCode'> {
+    // Auto Finish has its own market schema and does not expose Auto Jobs'
+    // short error codes. Keeping errorCode here makes the persisted
+    // auto-finish state fail validation and aborts the whole Auto Jobs cycle.
+    const { skippedJobs, expired, errorCode, ...base } = market;
     void skippedJobs;
     void expired;
+    void errorCode;
     return base;
 }
 
@@ -86,7 +90,7 @@ export interface FinalMarketInput {
     readonly synced: { jobs: readonly JobOffer[]; markets: readonly JobMarketSyncEntry[] };
     readonly allowedTypes: ReadonlySet<JobOffer['type']>;
     readonly doneIds: ReadonlySet<string>;
-    readonly completedResets: Readonly<Record<string, string>>;
+    readonly completedJobs: Readonly<Record<string, string>>;
     readonly resetByMarket: ReadonlyMap<string, string | null>;
     readonly locks: JobLockRegistry;
     readonly outcomes: ReadonlyMap<string, JobOutcome>;
@@ -97,7 +101,7 @@ export interface FinalMarketInput {
 
 /** Builds the per-market report shown by Auto Finish after a run. */
 export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketResult[] {
-    const { synced, allowedTypes, doneIds, completedResets, resetByMarket, locks, outcomes, failedById, stopped, now } = params;
+    const { synced, allowedTypes, doneIds, completedJobs, resetByMarket, locks, outcomes, failedById, stopped, now } = params;
     return synced.markets.map((market) => {
         const base = autoFinishMarketBase(market);
         if (!market.ok) return { ...base, jobs: [] };
@@ -145,20 +149,6 @@ export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketRes
                 };
             }
             const resetAt = resetByMarket.get(job.marketKey) ?? null;
-            if (resetAt !== null && completedResets[job.marketKey] === resetAt) {
-                return {
-                    jobId: job.id,
-                    name: job.name,
-                    serverName: job.serverName,
-                    marketKey: job.marketKey,
-                    status: 'skipped',
-                    rewardCredits: job.rewardCredits,
-                    rewardReputation: job.rewardReputation,
-                    error: 'Already completed for this market reset',
-                    code: 'ALREADY_COMPLETED',
-                    stage: 'select',
-                };
-            }
             const lockUntil = locks.lockUntil(job.id);
             if (lockUntil !== undefined && lockUntil > now) {
                 return {
@@ -237,6 +227,20 @@ export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketRes
                     error: failure?.error.message ?? outcomeReasonText(outcome),
                     code: codeForOutcome(outcome, failure?.error.detailCode ?? failure?.error.code ?? 'SKIPPED'),
                     stage: failure?.error.stage ?? 'select',
+                };
+            }
+            if (resetAt !== null && completedJobs[job.id] === resetAt) {
+                return {
+                    jobId: job.id,
+                    name: job.name,
+                    serverName: job.serverName,
+                    marketKey: job.marketKey,
+                    status: 'skipped',
+                    rewardCredits: job.rewardCredits,
+                    rewardReputation: job.rewardReputation,
+                    error: 'Already completed for this market reset',
+                    code: 'ALREADY_COMPLETED',
+                    stage: 'select',
                 };
             }
             return {

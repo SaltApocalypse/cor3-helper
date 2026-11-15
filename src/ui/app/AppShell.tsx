@@ -11,6 +11,8 @@ export interface AppShellProps {
     readonly helperMode: boolean;
     readonly activePage: PopupPage;
     readonly developerMode: boolean;
+    readonly windowMode?: boolean;
+    readonly onOpenWindow?: (() => void) | undefined;
     readonly onPageChange: (page: PopupPage) => void;
     readonly children: ComponentChildren;
 }
@@ -23,6 +25,8 @@ export function AppShell({
     helperMode,
     activePage,
     developerMode,
+    windowMode = false,
+    onOpenWindow,
     onPageChange,
     children,
 }: AppShellProps) {
@@ -35,7 +39,7 @@ export function AppShell({
         ...(developerMode ? [['developer', t(language, 'nav.developer')] as const] : []),
     ];
     return (
-        <main class="v2-shell">
+        <main class={`v2-shell${windowMode ? ' v2-window-shell' : ''}`}>
             <BrandHeader>
                 <span class={`v2-status v2-status-${ping === 'ok' ? 'ok' : ping === 'error' ? 'error' : ''}`} title={t(language, 'status.pingHint')}>
                     {ping === 'ok' ? t(language, 'status.ok') : ping === 'error' ? t(language, 'status.offline') : '…'}
@@ -46,6 +50,17 @@ export function AppShell({
                 <span class={`v2-status ${hasEndpoint ? 'v2-status-ok' : 'v2-status-muted'}`} title={t(language, 'status.endpointHint')}>
                     {hasEndpoint ? t(language, 'status.endpoint') : t(language, 'status.noEndpoint')}
                 </span>
+                {onOpenWindow ? (
+                    <button
+                        type="button"
+                        class="v2-header-action"
+                        title={t(language, 'header.openWindow')}
+                        aria-label={t(language, 'header.openWindow')}
+                        onClick={onOpenWindow}
+                    >
+                        ⧉
+                    </button>
+                ) : null}
             </BrandHeader>
 
             <nav class="v2-top-nav">

@@ -33,6 +33,7 @@ export interface AutoFinishPort {
     ): Promise<AutoFinishRunResult | { readonly busy: true }>;
     lastRun(): AutoFinishLastRun | null;
     completedResetsSnapshot(): Readonly<Record<string, string>>;
+    completedJobsSnapshot(): Readonly<Record<string, string>>;
 }
 
 export interface AutoJobsDeps {
@@ -383,18 +384,6 @@ export class AutoJobsCoordinator {
 
     allMarketsCompletedForCurrentReset(): boolean {
         const now = this.deps.clock.now();
-        const last = this.autoFinish?.lastRun() ?? null;
-        if (last && !last.stopped) {
-            const markets = last.markets.filter((market) => market.ok);
-            const finished = markets.length > 0
-                && markets.every((market) => (market.pending ?? 0) === 0 && (market.failed ?? 0) === 0);
-            if (finished) {
-                const dated = markets
-                    .map((market) => market.resetAt ? new Date(market.resetAt).getTime() : Number.NaN)
-                    .filter((value) => Number.isFinite(value));
-                if (dated.every((value) => value > now)) return true;
-            }
-        }
         const snapshot = this.snapshot;
         if (!snapshot || snapshot.markets.length === 0) return false;
         const active = snapshot.markets.filter((market) =>
@@ -402,8 +391,15 @@ export class AutoJobsCoordinator {
             && new Date(market.resetAt).getTime() > now,
         );
         if (active.length !== snapshot.markets.length) return false;
-        const completedResets = this.autoFinish?.completedResetsSnapshot() ?? {};
-        return active.every((market) => completedResets[market.marketKey] === market.resetAt);
+        const completedJobs = this.autoFinish?.completedJobsSnapshot() ?? {};
+        // Completion is tracked per job, not per market. A market can gain new
+        // jobs inside the same reset; those must still be processed. Empty
+        // markets are not considered finished so the next interval can find
+        // newly generated work.
+        return active.every((market) => {
+            const jobs = snapshot.jobs.filter((job) => job.marketKey === market.marketKey);
+            return jobs.length > 0 && jobs.every((job) => completedJobs[job.id] === market.resetAt);
+        });
     }
 
     dismissFailedJobs(

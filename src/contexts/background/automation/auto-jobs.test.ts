@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { settingsV1Schema, type SettingsV1 } from '../../../contracts/storage.js';
 import { AUTO_JOBS_INFO_ALARM } from './alarm-ids.js';
-import { AutoJobsCoordinator, type AutoJobsDeps } from './auto-jobs.js';
+import { AutoJobsCoordinator, type AutoFinishPort, type AutoJobsDeps } from './auto-jobs.js';
+import type { JobOffer } from '../../../domains/jobs/model.js';
 
 function makeCoordinator(overrides: Partial<SettingsV1>) {
     const settings = settingsV1Schema.parse(overrides);
@@ -103,6 +104,57 @@ describe('AutoJobsCoordinator gating', () => {
         expect(scheduler.create).toHaveBeenCalledWith(AUTO_JOBS_INFO_ALARM, {
             delayInMinutes: 60,
             periodInMinutes: 60,
+        });
+    });
+});
+
+describe('AutoJobsCoordinator reset completion', () => {
+    const resetAt = '2026-11-16T04:00:00.000Z';
+    const job = (id: string): JobOffer => ({
+        id,
+        name: id,
+        type: 'Data Upload',
+        marketId: 'home-market',
+        marketKey: 'home',
+        serverId: 'server-1',
+        serverName: 'Server 1',
+        rewardCredits: 0,
+        rewardReputation: 0,
+        deposit: 0,
+        alreadyTaken: false,
+        canComplete: false,
+    });
+
+    function coordinatorWithCompletedJobs(completedJobs: Readonly<Record<string, string>>) {
+        const made = makeCoordinator({ helperMode: false, autoJobsEnabled: true, autoFinishEnabled: true });
+        made.coordinator.attachAutoFinish({
+            run: vi.fn(),
+            lastRun: vi.fn(() => null),
+            completedResetsSnapshot: () => ({}),
+            completedJobsSnapshot: () => completedJobs,
+        } as unknown as AutoFinishPort);
+        made.coordinator.publishSnapshot({
+            at: 1,
+            jobs: [job('new-job')],
+            markets: [{ marketKey: 'home', label: 'HOME', ok: true, skipped: 0, resetAt }],
+        });
+        return made;
+    }
+
+    it('keeps the interval refresh when a new job appears in a completed reset', async () => {
+        const { coordinator, scheduler } = coordinatorWithCompletedJobs({});
+        await coordinator.scheduleNextRefresh();
+        expect(scheduler.create).toHaveBeenCalledWith(AUTO_JOBS_INFO_ALARM, {
+            delayInMinutes: 60,
+            periodInMinutes: 60,
+        });
+    });
+
+    it('schedules the next reset only when every current job is completed for that reset', async () => {
+        const { coordinator, scheduler } = coordinatorWithCompletedJobs({ 'new-job': resetAt });
+        await coordinator.scheduleNextRefresh();
+        expect(scheduler.create).toHaveBeenCalledWith(AUTO_JOBS_INFO_ALARM, {
+            when: Date.parse(resetAt) + 30_000,
         });
     });
 });
