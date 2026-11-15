@@ -1,9 +1,9 @@
 # cor3-helper 2.0 — Architecture Decision Record
 
-- **Status:** Accepted; implementation ongoing on `v2` (build `2.0.1-salta.240`)
+- **Status:** Accepted; implementation ongoing on `v2` (build `2.0.2-salta.251`)
 - **Date:** 2026-11-08
 - **Last status update:** 2026-11-15
-- **Current verification:** typecheck, lint, Vitest (82 files / 373 tests) and build pass at this build.
+- **Current verification:** typecheck, lint, Vitest (89 files / 406 tests) and build pass at this build.
 - **Baseline:** `experimental` at `c7b69c7` (`v1.8.6-salta-exp.2`)
 - **Related audit:** [`cor3-helper-2.0-architecture-audit.md`](./cor3-helper-2.0-architecture-audit.md)
 - **Scope:** architecture, technology selection, security, repository strategy, UI, loadout data, release identity
@@ -122,6 +122,8 @@ Open implementation detail: whether to use the full Zod API or a size-optimized 
 Scope:
 
 - Popup and side panel.
+- Detached popup window (the same `SidePanelApp`, opened through `chrome.windows.create`).
+- Content-script QoL overlays (DOM adaptation such as the SAI file highlighter) are not Preact; they live in `src/contexts/content/` and are gated by persisted settings.
 - DevTools panel and offline log viewer where appropriate.
 - Not the MAIN-world game engines.
 - Not the standalone DOM solvers.
@@ -648,7 +650,7 @@ Status: **2.0 rewrite implemented on `v2`; H9 is complete and H10 is partially a
 
 - Source was promoted from the transitional `v2/` workspace to the repository root `src/`.
 - v1 source was removed from the working tree; it remains in git history as the behavior reference.
-- Build output is `dist/`; current build is `2.0.1-salta.240`.
+- Build output is `dist/`; current build is `2.0.2-salta.251`.
 - Background split (H8): 54-line composition root, 103 bridge commands across 17 handler modules, and port-driven automation coordinators.
 - Side panel split: per-domain hooks, pure view models and page panels.
 - H1 release workflow fixed: typecheck/lint/test/build, zip `dist/`, generated release notes.

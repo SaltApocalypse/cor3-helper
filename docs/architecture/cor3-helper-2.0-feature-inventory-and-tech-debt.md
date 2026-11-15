@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-15 against build `2.0.1-salta.240`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (82 files / 373 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-15 against build `2.0.2-salta.251`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (89 files / 406 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.1-salta.240`)
+## Current completion snapshot (build `2.0.2-salta.251`)
 
 | Metric | Value |
 |---|---|
@@ -27,7 +27,7 @@ Reading the numbers:
 
 - The **automation core** (Auto Jobs/Auto Finish/Auto Jobs scheduling, loadout, Auto Expedition, Auto Drone, Auto Mail, Auto Daily, Valuable Seller) exists and is wired end to end.
 - Most **Partial** rows are narrower UI scope (per-market refresh, market lot tables, debug-console filters, timers), not missing automation.
-- Most **Missing** rows are v1 presentation/polish features: pop-out window, 10-theme system, pinned timers, market item INFO popup, Valuable Seller result tables, game-version notices and settings sync.
+- Most **Missing** rows are v1 presentation/polish features: 10-theme system, pinned timers, market item INFO popup, Valuable Seller result tables, game-version notices and settings sync.
 - The remaining engineering risk is concentrated in **H4** (static catalog artifact), **H10** (background/content/portal and UI tests), **M7** (unused settings) and **O-016** (settings sync). Part 6 records the loadout/decryption fixes; Part 7 records the dev.230 hardening pass; Part 8 records the dev.231 release pipeline.
 
 ---
@@ -39,7 +39,7 @@ Reading the numbers:
 | Feature | v1 entry points | v2 status | v2 evidence / notes |
 |---|---|---|---|
 | Brand header (logo + COR3 Helper) | `src/html/popup.html` header row | **Implemented** | `src/ui/components/BrandHeader.tsx`; adds `SaltA Fork` subtitle |
-| Pop-out window (360×700 Chrome popup) | `#popOutBtn`, `src/popup/panel-controls.js` | **Missing** | No popout button or `chrome.windows.create` in `ui/app/AppShell.tsx` / `WelcomeApp.tsx` |
+| Pop-out window (v1: 360×700 Chrome popup) | `#popOutBtn`, `src/popup/panel-controls.js` | **Implemented** | `ChromePopupPortal.openWindow()` opens `sidepanel.html?mode=window` as a 430×800 popup, focuses an existing one, and is exposed in `WelcomeApp.tsx` and the side-panel header. Wide multi-column layout is still not implemented |
 | Open as side panel | `#sidePanelBtn`, `src/popup/panel-controls.js` | **Implemented** | `WelcomeApp.tsx` → `portal.openSidePanel()` |
 | Refresh All (daily → markets → expeditions → inbox → mercenaries → archive → loadout) | `#refreshAllBtn`, `src/popup/refresh-all.js` | **Missing** | Only “Refresh all jobs” exists in `AutoJobsCard.tsx` |
 | Per-section refresh (daily, each market, expeditions, archive, drone, inventory, loadout) | `src/popup/refresh-all.js`, feature modules | **Partial** | Expedition/drone refresh buttons in `AutoExpeditionCard.tsx`; inventory/loadout reload only on mount/action |
@@ -206,6 +206,7 @@ Reading the numbers:
 | Disable network fog videos | `#disableNetworkFogToggle` | **Implemented** | `disableNetworkFog` setting applied by `src/contexts/content/qol.ts` |
 | Info panel visibility toggle | `#marketsPanelToggle` | **Missing** | Per-card open state only |
 | Anti-AFK clicker | `ensureAntiAfkEnabled`, `content-early/message-listener.js` | **Implemented** | `antiAfkEnabled` setting; content QoL clicks the desktop every three minutes |
+| SAI special-file highlight and value badges | External userscript `highlighter.ts` | **Implemented** | `saiFileHighlightEnabled`; `src/contexts/content/sai-highlighter.ts` uses the original userscript palette (user blue, system red, job yellow, marked valuable teal, price/tags orange, other magenta) and shows credit value, detection rate and tags. Toggle and colour legend: Game → Assist tools |
 | Secret Link/Server Finder | `#secretFinderToggle`, `content-early/network-discovery.js` | **Partial** | Manual Discover 4 IPs in Developer page; no auto toggle/log |
 | Startup/background market updates | `content-early/initial-fetch.js` | **Implemented** | Snapshot/market sync + Auto Jobs alarms |
 
@@ -265,7 +266,7 @@ Reading the numbers:
 
 1. Global Refresh All and most per-section refresh buttons.
 2. Theme system (10 themes).
-3. Pop-out window and multi-column popup layout.
+3. Multi-column popup layout for wide detached windows (the pop-out window itself is implemented).
 4. Pinned timers and per-market auto-refresh-on-zero.
 5. Market items list and item INFO popup.
 6. Per-market failed-job cleanup and per-market job-type filters.
@@ -605,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 82 files / 373 tests pass
-- `npm run build` — pass, `2.0.1-salta.240`
+- `npm test` — 89 files / 406 tests pass
+- `npm run build` — pass, `2.0.2-salta.251`
 
 ---
 
@@ -735,7 +736,7 @@ Fixes:
 
 - typecheck / lint pass
 - 80 test files / 355 tests
-- build `2.0.1-salta.240`
+- build `2.0.2-salta.251`
 
 ---
 
@@ -784,6 +785,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 - `useGameStatus` polls `overview.state` on Overview (10s) and exposes it to the status card; the separate `activity.state` poll remains at 3s for live progress.
 - The card uses green/amber/red/gray tones for healthy, attention, error and idle states. Detailed route/loadout/socket errors remain in the automation logs; the card only shows a short error category.
 - Added view-model tests for health precedence, recent-error detection, queue/snapshot warnings, and automation tone mapping.
+- The initial details grid used two columns for short rows, with `Game data`, `Network` and `Auto Jobs` spanning the full row; Part 14 switches the whole grid to one column.
 
 ---
 
@@ -793,3 +795,79 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 - The Auto Drone row previously used `lastRun().message` as `lastError` for every status, including normal/blocked messages. It now reports an error only when the last run status is `error`.
 - Auto Drone and Auto Expedition record the last successful view refresh. If the error predates that view, `overview.state` suppresses it; a new error after the view is shown again.
 - This prevents a resolved drone/expedition connection from leaving a permanent red error in Extension Status.
+
+---
+
+# Part 14 — Single-column Status Details and Detached Workspace Window (2.0.1-salta.242)
+
+- The Extension Status expanded details now use a single-column grid; every row spans the card width and long values wrap instead of sharing a two-column row.
+- `PopupPortal.openWindow()` opens `sidepanel.html?mode=window` as a 430×800 Chrome popup. It focuses an existing popup instead of creating duplicates and ignores the same document in normal browser tabs.
+- The detached window runs the same `SidePanelApp`; `?mode=window` adds a centered max-width shell. No new manifest permission or entry point is required.
+- `openSidePanel()` now reuses `openWindow()` when the SidePanel API is unavailable.
+- Entry points: the Welcome popup button and the side-panel header pop-out action.
+- Added portal tests for window creation, singleton focus, normal-tab filtering, failure handling and side-panel fallback.
+
+---
+
+# Part 15 — SAI Special-File Highlight and Value Badges (2.0.1-salta.243)
+
+- The MAIN-world socket hub now caches `sai:get.files` entries, applies `sai:file.delete` / `sai:file.upload` / `sai:file.search-valuable` updates, and forwards the normalized list to the content script (`V2_SAI_FILES`).
+- `game.saiFiles` exposes the cached list so a content script that starts after the SAI window opened can paint immediately.
+- `src/contexts/content/sai-highlighter.ts` maps the cached entries to the `SaiFiles` rows and reproduces the original userscript palette: user blue, system red, job yellow, game-marked valuable teal, credit-value/tag files orange, and other special sources magenta. Source colours keep the same precedence as the original script.
+- Value badges show `CR <basePrice>`, `<detectRate>% det`, and a compact `i` tooltip for tags. The overlay is class-based and re-applied by a MutationObserver, so it does not rewrite the game rows.
+- The overlay is opt-in through `saiFileHighlightEnabled` (default `false`) and can be toggled from the new Game → Assist tools panel without reloading the page; an inline info button next to the title explains the full colour legend.
+- Raw socket payloads are validated and normalized at the main-world boundary; the content script validates the cross-context message again.
+- Added contract and domain tests for normalization, tag parsing, value detection and highlight precedence.
+
+---
+
+# Part 16 — Auto Jobs Cycle Failure and Manual Market Refresh (2.0.1-salta.245)
+
+- A failed Auto Jobs market sync exposed `errorCode` on `JobMarketSyncEntry`. `autoFinishMarketBase` copied that field into `AutoFinishMarketResult`, whose schema does not allow it. The persisted/returned `last.markets` payload then failed Zod validation (`unrecognized_keys: errorCode`), aborting the Auto Jobs cycle and leaving the panel without a completion refresh.
+- `autoFinishMarketBase` now strips `errorCode` (and still strips the fields that Auto Finish recalculates). The Auto Jobs short error code remains available in the Auto Jobs report.
+- The MAIN-world socket hub now parses outgoing `market:get.options` / `get.lots` / `get.jobs` frames. This lets responses from a manual in-game market refresh update the market cache and publish `V2_MARKET_CACHE_UPDATED`, which the background applies to the Auto Jobs snapshot.
+- The side-panel `jobAllMarketsSchema` / `autoJobsSnapshotSchema` now accept and preserve `errorCode` for failed markets, so `job.syncAllMarkets` and `auto-jobs.snapshot` no longer reject a payload just because one market failed.
+- Added regression tests for the Auto Finish market/state schemas, failed-market Auto Jobs snapshots and outgoing market frame parsing.
+
+---
+
+# Part 17 — Job-level Auto Finish Completion Tracking (2.0.1-salta.246)
+
+- The log showed market refreshes completing with `skipped: 0`; the skipped rows came from Auto Finish selection, not the market mapper.
+- `completedResets` was market-level. Once a market was considered complete, every job currently listed in that market was skipped as `ALREADY_COMPLETED`, even when the market later produced new jobs under the same reset. A zero-job market was also marked complete immediately.
+- Auto Finish state now persists `completedJobs` (`jobId -> resetAt`). Selection and reporting skip only a job that was actually completed for the current reset. New job IDs in the same market/reset remain runnable.
+- Auto Jobs reset scheduling now checks the current job IDs against `completedJobs` and does not treat an empty market as complete. This keeps the interval refresh alive so newly generated work can be discovered.
+- The report marks `ALREADY_COMPLETED` only after checking real outcomes, so a force-run failure cannot be mislabelled as a completed job.
+- A `jobResult.error` guard prevents `Cannot read properties of undefined (reading 'code')` from aborting an Auto Finish run.
+- Added tests for job-level completion, zero-job markets, reset scheduling and Auto Finish state persistence.
+
+---
+
+# Part 18 — Auto Drone Startup Status Noise (2.0.1-salta.247)
+
+- A fresh worker can run Auto Drone before the game socket or drone data is available. `DroneAutoService.runOnce()` returns an error for that transient race, and the Overview used to paint the Auto Drone automation red until the user opened the drone panel.
+- Transient socket/bridge/timeout/route failures are now recorded as `waiting` instead of `error`; real drone failures still use `error`. The automation stays visible but no longer raises the red overview state.
+- Transient failures schedule the existing Auto Drone retry alarm (60 s) so the first successful game-data read launches normally. Real failures wait for the regular interval.
+- `restore()` marks the restored last-run timestamp as already viewed, so an error from a previous worker session does not flash on startup. A new error after a manual drone view still appears.
+- `markViewSeen()` now never moves the view timestamp behind the last run timestamp.
+- Added tests for transient classification, restored view state, startup waiting status and real-error visibility.
+
+---
+
+# Part 19 — Auto Daily "Already Claimed" Status (2.0.1-salta.248)
+
+- After a successful Auto Daily run, the next check can see `hasClaimedToday: true` and records `solved: false` with `puzzle: "claimed"`. The Overview treated every `solved: false` last run as an error, so the normal post-completion state appeared as `Data fetch failed`.
+- `isAutoDailyWaiting()` now recognizes the claimed/waiting state (and the equivalent "already completed" messages) and the Overview excludes it from the red automation error.
+- If the solve response is not marked solved but the post-run daily state already reports `hasClaimedToday`, the coordinator normalizes the last run to the claimed/waiting state instead of leaving a false failure.
+- Real solve/fetch failures still produce an error.
+- Added tests for claimed-state detection while keeping real failures visible.
+
+---
+
+# Part 20 — Build-aware Footer and Update-check Fallbacks (2.0.1-salta.250)
+
+- `build.js` now injects `__COR3_BUILD_NUMBER__` into the bundles while leaving the release tag and manifest `version_name` unchanged (`2.0.1-salta`). The Settings footer appends the build counter (`2.0.1-salta.250`) without changing release identity.
+- The update checker now tries three endpoints concurrently (raw GitHub, jsDelivr, GitHub raw) with a 6-second abort timeout per endpoint. This prevents one blocked CDN from producing a permanent “Could not check for updates”.
+- `manifest.json` permits the jsDelivr and GitHub raw hosts used by the fallbacks.
+- The side-panel bridge timeout for `system.updateCheck` is raised to 20 seconds, and the inline failure message exposes the underlying error in its tooltip.
+- Added a fallback test for the update checker.

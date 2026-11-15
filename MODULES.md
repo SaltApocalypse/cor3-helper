@@ -27,11 +27,11 @@ Statuses below mean “implementation exists”, not “v1 parity is verified”
 | Infrastructure | `src/infrastructure/logging/` | Buffered redacted logger and run-log store | Implemented |
 | Infrastructure | `src/infrastructure/auth/`, `update/` | Ephemeral session, tab auth adapter, update checker | Implemented |
 | Context | `src/contexts/main-world/` | Game socket hub, minigame solvers, page bridge server | Implemented |
-| Context | `src/contexts/content/` | Page bridge client, tab-command handlers, QoL DOM automation | Implemented |
+| Context | `src/contexts/content/` | Page bridge client, tab-command handlers, QoL DOM automation and the SAI file overlay | Implemented |
 | Context | `src/contexts/background/` | Composition root, bridge handlers, automation coordinators, alarms, bootstrap | Implemented |
-| Context | `src/contexts/popup/`, `sidepanel/`, `devtools/` | Preact composition roots | Implemented |
+| Context | `src/contexts/popup/`, `sidepanel/`, `devtools/` | Preact composition roots; `sidepanel/` also serves the detached window via `?mode=window` | Implemented |
 | UI | `src/ui/` | Preact components, pages, feature cards, hooks, view models, i18n | Implemented |
-| Assets | `src/html/`, `src/libs/` | Popup/side panel/DevTools HTML+CSS; vendored msgpack/notepack codecs | Implemented |
+| Assets | `src/html/`, `src/libs/` | Popup/side panel/DevTools HTML+CSS; the detached window reuses `sidepanel.html`; vendored msgpack/notepack codecs | Implemented |
 | Tooling | `src/tools/` | Catalog CLI, release build-number helper and build helpers | Implemented |
 
 ## Background composition
@@ -110,8 +110,8 @@ Behavior note: a known decrypt file type (for example `.xvct`) is planned exactl
 
 ## Current verification and known gaps
 
-- Last verified: 2026-11-15, build `2.0.1-salta.240`.
-- `npm run typecheck`, `npm run lint`, `npm test` (82 files / 373 tests) and `npm run build` pass.
+- Last verified: 2026-11-15, build `2.0.2-salta.251`.
+- `npm run typecheck`, `npm run lint`, `npm test` (89 files / 406 tests) and `npm run build` pass.
 - No domain/application imports of `chrome`, `window`, `document`, WebSocket, fetch or IndexedDB; an architecture-boundary test enforces this and the UI layer rules.
 - Persisted stores now use versioned envelopes with idempotent migrations (H9).
 - Release builds are tag-driven: `version` + `releaseLabel` determine the tag, and CI publishes `COR3 Helper v<version>-salta.zip`.

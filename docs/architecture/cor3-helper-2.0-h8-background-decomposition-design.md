@@ -3,7 +3,7 @@
 - **Status:** Implemented (Phase 0–7) in `2.0.0-salta-dev.222`
 - **Date:** 2026-11-15
 - **Build reference:** `2.0.0-salta-dev.222`
-- **Still current:** `2.0.1-salta.240` retains the 54-line composition root and 103 bridge commands across 17 handler modules; the suite is now 82 files / 373 tests.
+- **Still current:** `2.0.2-salta.251` retains the 54-line composition root and 103 bridge commands across 17 handler modules; the suite is now 89 files / 406 tests.
 - **Scope:** H8 (background god module + oversized side-panel component)
 - **Related:** H9 (persistence), H10 (test coverage), M2 (domain logic in UI), M10 (polling), M18 (boundary enforcement)
 

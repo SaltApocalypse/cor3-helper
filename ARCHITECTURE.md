@@ -4,7 +4,7 @@
 
 The project is on the `v2` branch and contains the 2.0 rewrite. v1 is no longer in the working tree; it remains available in git history as a behavior reference.
 
-Last verified: 2026-11-15 at build `2.0.1-salta.240`. Typecheck, lint, Vitest (82 files / 373 tests) and build pass. The remaining gaps are tracked in the feature inventory (H4, H10, M7, O-016).
+Last verified: 2026-11-15 at build `2.0.2-salta.251`. Typecheck, lint, Vitest (89 files / 406 tests) and build pass. The remaining gaps are tracked in the feature inventory (H4, H10, M7, O-016).
 
 Authoritative decisions:
 
@@ -15,9 +15,9 @@ Authoritative decisions:
 
 ```text
 MAIN world       content-early + injected game engines
-ISOLATED world   content bridge + DOM automation
+ISOLATED world   content bridge + DOM automation + SAI overlay
 Service worker   background scheduler
-Extension UI     Preact popup / side panel / DevTools
+Extension UI     Preact popup / side panel / detached window / DevTools
 ```
 
 Every cross-context message uses a typed, versioned envelope. No new global `window.__cor3*` state is allowed. Cross-context messages are validated with Zod at the receiving boundary.
@@ -62,7 +62,7 @@ src/application/     use cases and ports
 src/infrastructure/  Chrome, storage, WebSocket, logging adapters
 src/contexts/        main-world, content, background, popup, sidepanel, devtools
 src/ui/              Preact components, hooks, view models and i18n
-src/html/            popup/side-panel/DevTools HTML and CSS
+src/html/            popup/side-panel/DevTools HTML and CSS (the detached window reuses sidepanel.html)
 ```
 
 The 2.0 source was promoted from the transitional workspace to the root `src` layout on the `v2` branch; legacy v1 source was removed from the working tree.
