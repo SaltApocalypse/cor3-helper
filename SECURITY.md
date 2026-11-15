@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---|---|
-| 2.0.x (`v2` branch, development) | :white_check_mark: |
+| 2.0.x (`v2` branch) | :white_check_mark: |
 | 1.8.x (v1 stable line) | Critical fixes only |
 | < 1.8 | :x: |
 

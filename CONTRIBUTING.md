@@ -62,7 +62,7 @@ The same checks run in GitHub Actions for pushes and pull requests targeting `v2
 
 4. Test the changed feature in Chrome against cor3.gg.
 5. Update the relevant documentation (`README`, `ARCHITECTURE`, `MODULES`, feature inventory, ADR) when behavior, layout or decisions change.
-6. Development builds use `npm run bump:build` to increment `cor3Fork.build`. Release builds do not use the dev build counter; see below.
+6. Local builds use `npm run bump:build` to increment `cor3Fork.build`. Release builds do not use the local build counter; see below.
 
 Formatting:
 

@@ -101,7 +101,7 @@ export function DevToolsPanel({ portal }: DevToolsPanelProps) {
         <main class="devtools-shell">
             <header class="devtools-header">
                 <div>
-                    <p class="devtools-eyebrow">cor3-helper 2.0 Dev</p>
+                    <p class="devtools-eyebrow">cor3-helper 2.0</p>
                     <h1>{tr('Diagnostics')}</h1>
                 </div>
                 <div class="devtools-actions">

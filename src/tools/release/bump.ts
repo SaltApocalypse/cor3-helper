@@ -5,14 +5,15 @@ interface PackageJson {
     readonly version: string;
     readonly cor3Fork?: {
         readonly label?: string;
+        readonly releaseLabel?: string;
         readonly build?: number;
     };
 }
 
 /**
- * Increments `cor3Fork.build` in package.json. Release artifacts derive their
- * `version_name` from this value in build.js, so this is the single source of
- * truth for the development build number.
+ * Increments `cor3Fork.build` in package.json. Local artifacts derive their
+ * `version_name` from this value in build.js; releases use the tag version
+ * without the local counter.
  */
 async function main(): Promise<void> {
     const path = resolve(process.cwd(), 'package.json');
@@ -27,7 +28,7 @@ async function main(): Promise<void> {
         },
     };
     await writeFile(path, JSON.stringify(updated, null, 4) + '\n', 'utf8');
-    const label = pkg.cor3Fork?.label;
+    const label = pkg.cor3Fork?.releaseLabel ?? pkg.cor3Fork?.label;
     console.log(`Build ${label ? `${pkg.version}-${label}.${next}` : next} (was ${current})`);
 }
 

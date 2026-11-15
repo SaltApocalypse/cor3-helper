@@ -4,7 +4,7 @@
 
 这是一个用于 [cor3.gg](https://cor3.gg) 的 Chrome 扩展，可监控市场、任务、远征、日常任务、库存与配装，并提供可选自动化。
 
-当前 `v2` 分支包含 **2.0 重写版**。它是开发构建，不是稳定的 v1 扩展。
+当前 `v2` 分支包含 **2.0 发布线**。它不是稳定的 v1 扩展。
 
 > **个人分支：** [SaltApocalypse/cor3-helper](https://github.com/SaltApocalypse/cor3-helper)，基于 [Femtoce11/cor3-helper](https://github.com/Femtoce11/cor3-helper)。并非上游官方发布。
 >
@@ -13,11 +13,11 @@
 
 ## 当前状态
 
-- 版本：发布版见 `package.json` 的 `version`；开发版见 `cor3Fork.build`
+- 版本：发布版见 `package.json` 的 `version` + `cor3Fork.releaseLabel`；本地构建追加 `cor3Fork.build`
 - 分支：`v2`
 - 架构：分层、强类型的 2.0 重写（domain / application / infrastructure / contexts）
 - 构建输出：`dist/`（Manifest V3）
-- 验证状态：`2.0.0-salta-dev.234` 下 typecheck、lint、Vitest（80 个文件 / 355 个测试）和构建均通过；PR 会运行同样的 CI 检查
+- 验证状态：`2.0.1-salta.240` 下 typecheck、lint、Vitest（82 个文件 / 373 个测试）和构建均通过；PR 会运行同样的 CI 检查
 - 已知缺口：静态物品目录仍需真实模块转储，后台/内容/portal 与 UI 渲染测试仍不完整；见[功能清单与技术债](./docs/architecture/cor3-helper-2.0-feature-inventory-and-tech-debt.md)
 
 ## 环境要求
@@ -59,7 +59,7 @@ git push origin v2
 git push origin v2.1.0-salta
 ```
 
-tag 必须等于 `<version>-<cor3Fork.releaseLabel>`。开发构建继续使用 `cor3Fork.build`，版本形如 `2.0.0-salta-dev.<build>`。开发版和发布版共用同一个扩展 key，只有显示名称和版本不同。
+tag 必须等于 `<version>-<cor3Fork.releaseLabel>`。本地构建使用 `<version>-salta.<build>`；发布版使用 `<version>-salta`。两者共用 `COR3 Helper 2.0` 身份和扩展 key。
 
 ## 常用命令
 

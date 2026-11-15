@@ -1,9 +1,9 @@
 # cor3-helper 2.0 — Architecture Decision Record
 
-- **Status:** Accepted; implementation ongoing on `v2` (build `2.0.0-salta-dev.234`)
+- **Status:** Accepted; implementation ongoing on `v2` (build `2.0.1-salta.240`)
 - **Date:** 2026-11-08
 - **Last status update:** 2026-11-15
-- **Current verification:** typecheck, lint, Vitest (80 files / 355 tests) and build pass at this build.
+- **Current verification:** typecheck, lint, Vitest (82 files / 373 tests) and build pass at this build.
 - **Baseline:** `experimental` at `c7b69c7` (`v1.8.6-salta-exp.2`)
 - **Related audit:** [`cor3-helper-2.0-architecture-audit.md`](./cor3-helper-2.0-architecture-audit.md)
 - **Scope:** architecture, technology selection, security, repository strategy, UI, loadout data, release identity
@@ -24,7 +24,7 @@
 | D-007 | Maximum `psuPower` is the default PSU policy; make the policy extensible | **Approved** |
 | D-008 | Support non-max accounts as a mandatory requirement | **Approved** |
 | D-009 | Deprecate Dev TC; do not migrate legacy implementations directly | **Approved** |
-| D-010 | Use a separate development extension identity; final identity remains open | **Approved (dev identity)** |
+| D-010 | Use a dedicated 2.0 extension identity shared by local and release builds; final migration remains open | **Approved** |
 
 Open items are listed in section 11. They are not silently decided in this document.
 
@@ -50,7 +50,7 @@ Rules:
 - Freeze non-critical v1 feature work during 2.0.
 - Keep v1 open for critical bug fixes only.
 - Do not rewrite existing tags or history.
-- Final 2.0 release tags should use the `v2.0.0-salta` form (`<version>-<releaseLabel>`); `cor3Fork.build` remains dev-only.
+- Final 2.0 release tags should use the `v2.0.0-salta` form (`<version>-<releaseLabel>`); `cor3Fork.build` remains the local build counter.
 - The project remains a downstream fork of the original project. 2.0 is an independent architecture design and original rewrite, not an official upstream release.
 
 Consequences:
@@ -286,26 +286,26 @@ Rules:
 
 ### D-010 — Extension identity
 
-**Decision:** Use a separate development extension identity. Final release identity remains open.
+**Decision:** Use a dedicated 2.0 extension identity. Local and release builds share the same identity; migration from v1 remains open.
 
 Development identity:
 
 ```text
-Name: cor3-helper 2.0 Dev
-manifest key: dedicated development key for a stable unpacked ID
-version_name: 2.0.0-salta-dev.N
+Name: COR3 Helper 2.0
+manifest key: shared 2.0 extension key
+version_name: <version>-salta (release) / <version>-salta.<build> (local)
 storage namespace: separate from v1
 ```
 
 Rules:
 
-- Dev and release builds use separate manifest profiles.
-- Dev build must not overwrite v1 settings or caches.
-- Dev build must not publish to the stable release channel.
+- Local and release builds use the same manifest profile.
+- The 2.0 build must not overwrite v1 settings or caches.
+- Local builds must not publish to the stable release channel.
 - Final release identity is **Open**: same ID/name for upgrade, or distinct identity for side-by-side.
 - If the final identity differs, provide a settings export/import migration path.
 - The release workflow must verify which identity is being built.
-- **Implementation note (dev.231):** the simplified release pipeline uses the same extension key/ID for dev and release. Only the manifest display name (`cor3-helper 2.0 Dev` vs `COR3 Helper 2.0`) and `version_name` differ. This supersedes the “separate manifest profiles” bullet above for the current pipeline, narrows O-002 to a single-identity decision, and leaves side-by-side dev/release identities out of scope.
+- **Implementation note (2.0.0):** the development phase is complete. Local and release builds use the same `COR3 Helper 2.0` identity and extension key; only `version_name` differs (local builds append the build counter). This supersedes the separate-dev-identity profile for 2.0. Migration from v1 remains O-002.
 
 ---
 
@@ -648,15 +648,16 @@ Status: **2.0 rewrite implemented on `v2`; H9 is complete and H10 is partially a
 
 - Source was promoted from the transitional `v2/` workspace to the repository root `src/`.
 - v1 source was removed from the working tree; it remains in git history as the behavior reference.
-- Build output is `dist/`; current build is `2.0.0-salta-dev.234`.
+- Build output is `dist/`; current build is `2.0.1-salta.240`.
 - Background split (H8): 54-line composition root, 103 bridge commands across 17 handler modules, and port-driven automation coordinators.
 - Side panel split: per-domain hooks, pure view models and page panels.
 - H1 release workflow fixed: typecheck/lint/test/build, zip `dist/`, generated release notes.
 - H2/H3/H5/H6/H7 complete; H9 store migrations complete; H4 partial because the static catalog artifact is still absent (the loader now merges when it appears).
 - H10 integration/UI tests are partially addressed (decrypt pipeline, storage migrations and architecture boundaries) but background/content/portal orchestration and UI rendering remain deferred.
 - **Loadout/auto-decryption:** the Loadout page and automatic File Decryption share `LoadoutService.ensure()` + `optimizeLoadout()`. File Decryption uses exact-target planning before `take`, applies an adaptive hardware order, and reports plan/step diagnostics.
-- **Release pipeline (dev.231):** tag-driven. A tag must equal `package.json.version + cor3Fork.releaseLabel`; the workflow builds `COR3 Helper v<version>-salta.zip` and publishes a GitHub Release.
-- **Verification:** typecheck, lint, 80 test files / 355 tests and build pass.
+- **Network routing (dev.236):** `RouteExecutor` tries the direct target endpoint before path-through. Path-through starts from the current endpoint/last reached node and falls back to home; HACK loadout is equipped lazily only after a retryable hack error.
+- **Release pipeline:** tag-driven. A tag must equal `package.json.version + cor3Fork.releaseLabel`; the workflow builds `COR3 Helper v<version>-salta.zip` and publishes a GitHub Release.
+- **Verification:** typecheck, lint, 81 test files / 363 tests and build pass.
 - **Parity snapshot:** 89 implemented/improved, 37 partial and 20 missing of 147 v1 parity rows; most missing rows are presentation polish.
 - H8 details: see [`cor3-helper-2.0-h8-background-decomposition-design.md`](./cor3-helper-2.0-h8-background-decomposition-design.md).
 - Current feature and debt status: see [`cor3-helper-2.0-feature-inventory-and-tech-debt.md`](./cor3-helper-2.0-feature-inventory-and-tech-debt.md).
@@ -674,7 +675,7 @@ Remaining focus:
 | ID | Item | Why it is open | Suggested owner/decision |
 |---|---|---|---|
 | O-001 | Catalog redistribution/licensing | Account access ≠ public redistribution rights | Maintainer + license review |
-| O-002 | Final extension identity | **Narrowed in dev.231:** dev and release share the same key/ID; a separate release identity remains optional | Maintainer |
+| O-002 | Final extension identity | **Narrowed:** local and release share the same key/ID; migration from v1 remains open | Maintainer |
 | O-003 | Preact Signals vs local hooks/store | **Resolved:** local hooks + pure view models chosen in H8 Phase 7 | — |
 | O-004 | Hidden route model | Task-gated vs permanent | Network validation |
 | O-005 | Target browser matrix | Chrome only vs Chromium/Edge | Maintainer |
@@ -685,7 +686,7 @@ Remaining focus:
 | O-010 | Preserve reachability test as diagnostics | Dev TC deprecated | Maintainer/network owner |
 | O-011 | H9 store migrations | **Resolved in dev.230:** remaining stores use versioned envelopes with migrations and tests | — |
 | O-012 | H10 integration/UI tests | **Partial:** decrypt pipeline, storage migrations and boundaries covered; background/content/portal and UI rendering still lack coverage | Maintainer, next quality task |
-| O-013 | Release build number automation | **Resolved in dev.231:** release tag must equal `version + releaseLabel`; `cor3Fork.build` is dev-only | — |
+| O-013 | Release build number automation | **Resolved:** release tag must equal `version + releaseLabel`; `cor3Fork.build` is the local build counter | — |
 | O-014 | Static catalog artifact | **Partial:** the loader now merges; the artifact still needs a real module dump | Catalog owner (H4) |
 | O-015 | PSU policy post-processing | **Resolved in dev.230:** `MinPowerPsuPolicy` added; ranking goes through the policy and the cache key includes policy version | — |
 | O-016 | Settings-only sync | The [settings sync assessment](./cor3-helper-2.0-settings-sync-assessment.md) is a proposal; 2.0 remains local-only | Maintainer |
@@ -733,6 +734,6 @@ Approved by maintainer on 2026-11-08:
 - D-007 PSU policy
 - D-008 non-max support
 - D-009 Dev TC/legacy policy
-- D-010 development extension identity
+- D-010 dedicated 2.0 extension identity
 
 This record does not authorize code rewrite. Implementation starts only after maintainer confirmation.

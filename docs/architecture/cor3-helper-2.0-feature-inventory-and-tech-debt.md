@@ -4,11 +4,11 @@
 - **Scope:** v1 (git history, behavior oracle) vs v2 (`src/`, branch `v2`)
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
-- **Caveat:** this is not a runtime parity sign-off. v2 is still a development build (`cor3-helper 2.0 Dev`).
-- **Last verified:** 2026-11-15 against build `2.0.0-salta-dev.234`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (80 files / 355 tests) and `npm run build` all pass.
+- **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
+- **Last verified:** 2026-11-15 against build `2.0.1-salta.240`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (82 files / 373 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.0-salta-dev.234`)
+## Current completion snapshot (build `2.0.1-salta.240`)
 
 | Metric | Value |
 |---|---|
@@ -401,7 +401,7 @@ Reading the numbers:
 
 ## Testing gaps (updated for dev.230)
 
-- 80 test files / 355 tests. Added a decrypt-pipeline integration test, store-migration tests and an architecture-boundary test. No tests for `contexts/background/index.ts`, `contexts/content/index.ts`, sidepanel/UI roots or `chrome-popup-portal.ts`.
+- 81 test files / 363 tests. Added a decrypt-pipeline integration test, store-migration tests and an architecture-boundary test. No tests for `contexts/background/index.ts`, `contexts/content/index.ts`, sidepanel/UI roots or `chrome-popup-portal.ts`.
 - No integration/e2e against a fake tab/main-world transport; bridge tests are in-process only.
 - No coverage thresholds; several tests still use real `Date.now()`/`setTimeout` instead of a fake clock.
 - Redaction, i18n completeness and storage-migration tests now exist (H6/M16/H9).
@@ -605,8 +605,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 80 files / 355 tests pass
-- `npm run build` — pass, `2.0.0-salta-dev.234`
+- `npm test` — 82 files / 373 tests pass
+- `npm run build` — pass, `2.0.1-salta.240`
 
 ---
 
@@ -683,30 +683,31 @@ release.yml
 
 | Channel | Trigger | manifest name | version_name |
 |---|---|---|---|
-| dev | local build | `cor3-helper 2.0 Dev` | `2.0.0-salta-dev.<build>` |
+| local | local build | `COR3 Helper 2.0` | `<version>-salta.<build>` |
 | release | `v2.*-salta` tag | `COR3 Helper 2.0` | `<version>-salta` |
 
 ## Decisions and trade-offs
 
-- Dev and release share the same extension key/ID. O-002 is narrowed to “single identity”; a separate release identity would need a new manifest profile and migration.
+- Local and release builds share the same extension key/ID and `COR3 Helper 2.0` identity. Migration from v1 remains O-002.
 - A release tag publishes automatically. There is no draft or approval step.
 - There is no checksum or artifact attestation. These can be added without changing the version model.
-- `cor3Fork.build` is dev-only. Release versioning uses `package.json.version`.
-- The update checker reads `version + releaseLabel` and never advertises a dev build.
+- `cor3Fork.build` is the local build counter. Release versioning uses `package.json.version` + `releaseLabel`.
+- The update checker reads `version + releaseLabel` and never advertises a local build.
 
 ## Verification
 
-- `COR3_CHANNEL=release npm run build` produces `COR3 Helper 2.0` / `2.0.0-salta`.
-- Dev build produces `cor3-helper 2.0 Dev` / `2.0.0-salta-dev.231`.
+- `COR3_VERSION_NAME=2.0.0-salta npm run build` produces `COR3 Helper 2.0` / `2.0.0-salta`.
+- Local build produces `COR3 Helper 2.0` / `2.0.0-salta.<build>`.
 - Tag/version mismatch is rejected by the workflow before build.
 
 ---
 
-# Part 9 — UI Polish & Specialist Diagnostics (2.0.0-salta-dev.232–234)
+# Part 9 — UI Polish & Specialist Diagnostics (2.0.0-salta-dev.232–236)
 
 ## UI changes
 
 - **Recent jobs:** the Overview history list is now a fixed-height scroll area (`v2-job-history-list`) with the same thin scrollbar style as the warehouse rows.
+- **Market jobs panel:** hidden on the Overview while Auto Jobs is disabled, because no market-task sync runs and the panel would otherwise stay on “Waiting...” forever.
 - **Auto Daily Actions:** renamed from “Auto Daily” and the schedule reason is localized (`next-task` → “Next task” / “下一任务”); unknown reasons still fall back to the raw value.
 - **Auto Jobs:** tightened vertical spacing and added a dedicated action row so the refresh icon and manual start button share the same baseline.
 - **Auto Expedition:** added top spacing between the tab buttons and the card header border.
@@ -734,4 +735,61 @@ Fixes:
 
 - typecheck / lint pass
 - 80 test files / 355 tests
-- build `2.0.0-salta-dev.234`
+- build `2.0.1-salta.240`
+
+---
+
+# Part 10 — Direct-First Network Routing (2.0.0-salta-dev.236)
+
+## Problem
+
+Market refresh used `RouteExecutor` directly. The executor always walked intermediate nodes and called `ensureAccess`, which could trigger a HACK loadout before the market server was ever tried directly. A USOL refresh through URM7-M therefore failed with `LOADOUT_NO_PLAN_NO_SOFTWARE` even though the market endpoint might be directly reachable.
+
+## Changes
+
+- `RouteExecutor` now tries `set.endpoint(target)` before path planning. Direct success does not touch intermediates or the loadout.
+- Direct routing also works when the target is missing from a stale network snapshot.
+- If direct routing fails, route attempts start from the current endpoint and then fall back to home. A failed attempt records the last reached node and tries alternatives from there.
+- `NetworkGraph.findRouteFrom` / `findRoutesFrom` plan from an explicit start node.
+- `ChromeTabServerAccessAdapter` tries `hack.start` with the current loadout first and only equips a HACK plan after `sai-no-hack-software` / `sai-hack-impossible`.
+- Market sync results/logs expose `direct` and `directError`; route failures include the direct failure reason plus per-route details.
+- `JobRouting.setEndpointIfNeeded` passes `skipDirect` because it already tried the direct endpoint, avoiding duplicate commands.
+
+## Verification
+
+- New tests cover direct target success, snapshot-missing direct success, alternative route fallback, explicit-start graph routes, lazy HACK loadout, and loadout-swap retry.
+- typecheck / lint pass
+- 81 test files / 363 tests
+- build `2.0.0-salta.238`
+
+---
+
+# Part 11 — Auto Jobs Report Polish (2.0.0-salta.237)
+
+- Market sync failures now persist a short `errorCode` (`ROUTE_FAILED`, `MARKET_FETCH_FAILED`, `SNAPSHOT_FAILED`) instead of exposing the full route/debug message in the Status and report panel.
+- The detailed failure message (direct endpoint error, route attempts, per-server access failures) remains in the automation log.
+- The report panel renders localized summaries: route failed, market data fetch failed, network snapshot failed, or generic data fetch failed.
+- Added translations for “No game WebSocket is available”, “All route attempts failed”, the report summaries, and the short Auto Jobs snapshot/status failures.
+- `jobStatusTone` now handles both English and Chinese status text: ready/synced is green, syncing/waiting/running is amber, and failure/unavailable/timeout is red.
+- Tests cover the new report codes and translated status tones.
+
+---
+
+# Part 12 — Overview Extension Status Aggregation (2.0.0-salta.238)
+
+- The Overview extension status card now combines the live activity indicator with a health badge and an expandable details section.
+- Collapsed by default: only the overall extension status and the current activity/progress are visible; the details section is behind an explicit toggle.
+- Expanded details include session/auth, game readiness, network endpoint/server count/snapshot age, operation queue, Helper Mode, Auto Jobs next/last refresh, per-automation chips, and a simplified recent-error summary.
+- `overview.state` now returns `helperMode`, `networkAgeMs`, an `autoJobs` summary, and per-automation `lastAt`.
+- `useGameStatus` polls `overview.state` on Overview (10s) and exposes it to the status card; the separate `activity.state` poll remains at 3s for live progress.
+- The card uses green/amber/red/gray tones for healthy, attention, error and idle states. Detailed route/loadout/socket errors remain in the automation logs; the card only shows a short error category.
+- Added view-model tests for health precedence, recent-error detection, queue/snapshot warnings, and automation tone mapping.
+
+---
+
+# Part 13 — Stale Automation Error Acknowledgement (2.0.0-salta.239)
+
+- Extension Status polls `overview.state` every 10 seconds and refreshes immediately when the Overview page becomes active, so it does update after returning from another page.
+- The Auto Drone row previously used `lastRun().message` as `lastError` for every status, including normal/blocked messages. It now reports an error only when the last run status is `error`.
+- Auto Drone and Auto Expedition record the last successful view refresh. If the error predates that view, `overview.state` suppresses it; a new error after the view is shown again.
+- This prevents a resolved drone/expedition connection from leaving a permanent red error in Extension Status.

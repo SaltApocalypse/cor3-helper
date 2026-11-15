@@ -30,5 +30,5 @@ How were these changes tested?
 - [ ] External data is validated with Zod at the boundary
 - [ ] No bearer token, JWT, cookie or session ID is persisted or logged
 - [ ] Docs updated when behavior, architecture or decisions changed
-- [ ] `cor3Fork.build` incremented when the change affects the release build
+- [ ] `cor3Fork.build` incremented for local build identification when needed
 - [ ] PR targets the `v2` branch

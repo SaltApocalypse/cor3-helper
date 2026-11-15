@@ -55,7 +55,7 @@ jobs:
 
       - name: Build
         run: |
-          COR3_CHANNEL=release COR3_VERSION_NAME="$VERSION" npm run build
+          COR3_VERSION_NAME="$VERSION" npm run build
 
       - name: Verify manifest identity
         run: |

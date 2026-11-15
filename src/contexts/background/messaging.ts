@@ -48,6 +48,6 @@ export function registerMessaging(core: CoreRuntime, automation: AutomationRunti
     }
 
     chrome.runtime.onInstalled.addListener(() => {
-        core.logger.info('background', 'Installed development shell', { version: VERSION });
+        core.logger.info('background', 'Installed extension', { version: VERSION });
     });
 }

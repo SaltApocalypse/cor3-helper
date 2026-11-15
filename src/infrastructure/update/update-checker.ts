@@ -76,8 +76,8 @@ export function versionNameFromPackage(pkg: {
         readonly build?: number | undefined;
     } | undefined;
 }): string {
-    // Release builds use `<version>-<releaseLabel>`; the dev build counter is
-    // intentionally ignored so release users are never offered a dev build.
+    // Release builds use `<version>-<releaseLabel>`; the local build counter is
+    // intentionally ignored so release users are never offered a local build.
     const releaseLabel = pkg.cor3Fork?.releaseLabel;
     if (releaseLabel) return `${pkg.version}-${releaseLabel}`;
     const label = pkg.cor3Fork?.label;

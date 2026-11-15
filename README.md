@@ -4,7 +4,7 @@
 
 A Chrome extension for [cor3.gg](https://cor3.gg) that monitors markets, jobs, expeditions, daily ops, inventory and loadout, and provides optional automation.
 
-This branch (`v2`) contains the **2.0 rewrite**. It is a development build, not the stable v1 extension.
+This branch (`v2`) contains the **2.0 release line**. It is not the stable v1 extension.
 
 > **Personal fork:** [SaltApocalypse/cor3-helper](https://github.com/SaltApocalypse/cor3-helper), based on [Femtoce11/cor3-helper](https://github.com/Femtoce11/cor3-helper). This is not an official upstream release.
 >
@@ -13,11 +13,11 @@ This branch (`v2`) contains the **2.0 rewrite**. It is a development build, not 
 
 ## Status
 
-- Version: `package.json` `version` for releases; `cor3Fork.build` for development builds
+- Version: `package.json` `version` + `cor3Fork.releaseLabel` for releases; local builds append `cor3Fork.build`
 - Branch: `v2`
 - Architecture: typed, layered 2.0 rewrite (domain / application / infrastructure / contexts)
 - Build output: `dist/` (Manifest V3)
-- Verification: typecheck, lint, Vitest (80 files / 355 tests) and build pass at `2.0.0-salta-dev.234`; CI runs the same checks on pull requests
+- Verification: typecheck, lint, Vitest (82 files / 373 tests) and build pass at `2.0.1-salta.240`; CI runs the same checks on pull requests
 - Known gaps: the static catalog artifact still needs a real module dump, and background/content/portal plus UI rendering tests remain incomplete; see [feature inventory](./docs/architecture/cor3-helper-2.0-feature-inventory-and-tech-debt.md)
 
 ## Requirements
@@ -59,7 +59,7 @@ git push origin v2
 git push origin v2.1.0-salta
 ```
 
-The tag must equal `<version>-<cor3Fork.releaseLabel>`. Development builds keep using `cor3Fork.build` and the `2.0.0-salta-dev.<build>` version. Dev and release share the same extension key; only the display name and version differ.
+The tag must equal `<version>-<cor3Fork.releaseLabel>`. Local builds use `<version>-salta.<build>`; releases use `<version>-salta`. Both use the `COR3 Helper 2.0` identity and extension key.
 
 ## Scripts
 

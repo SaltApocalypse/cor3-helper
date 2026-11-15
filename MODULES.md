@@ -93,6 +93,7 @@ Behavior note: a known decrypt file type (for example `.xvct`) is planned exactl
 | `src/ui/app/hooks/` | Per-domain side-panel state, portal calls and polling (`usePolling`) |
 | `src/ui/app/panels/` | Overview, Progress, Game, Settings, Developer, Automation panels |
 | `src/ui/app/view-models/` | Pure UI calculations with unit tests |
+| `src/ui/components/` | Shared cards, status widgets, modals and controls |
 | `src/ui/pages/` | Detailed feature pages |
 | `src/ui/features/` | Automation cards and reusable feature UI |
 | `src/ui/devtools/` | DevTools panel and offline log viewer |
@@ -109,8 +110,8 @@ Behavior note: a known decrypt file type (for example `.xvct`) is planned exactl
 
 ## Current verification and known gaps
 
-- Last verified: 2026-11-15, build `2.0.0-salta-dev.234`.
-- `npm run typecheck`, `npm run lint`, `npm test` (80 files / 355 tests) and `npm run build` pass.
+- Last verified: 2026-11-15, build `2.0.1-salta.240`.
+- `npm run typecheck`, `npm run lint`, `npm test` (82 files / 373 tests) and `npm run build` pass.
 - No domain/application imports of `chrome`, `window`, `document`, WebSocket, fetch or IndexedDB; an architecture-boundary test enforces this and the UI layer rules.
 - Persisted stores now use versioned envelopes with idempotent migrations (H9).
 - Release builds are tag-driven: `version` + `releaseLabel` determine the tag, and CI publishes `COR3 Helper v<version>-salta.zip`.

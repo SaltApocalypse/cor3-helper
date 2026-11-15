@@ -41,4 +41,4 @@ jobs:
         run: npm run build
 
       - name: Verify build identity
-        run: node -e "const p=require('./package.json');const m=require('./dist/manifest.json');const f=p.cor3Fork||{};const v=f.label?p.version+'-'+f.label+'.'+(f.build||1):p.version;if(m.version_name!==v){console.error('version mismatch:',m.version_name,'!=',v);process.exit(1)}"
+        run: node -e "const p=require('./package.json');const m=require('./dist/manifest.json');const f=p.cor3Fork||{};const v=f.releaseLabel?p.version+'-'+f.releaseLabel+'.'+(f.build||1):p.version;if(m.version_name!==v){console.error('version mismatch:',m.version_name,'!=',v);process.exit(1)}"

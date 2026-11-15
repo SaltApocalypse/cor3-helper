@@ -7,9 +7,8 @@ const ROOT = __dirname;
 const DIST = path.join(ROOT, 'dist');
 const pkg = JSON.parse(fs.readFileSync(path.join(V2, 'package.json'), 'utf8'));
 const fork = pkg.cor3Fork || null;
-const channel = process.env.COR3_CHANNEL === 'release' ? 'release' : 'dev';
-// CI/release runs can override the development build number without editing
-// package.json. Local builds keep using the committed cor3Fork.build value.
+// CI/release runs can override the build counter without editing package.json.
+// Local builds append the committed counter to the release label.
 const buildOverride = process.env.COR3_BUILD === undefined ? null : Number(process.env.COR3_BUILD);
 if (buildOverride !== null && (!Number.isInteger(buildOverride) || buildOverride < 1)) {
     console.error('COR3_BUILD must be a positive integer');
@@ -17,15 +16,10 @@ if (buildOverride !== null && (!Number.isInteger(buildOverride) || buildOverride
 }
 const buildNumber = buildOverride ?? fork?.build ?? 1;
 const releaseLabel = typeof fork?.releaseLabel === 'string' ? fork.releaseLabel : null;
-const devLabel = typeof fork?.label === 'string' ? fork.label : null;
-const computedVersionName = channel === 'release'
-    ? (releaseLabel ? `${pkg.version}-${releaseLabel}` : pkg.version)
-    : (devLabel ? `${pkg.version}-${devLabel}.${buildNumber}` : pkg.version);
+const computedVersionName = releaseLabel
+    ? `${pkg.version}-${releaseLabel}.${buildNumber}`
+    : pkg.version;
 const versionName = (process.env.COR3_VERSION_NAME || '').trim() || computedVersionName;
-if (channel === 'release' && !releaseLabel && !process.env.COR3_VERSION_NAME) {
-    console.error('Release builds require cor3Fork.releaseLabel or COR3_VERSION_NAME');
-    process.exit(1);
-}
 
 function cleanDist() {
     if (fs.existsSync(DIST)) fs.rmSync(DIST, { recursive: true, force: true });
@@ -63,11 +57,6 @@ function writeManifest() {
     const manifest = JSON.parse(fs.readFileSync(path.join(V2, 'manifest.json'), 'utf8'));
     manifest.version = pkg.version;
     manifest.version_name = versionName;
-    if (channel === 'release') {
-        manifest.name = 'COR3 Helper 2.0';
-        manifest.description = 'COR3 Helper 2.0 (Salta fork)';
-        if (manifest.action) manifest.action.default_title = manifest.name;
-    }
     fs.writeFileSync(path.join(DIST, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 }
 
@@ -156,7 +145,7 @@ async function build() {
         outdir: undefined,
     });
 
-    console.log(`Built ${versionName} (${channel}) into ${DIST}`);
+    console.log(`Built ${versionName} into ${DIST}`);
 }
 
 build().catch((err) => {

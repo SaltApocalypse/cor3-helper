@@ -4,7 +4,7 @@
 
 The project is on the `v2` branch and contains the 2.0 rewrite. v1 is no longer in the working tree; it remains available in git history as a behavior reference.
 
-Last verified: 2026-11-15 at build `2.0.0-salta-dev.234`. Typecheck, lint, Vitest (80 files / 355 tests) and build pass. The remaining gaps are tracked in the feature inventory (H4, H10, M7, O-016).
+Last verified: 2026-11-15 at build `2.0.1-salta.240`. Typecheck, lint, Vitest (82 files / 373 tests) and build pass. The remaining gaps are tracked in the feature inventory (H4, H10, M7, O-016).
 
 Authoritative decisions:
 
@@ -75,18 +75,18 @@ The 2.0 source was promoted from the transitional workspace to the root `src` la
 - esbuild
 - Vitest
 - GitHub Actions CI (typecheck, lint, test, build)
-- Separate development extension identity (`cor3-helper 2.0 Dev`)
+- Release identity (`COR3 Helper 2.0`, shared by local and release builds)
 
 ## Release
 
-Releases are tag-driven. `package.json.version` plus `cor3Fork.releaseLabel` must equal the pushed tag (`v<version>-<releaseLabel>`). GitHub Actions verifies the version, builds the release manifest (`COR3 Helper 2.0`), packages `COR3 Helper v<version>-salta.zip`, and publishes the GitHub Release. Dev builds keep the `2.0.0-salta-dev.<build>` form and share the same extension key.
+Releases are tag-driven. `package.json.version` plus `cor3Fork.releaseLabel` must equal the pushed tag (`v<version>-<releaseLabel>`). GitHub Actions verifies the version, builds the release manifest (`COR3 Helper 2.0`), packages `COR3 Helper v<version>-salta.zip`, and publishes the GitHub Release. Local builds use `<version>-salta.<build>` and releases use `<version>-salta`; both share the same extension key.
 
 ## Security
 
 - Do not persist bearer tokens.
 - Content mediates authenticated game/API calls.
 - Redact Authorization/JWT/cookie/session fields from logs, snapshots, and exports.
-- The development build uses its own extension identity. The final release identity and migration strategy remain open (O-002).
+- The 2.0 build uses a dedicated extension identity shared by local and release builds. Migration from v1 remains open (O-002).
 
 ## Commands
 
