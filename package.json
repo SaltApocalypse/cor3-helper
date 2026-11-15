@@ -1,27 +1,44 @@
 {
-  "name": "cor3-helper",
-  "version": "1.8.6",
-  "private": true,
-  "description": "COR3 Helper Chrome Extension (Salta fork)",
-  "cor3Fork": {
-    "label": "salta-exp",
-    "build": 2
-  },
-  "scripts": {
-    "build": "node build.js",
-    "watch": "node build.js --watch",
-    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    "sync-versions": "node scripts/sync-versions.js",
-    "sync-versions:check": "node scripts/sync-versions.js --check",
-    "release:prepare": "npm run sync-versions && npm run build"
-  },
-  "devDependencies": {
-    "esbuild": "^0.25.0"
-  },
-  "dependencies": {
-    "npm": "^12.0.2"
-  },
-  "allowScripts": {
-    "esbuild@0.25.12": true
-  }
+    "name": "cor3-helper",
+    "version": "2.0.0",
+    "private": true,
+    "description": "COR3 Helper 2.0 — Chrome extension for cor3.gg",
+    "cor3Fork": {
+        "label": "salta-dev",
+        "releaseLabel": "salta",
+        "build": 234
+    },
+    "engines": {
+        "node": ">=24"
+    },
+    "scripts": {
+        "build": "node build.js",
+        "build:min": "MINIFY=1 node build.js",
+        "typecheck": "tsc --noEmit",
+        "lint": "oxlint src",
+        "lint:fix": "oxlint src --fix",
+        "format": "prettier --write \"src/**/*.{ts,tsx,css,html}\"",
+        "format:check": "prettier --check \"src/**/*.{ts,tsx,css,html}\"",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "clean": "node -e \"for (const d of ['dist','dist-tools']) require('fs').rmSync(d,{recursive:true,force:true})\"",
+        "bump:build": "esbuild src/tools/release/bump.ts --bundle --platform=node --format=cjs --outfile=dist-tools/bump.cjs && node dist-tools/bump.cjs",
+        "catalog": "esbuild src/tools/catalog/cli.ts --bundle --platform=node --format=esm --outfile=dist-tools/catalog.mjs && node dist-tools/catalog.mjs"
+    },
+    "devDependencies": {
+        "@types/chrome": "^0.3.7",
+        "@types/node": "^26.6.6",
+        "esbuild": "^0.25.0",
+        "oxlint": "^1.93.0",
+        "prettier": "^3.9.10",
+        "typescript": "^7.0.2",
+        "vitest": "^3.2.7"
+    },
+    "allowScripts": {
+        "esbuild@0.25.12": true
+    },
+    "dependencies": {
+        "preact": "^11.2.0",
+        "zod": "^4.6.7"
+    }
 }

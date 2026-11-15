@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dist-tools/
+docs/
+src/libs/
+package-lock.json
+cor3-ws-export*.json
+export.json
+*.md

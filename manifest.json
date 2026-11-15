@@ -1,29 +1,35 @@
 {
   "manifest_version": 3,
-  "name": "COR3 Helper",
-  "version": "1.7.0",
-  "_version_note": "Salta fork build. Canonical version is package.json; build.js generates both version and version_name. Kept for backward-compat: older extension versions fetch this file for update checks.",
-  "description": "Salta fork of COR3 Helper — monitor markets, expeditions, daily ops, and get timer alerts for cor3.gg.",
+  "name": "cor3-helper 2.0 Dev",
+  "version": "2.0.0",
+  "description": "Development build of the COR3 Helper 2.0 rewrite.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnPdVGAehExmT/UEBwLfE5Gzyx+q/kKSBaEyx65rZLXeww3SPOd+JtvXIm6L6JTtsZRKfSJY/Q63V64NtYH7k00qp5mt53MJkwnby+PfuWVAOtmB5q6Cqbp1fZdYsJCvFGN9lzd0Pian1MpFdy21zxpZpUtPAtg9HzWA5yseM7i7QXUovLUkoIQvTrVC27mfBY8Djb0C7LAOzoP/vQX/jXWA9A/BZkobhKl0HfHt/T2DaTcaR7aV1i+qAo4eNTtobrZNpPZr+niPAPYG0wDT51fHXXMFKasQIdWFSY3q1TlLJ7gnt5ffn2TEvWUXtDxPwegtvAVfheu+swq6vLLt31QIDAQAB",
   "permissions": [
     "storage",
-    "scripting",
-    "activeTab",
     "tabs",
     "sidePanel",
     "alarms"
   ],
-  "side_panel": {
-    "default_path": "popup.html"
-  },
   "host_permissions": [
     "https://cor3.gg/*",
     "https://os.cor3.gg/*",
     "https://svc-corie.cor3.gg/*",
-    "https://raw.githubusercontent.com/*"
+    "https://raw.githubusercontent.com/SaltApocalypse/cor3-helper/*"
   ],
-  "devtools_page": "devtools.html",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "cor3-helper 2.0 Dev"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
   "background": {
     "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icon/favicon16.png",
+    "48": "icon/favicon48.png",
+    "128": "icon/favicon128.png"
   },
   "content_scripts": [
     {
@@ -32,10 +38,9 @@
         "https://os.cor3.gg/*"
       ],
       "js": [
-        "console-logger.js",
         "notepack.min.js",
         "msgpack-codec.js",
-        "content-early.js"
+        "main-world.js"
       ],
       "run_at": "document_start",
       "world": "MAIN"
@@ -46,41 +51,10 @@
         "https://os.cor3.gg/*"
       ],
       "js": [
-        "console-logger.js",
-        "errors.js",
-        "ws-messages.js",
         "content.js"
       ],
       "run_at": "document_idle"
     }
   ],
-  "icons": {
-    "16": "icon/favicon16.png",
-    "48": "icon/favicon48.png",
-    "128": "icon/favicon128.png"
-  },
-  "action": {
-    "default_icon": "icon/favicon128.png",
-    "default_popup": "popup.html",
-    "default_title": "COR3 Helper"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "msgpack-codec.js",
-        "ws-interceptor.js",
-        "decrypt-solver.js",
-        "daily-hack-solver.js",
-        "auto-job-solver.js",
-        "auto-valuable-seller.js",
-        "ice-wall-solver.js",
-        "simple-decrypt-solver.js",
-        "devtools-log-viewer.html",
-        "devtools-log-viewer.js"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
-    }
-  ]
+  "devtools_page": "devtools.html"
 }

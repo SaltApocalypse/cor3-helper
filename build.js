@@ -2,177 +2,164 @@ const esbuild = require('esbuild');
 const fs = require('fs');
 const path = require('path');
 
-const watch = process.argv.includes('--watch');
-
-const DIST = path.join(__dirname, 'dist');
-
-const sharedConfig = {
-    bundle: true,
-    format: 'iife',
-    target: ['chrome120'],
-    sourcemap: false,
-    minify: false,
-    legalComments: 'none',
-    logLevel: 'info',
-    outdir: DIST,
-};
-
-const entryPoints = [
-    // Modularized entry points — bundled by esbuild
-    { in: 'src/auto-job-solver/index.js', out: 'auto-job-solver' },
-    { in: 'src/auto-valuable-seller/index.js', out: 'auto-valuable-seller' },
-    { in: 'src/background/index.js', out: 'background' },
-    { in: 'src/content/index.js', out: 'content' },
-    { in: 'src/content-early/index.js', out: 'content-early' },
-    { in: 'src/popup/index.js', out: 'popup' },
-    { in: 'src/devtools-panel/index.js', out: 'devtools-panel' },
-    { in: 'src/devtools-log-viewer/index.js', out: 'devtools-log-viewer' },
-];
-
-const staticFiles = [
-    // Root config
-    'manifest.json',
-    'versions.json',
-
-    // HTML / CSS (src/html/ → dist/)
-    'src/html/popup.html',
-    'src/html/popup.css',
-    'src/html/devtools.html',
-    'src/html/devtools.js',
-    'src/html/devtools-panel.html',
-    'src/html/devtools-log-viewer.html',
-
-    // Shared libs — loaded via importScripts / content_scripts (src/libs/ → dist/)
-    'src/libs/notepack.min.js',
-    'src/libs/msgpack-codec.js',
-    'src/libs/console-logger.js',
-    'src/libs/errors.js',
-    'src/libs/ws-messages.js',
-
-    // Standalone scripts — injected at runtime, can't be bundled (src/standalone/ → dist/)
-    'src/standalone/ws-interceptor.js',
-    'src/standalone/decrypt-solver.js',
-    'src/standalone/ice-wall-solver.js',
-    'src/standalone/simple-decrypt-solver.js',
-    'src/standalone/daily-hack-solver.js',
-];
-
-const staticDirs = [
-    'icon',
-    'factions',
-];
+const V2 = __dirname;
+const ROOT = __dirname;
+const DIST = path.join(ROOT, 'dist');
+const pkg = JSON.parse(fs.readFileSync(path.join(V2, 'package.json'), 'utf8'));
+const fork = pkg.cor3Fork || null;
+const channel = process.env.COR3_CHANNEL === 'release' ? 'release' : 'dev';
+// CI/release runs can override the development build number without editing
+// package.json. Local builds keep using the committed cor3Fork.build value.
+const buildOverride = process.env.COR3_BUILD === undefined ? null : Number(process.env.COR3_BUILD);
+if (buildOverride !== null && (!Number.isInteger(buildOverride) || buildOverride < 1)) {
+    console.error('COR3_BUILD must be a positive integer');
+    process.exit(1);
+}
+const buildNumber = buildOverride ?? fork?.build ?? 1;
+const releaseLabel = typeof fork?.releaseLabel === 'string' ? fork.releaseLabel : null;
+const devLabel = typeof fork?.label === 'string' ? fork.label : null;
+const computedVersionName = channel === 'release'
+    ? (releaseLabel ? `${pkg.version}-${releaseLabel}` : pkg.version)
+    : (devLabel ? `${pkg.version}-${devLabel}.${buildNumber}` : pkg.version);
+const versionName = (process.env.COR3_VERSION_NAME || '').trim() || computedVersionName;
+if (channel === 'release' && !releaseLabel && !process.env.COR3_VERSION_NAME) {
+    console.error('Release builds require cor3Fork.releaseLabel or COR3_VERSION_NAME');
+    process.exit(1);
+}
 
 function cleanDist() {
-    if (fs.existsSync(DIST)) {
-        console.log('Deleting the "dist" folder...');
-        fs.rmSync(DIST, { recursive: true, force: true });
-        console.log('Re-creating the "dist" folder...');
-    } else {
-        console.log('Creating the "dist" folder...');
-    }
+    if (fs.existsSync(DIST)) fs.rmSync(DIST, { recursive: true, force: true });
     fs.mkdirSync(DIST, { recursive: true });
 }
 
-function copyStaticFiles() {
-    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
-    const pkgVersion = pkg.version;
-    const fork = pkg.cor3Fork || null;
-
-    for (const file of staticFiles) {
-        const src = path.join(__dirname, file);
-        const dest = path.join(DIST, path.basename(file));
-        if (!fs.existsSync(src)) continue;
-
-        // Auto update manifest extension version by using "package.json" data
-        if (path.basename(file) === 'manifest.json') {
-            const manifest = JSON.parse(fs.readFileSync(src, 'utf8'));
-            manifest.version = pkgVersion;
-            if (fork && fork.label) {
-                manifest.version_name = `${pkgVersion}-${fork.label}.${fork.build || 1}`;
-            } else {
-                delete manifest.version_name;
-            }
-            delete manifest._version_note;
-            fs.writeFileSync(dest, JSON.stringify(manifest, null, 2) + '\n');
-        } else {
-            fs.copyFileSync(src, dest);
-        }
-    }
-
-    for (const dir of staticDirs) {
-        const src = path.join(__dirname, dir);
-        const dest = path.join(DIST, dir);
-        if (fs.existsSync(src)) {
-            copyDirSync(src, dest);
-        }
-    }
+function copyFile(relative, destination) {
+    const src = path.join(V2, relative);
+    if (!fs.existsSync(src)) return;
+    const dest = path.join(DIST, destination || path.basename(relative));
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
 }
 
-function copyDirSync(src, dest) {
-    if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
+function copyRootFile(relative, destination) {
+    const src = path.join(ROOT, relative);
+    if (!fs.existsSync(src)) return;
+    const dest = path.join(DIST, destination || path.basename(relative));
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+}
+
+function copyDir(src, dest) {
+    if (!fs.existsSync(src)) return;
+    fs.mkdirSync(dest, { recursive: true });
     for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-        const srcPath = path.join(src, entry.name);
-        const destPath = path.join(dest, entry.name);
-        if (entry.isDirectory()) {
-            copyDirSync(srcPath, destPath);
-        } else {
-            fs.copyFileSync(srcPath, destPath);
-        }
+        const from = path.join(src, entry.name);
+        const to = path.join(dest, entry.name);
+        if (entry.isDirectory()) copyDir(from, to);
+        else fs.copyFileSync(from, to);
     }
 }
 
-function syncPackageLockVersion(version) {
-    const lockPath = path.join(__dirname, 'package-lock.json');
-    if (!fs.existsSync(lockPath)) return;
-    const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
-    let changed = false;
-    if (lock.version !== version) { lock.version = version; changed = true; }
-    if (lock.packages && lock.packages[''] && lock.packages[''].version !== version) {
-        lock.packages[''].version = version; changed = true;
+function writeManifest() {
+    const manifest = JSON.parse(fs.readFileSync(path.join(V2, 'manifest.json'), 'utf8'));
+    manifest.version = pkg.version;
+    manifest.version_name = versionName;
+    if (channel === 'release') {
+        manifest.name = 'COR3 Helper 2.0';
+        manifest.description = 'COR3 Helper 2.0 (Salta fork)';
+        if (manifest.action) manifest.action.default_title = manifest.name;
     }
-    if (changed) {
-        fs.writeFileSync(lockPath, JSON.stringify(lock, null, 2) + '\n');
-        console.log(`Synced package-lock.json version to ${version}`);
-    }
+    fs.writeFileSync(path.join(DIST, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 }
 
 async function build() {
     cleanDist();
-    const pkgVersion = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version;
-    syncPackageLockVersion(pkgVersion);
-    console.log('Copying static files...');
-    copyStaticFiles();
+    writeManifest();
+    copyFile('src/html/popup.html');
+    copyFile('src/html/sidepanel.html');
+    copyFile('src/html/popup.css');
+    copyFile('src/html/devtools.html');
+    copyFile('src/html/devtools-panel.html');
+    copyFile('src/html/devtools-log-viewer.html');
+    copyFile('src/html/devtools.css');
+    copyRootFile('src/libs/notepack.min.js');
+    copyRootFile('src/libs/msgpack-codec.js');
+    copyRootFile('catalog/item-catalog.json');
+    copyDir(path.join(ROOT, 'icon'), path.join(DIST, 'icon'));
+    copyDir(path.join(ROOT, 'factions'), path.join(DIST, 'factions'));
 
-    const buildEntries = entryPoints.map(ep => {
-        const config = {
-            entryPoints: [ep.in],
-            outfile: path.join(DIST, ep.out + '.js'),
-            ...sharedConfig,
-            outdir: undefined,
-        };
-        // background.js is a service worker — prepend importScripts for shared libs
-        if (ep.out === 'background') {
-            config.banner = { js: "importScripts('console-logger.js');\nimportScripts('errors.js');\n" };
-        }
-        return config;
+    const common = {
+        bundle: true,
+        format: 'iife',
+        target: ['chrome120'],
+        sourcemap: false,
+        minify: process.env.MINIFY === '1',
+        legalComments: 'none',
+        logLevel: 'info',
+        jsx: 'automatic',
+        jsxImportSource: 'preact',
+        outdir: DIST,
+    };
+
+    await esbuild.build({
+        ...common,
+        entryPoints: [path.join(V2, 'src/contexts/background/index.ts')],
+        outfile: path.join(DIST, 'background.js'),
+        outdir: undefined,
     });
 
-    if (watch) {
-        console.log('Starting watch mode...');
-        for (const config of buildEntries) {
-            const ctx = await esbuild.context(config);
-            await ctx.watch();
-        }
-        console.log('Watching for changes...');
-    } else {
-        for (const config of buildEntries) {
-            await esbuild.build(config);
-        }
-        console.log('Build complete!');
-    }
+    await esbuild.build({
+        ...common,
+        entryPoints: [path.join(V2, 'src/contexts/main-world/index.ts')],
+        outfile: path.join(DIST, 'main-world.js'),
+        outdir: undefined,
+    });
+
+    await esbuild.build({
+        ...common,
+        entryPoints: [path.join(V2, 'src/contexts/content/index.ts')],
+        outfile: path.join(DIST, 'content.js'),
+        outdir: undefined,
+    });
+
+    await esbuild.build({
+        ...common,
+        entryPoints: [path.join(V2, 'src/contexts/popup/index.tsx')],
+        outfile: path.join(DIST, 'popup.js'),
+        outdir: undefined,
+    });
+
+    await esbuild.build({
+        ...common,
+        entryPoints: [path.join(V2, 'src/contexts/sidepanel/index.tsx')],
+        outfile: path.join(DIST, 'sidepanel.js'),
+        outdir: undefined,
+    });
+
+    await esbuild.build({
+        ...common,
+        entryPoints: [path.join(V2, 'src/contexts/devtools/index.ts')],
+        outfile: path.join(DIST, 'devtools.js'),
+        outdir: undefined,
+    });
+
+    await esbuild.build({
+        ...common,
+        entryPoints: [path.join(V2, 'src/contexts/devtools/panel.tsx')],
+        outfile: path.join(DIST, 'devtools-panel.js'),
+        outdir: undefined,
+    });
+
+    await esbuild.build({
+        ...common,
+        entryPoints: [path.join(V2, 'src/contexts/devtools/log-viewer.tsx')],
+        outfile: path.join(DIST, 'devtools-log-viewer.js'),
+        outdir: undefined,
+    });
+
+    console.log(`Built ${versionName} (${channel}) into ${DIST}`);
 }
 
 build().catch((err) => {
-    console.error('Build failed:', err);
+    console.error('v2 build failed:', err);
     process.exit(1);
 });
