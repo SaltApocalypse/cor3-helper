@@ -1258,8 +1258,8 @@ export class GameSocketHub {
     }
 
     async requestMarketOptions(marketId: string): Promise<Result<unknown, GameError>> {
-        this.pendingMarketActions.set('get.options', { marketId, expiresAt: Date.now() + 20000 });
-        const response = await this.request('market', 'get.options', { marketId }, 15000).catch((error) => error);
+        this.pendingMarketActions.set('get.options', { marketId, expiresAt: Date.now() + 45_000 });
+        const response = await this.request('market', 'get.options', { marketId }, 35_000).catch((error) => error);
         if (response instanceof Error) {
             this.pendingMarketActions.delete('get.options');
             return err({ code: 'GAME_TIMEOUT', message: response.message });
@@ -1272,8 +1272,8 @@ export class GameSocketHub {
     }
 
     async requestMarketLots(marketId: string): Promise<Result<unknown, GameError>> {
-        this.pendingMarketActions.set('get.lots', { marketId, expiresAt: Date.now() + 20000 });
-        const response = await this.request('market', 'get.lots', { marketId }, 15000).catch((error) => error);
+        this.pendingMarketActions.set('get.lots', { marketId, expiresAt: Date.now() + 45_000 });
+        const response = await this.request('market', 'get.lots', { marketId }, 35_000).catch((error) => error);
         if (response instanceof Error) {
             this.pendingMarketActions.delete('get.lots');
             return err({ code: 'GAME_TIMEOUT', message: response.message });
@@ -1286,8 +1286,8 @@ export class GameSocketHub {
     }
 
     async requestMarketJobs(marketId: string): Promise<Result<unknown, GameError>> {
-        this.pendingMarketActions.set('get.jobs', { marketId, expiresAt: Date.now() + 20000 });
-        const response = await this.request('market', 'get.jobs', { marketId }, 15000).catch((error) => error);
+        this.pendingMarketActions.set('get.jobs', { marketId, expiresAt: Date.now() + 45_000 });
+        const response = await this.request('market', 'get.jobs', { marketId }, 35_000).catch((error) => error);
         if (response instanceof Error) {
             this.pendingMarketActions.delete('get.jobs');
             return err({ code: 'GAME_TIMEOUT', message: response.message });

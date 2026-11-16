@@ -548,20 +548,21 @@ html::-webkit-scrollbar, body::-webkit-scrollbar,
 .v2-expedition-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin: 10px 0; }
 .v2-expedition-tabs button { margin: 0; padding: 7px 9px; color: var(--v2-muted); background: transparent; border: 1px solid var(--v2-border); border-radius: 7px; font-size: 11px; }
 .v2-expedition-tabs button.active { color: var(--v2-text); border-color: var(--v2-accent); background: rgba(118, 193, 209, .12); }
-.v2-expedition-active { width: 100%; margin-bottom: 10px; padding: 8px; border: 1px solid var(--v2-border); border-radius: 8px; background: rgba(10, 14, 23, .35); }
+.v2-expedition-active { width: 100%; min-width: 0; max-width: 100%; margin-bottom: 10px; padding: 8px; border: 1px solid var(--v2-border); border-radius: 8px; background: rgba(10, 14, 23, .35); overflow: hidden; }
 .v2-expedition-active-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .v2-expedition-active-head strong { font-size: 12px; }
 .v2-expedition-active-head button { margin: 0; padding: 4px 7px; font-size: 9px; }
 .v2-expedition-stage-list { display: grid; gap: 7px; margin-top: 8px; }
-.v2-stage-card { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--v2-border); border-radius: 7px; background: var(--v2-bg); }
+.v2-stage-card { display: grid; gap: 6px; min-width: 0; max-width: 100%; padding: 8px; border: 1px solid var(--v2-border); border-radius: 7px; background: var(--v2-bg); overflow: hidden; }
 .v2-stage-card.is-warn { border-color: #e5b567; background: rgba(229, 181, 103, .08); }
 .v2-stage-card.is-ok { border-color: rgba(76, 175, 80, .55); }
 .v2-stage-card.is-error { border-color: rgba(244, 67, 54, .65); background: rgba(244, 67, 54, .07); }
-.v2-stage-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.v2-stage-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--v2-text); font-size: 11px; font-weight: 700; }
-.v2-stage-stats { display: flex; flex-wrap: wrap; gap: 10px; color: var(--v2-muted); font-size: 9px; }
-.v2-stage-stats strong { color: var(--v2-text); font-variant-numeric: tabular-nums; }
-.v2-stage-note { margin: 0 !important; color: var(--v2-muted); font-size: 9px; }
+.v2-stage-head { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
+.v2-stage-title { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; white-space: normal; color: var(--v2-text); font-size: 11px; font-weight: 700; }
+.v2-stage-stats { display: flex; flex-wrap: wrap; gap: 6px 10px; min-width: 0; color: var(--v2-muted); font-size: 9px; }
+.v2-stage-stats > span { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.v2-stage-stats strong { color: var(--v2-text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.v2-stage-note { margin: 0 !important; color: var(--v2-muted); font-size: 9px; overflow-wrap: anywhere; }
 .v2-stage-actions { display: flex; justify-content: flex-end; }
 .v2-stage-actions button { margin: 0; padding: 4px 8px; font-size: 10px; }
 .v2-expedition-setting-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 9px; padding-top: 9px; border-top: 1px dashed var(--v2-border); }
@@ -781,7 +782,7 @@ button.v2-icon-button:hover { color: var(--v2-accent); border-color: var(--v2-ac
 .v2-drone-bar-fill.is-warn { background: #e5b567; }
 .v2-drone-bar-fill.is-error { background: var(--v2-error); }
 .v2-drone-bar-value { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.v2-expedition-last-run { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--v2-border); color: var(--v2-muted); font-size: 10px; }
+.v2-expedition-last-run { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; min-width: 0; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--v2-border); color: var(--v2-muted); font-size: 10px; overflow-wrap: anywhere; }
 .v2-expedition-last-run strong { color: var(--v2-text); font-size: 10px; }
 
 /* Brand header and shell title */

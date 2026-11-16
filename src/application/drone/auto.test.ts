@@ -63,6 +63,37 @@ const settings: DroneAutomationSettings = {
     autoSendEnabled: true,
 };
 
+describe('DroneAutoService events', () => {
+    it('passes the event mission id when resolving a decision', async () => {
+        const port = fakePort();
+        let resolved: { eventId: string; optionId: string; missionId?: string } | null = null;
+        port.getLatestEvent = async () => ({
+            ok: true,
+            value: {
+                missionId: '019f36e2-c220-7a04-9a73-a71e708ff23f',
+                event: {
+                    eventId: '019f36e9-f0dd-7c3e-8ab8-9b0c6aa9c151',
+                    type: 'DECISION',
+                    isResolvable: true,
+                    options: [{ id: 'option-1', label: 'Inspect', lootDelta: 10, riskDelta: 0 }],
+                },
+            },
+        });
+        port.resolve = async (eventId, optionId, missionId) => {
+            resolved = { eventId, optionId, ...(missionId ? { missionId } : {}) };
+            return { ok: true, value: undefined };
+        };
+        const service = new DroneAutoService(new DroneService(port));
+        const result = await service.runOnce({ ...settings, decisionPolicy: 'loot' });
+        expect(result.ok && result.value.status).toBe('launched');
+        expect(resolved).toEqual({
+            eventId: '019f36e9-f0dd-7c3e-8ab8-9b0c6aa9c151',
+            optionId: 'option-1',
+            missionId: '019f36e2-c220-7a04-9a73-a71e708ff23f',
+        });
+    });
+});
+
 describe('DroneAutoService fixed target', () => {
     it('launches the configured location and mission config IDs', async () => {
         const port = fakePort();

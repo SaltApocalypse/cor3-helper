@@ -95,6 +95,25 @@ describe('UpdateChecker', () => {
         }
     });
 
+    it('uses the highest result from package mirrors and the releases API', async () => {
+        const checker = new UpdateChecker({
+            urls: ['https://example.test/package.json'],
+            apiUrls: ['https://api.example.test/releases/latest'],
+            fetchImpl: (async (input: RequestInfo | URL) => new Response(JSON.stringify(
+                String(input).includes('api.example.test')
+                    ? { tag_name: 'v2.0.2-salta', html_url: 'https://example.test/release' }
+                    : { version: '2.0.1', cor3Fork: { releaseLabel: 'salta' } },
+            ))) as typeof fetch,
+        });
+        const result = await checker.check('2.0.1-salta');
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.value.latest).toBe('2.0.2-salta');
+            expect(result.value.source).toBe('https://api.example.test/releases/latest');
+            expect(result.value.releaseUrl).toBe('https://example.test/release');
+        }
+    });
+
     it('surfaces a network failure', async () => {
         const checker = new UpdateChecker({
             urls: ['https://example.test/v2/package.json'],

@@ -392,7 +392,7 @@ export function LoadoutPage({
                         </div>
                         <div class="v2-actions">
                             <button type="button" disabled={busy || target.length === 0} onClick={() => void onApplyWeakest()}>{tr('Apply weakest (min power)')}</button>
-                            <button type="button" disabled={busy || target.length === 0} onClick={() => void onApply()}>{tr('Apply optimized (max power)')}</button>
+                            <button type="button" disabled={busy || target.length === 0} onClick={() => void onApply()}>{tr('Apply optimized (keep current if sufficient)')}</button>
                         </div>
                     </div>
                 </div>

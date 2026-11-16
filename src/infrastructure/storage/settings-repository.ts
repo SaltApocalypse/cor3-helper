@@ -16,6 +16,12 @@ const SETTINGS_MIGRATIONS: readonly ((settings: SettingsV1) => SettingsV1)[] = [
     (settings) => settings.autoJobsIntervalMinutes === 30
         ? { ...settings, autoJobsIntervalMinutes: 60 }
         : settings,
+    // Drone events have no veteran/mercenary data, so the drone dropdown no
+    // longer offers "veterans first". Map an existing selection to the normal
+    // loot-first policy instead of leaving a value the UI cannot display.
+    (settings) => settings.droneDecisionPolicy === 'veterans'
+        ? { ...settings, droneDecisionPolicy: 'loot' }
+        : settings,
 ];
 
 function migrateSettings(settings: SettingsV1): SettingsV1 {

@@ -115,9 +115,6 @@ function makeHarness(includeXvct: boolean): Harness {
     const actions: JobActionPort = {
         take: async () => {
             calls.push('take');
-            if (includeXvct && !equipped.software.includes(xvct.id)) {
-                return err({ code: 'TAKE_FAILED', message: 'loadout not applied before take' });
-            }
             return ok(undefined);
         },
         complete: async () => {
@@ -188,21 +185,23 @@ function makeHarness(includeXvct: boolean): Harness {
 }
 
 describe('File Decryption pipeline', () => {
-    it('applies the exact-target loadout before take and completes the job', async () => {
+    it('takes the job, applies the exact-target loadout, and completes', async () => {
         const harness = makeHarness(true);
         const result = await harness.service.executeDetailed(job());
         expect(result.ok).toBe(true);
         expect(harness.equipped.software).toEqual([xvct.id]);
-        expect(harness.calls.indexOf('take')).toBeGreaterThan(harness.calls.indexOf('equip-software'));
+        expect(harness.calls.indexOf('take')).toBeLessThan(harness.calls.indexOf('equip-software'));
         expect(harness.calls).toContain('decrypt');
         expect(harness.calls).toContain('complete');
     });
 
-    it('does not take the job when no owned module supports the file type', async () => {
+    it('keeps the taken job when no owned module supports the file type', async () => {
         const harness = makeHarness(false);
         const result = await harness.service.executeDetailed(job());
         expect(result.ok).toBe(false);
         if (!result.ok) expect(result.error.code).toBe('DECRYPT_POWER_INSUFFICIENT');
-        expect(harness.calls).not.toContain('take');
+        expect(harness.calls).toContain('take');
+        expect(harness.calls).not.toContain('decrypt');
+        expect(harness.calls).not.toContain('complete');
     });
 });

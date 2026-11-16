@@ -26,7 +26,7 @@ export interface AutoDroneDeps {
 const AUTO_DRONE_ACTIVE_RETRY_MS = 60_000;
 const AUTO_DRONE_MAINTENANCE_RETRY_MS = 30 * 60_000;
 
-const TRANSIENT_DRONE_ERROR = /no game websocket|not ready|socket|timed? ?out|timeout|connection|network|route|unreachable|not[-\s]?reachable|bridge|drone view/i;
+const TRANSIENT_DRONE_ERROR = /no game websocket|no cor3\.gg tab|not ready|socket|timed? ?out|timeout|connection|network|route|unreachable|not[-\s]?reachable|bridge|drone view/i;
 
 /**
  * Startup and tab-switch races produce socket/bridge failures before the game
@@ -34,7 +34,7 @@ const TRANSIENT_DRONE_ERROR = /no game websocket|not ready|socket|timed? ?out|ti
  * "waiting" instead of painting the Overview status red.
  */
 export function isTransientDroneFailure(code: string, message: string): boolean {
-    return /GAME_NO_SOCKET|GAME_TIMEOUT|BRIDGE_TIMEOUT|BRIDGE_TRANSPORT_ERROR|ENDPOINT_COMMAND_FAILED|GAME_SET_ENDPOINT_FAILED/i.test(code)
+    return /GAME_NO_SOCKET|GAME_TIMEOUT|BRIDGE_TIMEOUT|BRIDGE_TRANSPORT_ERROR|ENDPOINT_COMMAND_FAILED|GAME_SET_ENDPOINT_FAILED|NO_COR3_TAB/i.test(code)
         || TRANSIENT_DRONE_ERROR.test(message);
 }
 

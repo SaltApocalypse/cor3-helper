@@ -430,6 +430,8 @@ export interface OverviewAutomation {
     readonly running: boolean;
     readonly lastAt: number | null;
     readonly lastError: string | null;
+    /** Startup/data-not-ready state; shown as loading rather than an error. */
+    readonly waiting?: boolean | undefined;
 }
 
 export interface OverviewAutoJobs {

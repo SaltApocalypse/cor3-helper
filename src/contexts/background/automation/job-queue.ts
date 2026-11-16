@@ -165,12 +165,17 @@ export class JobQueueCoordinator {
         await this.deps.history.record(result.done, result.failed);
         const currentSettings = await this.deps.settings.get();
         if (currentSettings.autoDismissFailedJobsEnabled && !result.stopped) {
-            try {
-                const summary = await this.dismisser!(request.owner, 'dismiss-failed', undefined, () => this.cancelled.has(request.runId), request.runId);
-                this.deps.runLogs.add(request.runId, 'info', 'dismiss-failed',
-                    `Auto dismiss complete: ${summary.dismissed} dismissed, ${summary.failed} failed`);
-            } catch (error) {
-                this.deps.runLogs.add(request.runId, 'error', 'dismiss-failed', `Auto dismiss crashed: ${error instanceof Error ? error.message : String(error)}`);
+            if (!this.dismisser) {
+                this.deps.runLogs.add(request.runId, 'warn', 'dismiss-failed', 'Auto dismiss is enabled but no dismisser is attached');
+            } else {
+                try {
+                    const dismisser = this.dismisser;
+                    const summary = await dismisser(request.owner, 'dismiss-failed', undefined, () => this.cancelled.has(request.runId), request.runId);
+                    this.deps.runLogs.add(request.runId, 'info', 'dismiss-failed',
+                        `Auto dismiss complete: ${summary.dismissed} dismissed, ${summary.failed} failed`);
+                } catch (error) {
+                    this.deps.runLogs.add(request.runId, 'error', 'dismiss-failed', `Auto dismiss crashed: ${error instanceof Error ? error.message : String(error)}`);
+                }
             }
         }
         this.cancelled.delete(request.runId);

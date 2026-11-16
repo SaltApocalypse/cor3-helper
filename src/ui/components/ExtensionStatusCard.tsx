@@ -57,8 +57,9 @@ function errorSummary(message: string, tr: TranslateSource): string {
     return tr('Data fetch failed');
 }
 
-function automationStatus(running: boolean, enabled: boolean, tone: StatusTone, tr: TranslateSource): string {
+function automationStatus(running: boolean, enabled: boolean, waiting: boolean, tone: StatusTone, tr: TranslateSource): string {
     if (tone === 'error') return tr('Error');
+    if (waiting) return tr('Loading...');
     if (running) return tr('Running');
     return enabled ? tr('Enabled') : tr('Off');
 }
@@ -207,7 +208,7 @@ export function ExtensionStatusCard({
                                         <span key={entry.key} class={`v2-status-chip is-${tone}`} title={tr(entry.label)}>
                                             <span class="v2-status-dot" />
                                             <span>{tr(entry.label)}</span>
-                                            <span class="v2-status-chip-state">{automationStatus(entry.running, entry.enabled, tone, tr)}</span>
+                                            <span class="v2-status-chip-state">{automationStatus(entry.running, entry.enabled, entry.waiting === true, tone, tr)}</span>
                                         </span>
                                     );
                                 })}

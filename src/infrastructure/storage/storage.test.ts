@@ -79,6 +79,17 @@ describe('SettingsRepository', () => {
         expect(settings.autoJobsEnabled).toBe(true);
         expect(settings.uiLanguage).toBe('en');
     });
+
+    it('migrates the removed drone veterans policy to loot-first', async () => {
+        const area = new MemoryStorageArea();
+        const data = {
+            ...settingsV1Schema.parse({}),
+            droneDecisionPolicy: 'veterans',
+        };
+        await area.set({ 'v2.settings': { schemaVersion: 1, writtenAt: 1, data } });
+        const repo = new SettingsRepository(area, { now: () => 1 });
+        expect((await repo.get()).droneDecisionPolicy).toBe('loot');
+    });
 });
 
 

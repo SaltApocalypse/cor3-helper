@@ -10,33 +10,44 @@ export interface PsuSelectionPolicy {
     compare(a: HardwareDefinition, b: HardwareDefinition, context?: PsuPolicyContext): number;
 }
 
-/** Default policy: highest psuPower only; equal power keeps the current PSU. */
+/** Default policy: highest psuPower; equal power prefers higher protection, then the current PSU. */
 export class MaxPowerPsuPolicy implements PsuSelectionPolicy {
     readonly id = 'max-psu-power';
-    readonly version = 2;
+    readonly version = 3;
 
     compare(a: HardwareDefinition, b: HardwareDefinition, context?: PsuPolicyContext): number {
         const aPower = a.specs.psuPower ?? 0;
         const bPower = b.specs.psuPower ?? 0;
         if (aPower !== bPower) return aPower - bPower;
+        const protection = compareProtection(a, b);
+        if (protection !== 0) return protection;
         return preferCurrent(a, b, context);
     }
 }
 
 /**
  * Weakest-plan policy: lowest psuPower that can still boot the plan. Equal
- * power still prefers the currently equipped PSU to avoid a pointless swap.
+ * power prefers higher protection, then the currently equipped PSU to avoid a
+ * pointless swap.
  */
 export class MinPowerPsuPolicy implements PsuSelectionPolicy {
     readonly id = 'min-psu-power';
-    readonly version = 1;
+    readonly version = 2;
 
     compare(a: HardwareDefinition, b: HardwareDefinition, context?: PsuPolicyContext): number {
         const aPower = a.specs.psuPower ?? 0;
         const bPower = b.specs.psuPower ?? 0;
         if (aPower !== bPower) return bPower - aPower;
+        const protection = compareProtection(a, b);
+        if (protection !== 0) return protection;
         return preferCurrent(a, b, context);
     }
+}
+
+function compareProtection(a: HardwareDefinition, b: HardwareDefinition): number {
+    const aProtection = a.specs.psuProtection ?? 0;
+    const bProtection = b.specs.psuProtection ?? 0;
+    return aProtection - bProtection;
 }
 
 function preferCurrent(a: HardwareDefinition, b: HardwareDefinition, context?: PsuPolicyContext): number {

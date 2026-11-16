@@ -65,6 +65,30 @@ describe('RouteExecutor', () => {
         expect(leases.current()).toBeNull();
     });
 
+    it('ensures target access when the player is already at the target endpoint', async () => {
+        const clock = new FakeClock(0);
+        const leases = new InMemoryEndpointLeaseService(clock);
+        const endpoints: string[] = [];
+        let accessCalls = 0;
+        const executor = new RouteExecutor({
+            setEndpoint: async (id) => { endpoints.push(id); return ok(undefined); },
+        }, {
+            ensureAccess: async () => { accessCalls += 1; return ok(undefined); },
+        }, leases, clock);
+
+        const result = await executor.execute(graph(), target, {
+            owner: 'test',
+            reason: 'unit',
+            currentEndpoint: target,
+        });
+
+        expect(result.ok).toBe(true);
+        expect(result.direct).toBe(true);
+        expect(result.accessEnsured).toBe(true);
+        expect(endpoints).toEqual([]);
+        expect(accessCalls).toBe(1);
+    });
+
     it('falls back to an alternative route when direct and intermediate access fail', async () => {
         const clock = new FakeClock(0);
         const leases = new InMemoryEndpointLeaseService(clock);

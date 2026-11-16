@@ -40,7 +40,7 @@ export class ChromeTabServerAccessAdapter implements ServerAccessPort {
                 // with LOADOUT_NO_PLAN even when the server was auto-hackable
                 // or the current module was sufficient.
                 let hack = await this.hackStart(tabId, serverId);
-                if (!hack.ok && this.isRetryableHack(hack.error.code)) {
+                if (!hack.ok && this.isRetryableHack(hack.error.code, hack.error.message)) {
                     const retryLoadout = await this.ensureHackLoadout(status.value, context);
                     if (!retryLoadout.ok) return retryLoadout;
                     hack = await this.hackStart(tabId, serverId);
@@ -108,8 +108,10 @@ export class ChromeTabServerAccessAdapter implements ServerAccessPort {
         return ok(undefined);
     }
 
-    private isRetryableHack(code: string): boolean {
-        return code === 'sai-hack-impossible' || code === 'sai-no-hack-software';
+    private isRetryableHack(code: string, message: string): boolean {
+        return code === 'sai-hack-impossible'
+            || code === 'sai-no-hack-software'
+            || /sai-(?:no-hack-software|hack-impossible)|hack software/i.test(message);
     }
 
     private async loginStatus(tabId: number, serverId: ServerId): Promise<Result<unknown, GameError>> {

@@ -98,7 +98,96 @@ describe('JobExecutionService', () => {
         expect(minigameCalls).toEqual(['solve']);
     });
 
-    it('applies the decrypt loadout before taking a File Decryption job', async () => {
+    it('selects the downloaded file referenced by DecryptDownloadedFile conditions', async () => {
+        const fake = actions();
+        const picked: string[] = [];
+        fake.port.openFolder = async () => ({
+            ok: true,
+            value: [
+                { id: 'upload-bin', name: 'payload.bin', isEncrypted: true },
+                { id: 'target-file', name: 'report.ab52x', isEncrypted: true },
+            ],
+        });
+        fake.port.getFileAnalysis = async (fileId) => {
+            picked.push('analysis:' + fileId);
+            return { ok: true, value: { canDecrypt: true, decryptPower: 20, tags: [], source: null } };
+        };
+        fake.port.decryptFile = async (fileId) => {
+            picked.push('decrypt:' + fileId);
+            return { ok: true, value: undefined };
+        };
+        const service = new JobExecutionService(
+            fake.port,
+            undefined,
+            undefined,
+            { solve: async () => ({ ok: true, value: { kind: 'config-hack' as const, solved: true } }), cancel: async () => ({ ok: true, value: undefined }) },
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            async () => undefined,
+        );
+        const result = await service.executeDetailed(job('File Decryption', {
+            conditions: [{ type: 'DecryptDownloadedFile', details: { files: [{ id: 'target-file', name: 'report.ab52x' }] } }],
+        }));
+        expect(result.ok).toBe(true);
+        expect(picked).toEqual(['analysis:target-file', 'decrypt:target-file']);
+    });
+
+    it('waits for the loadout analysis to settle after equipping decrypt software', async () => {
+        const fake = actions();
+        let analysisCalls = 0;
+        fake.port.getFileAnalysis = async () => {
+            analysisCalls += 1;
+            return { ok: true, value: { canDecrypt: analysisCalls >= 3, decryptPower: 20, tags: [], source: null } };
+        };
+        const service = new JobExecutionService(
+            fake.port,
+            undefined,
+            async () => ({ ok: true as const, value: undefined }),
+            { solve: async () => ({ ok: true, value: { kind: 'config-hack' as const, solved: true } }), cancel: async () => ({ ok: true, value: undefined }) },
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            async () => undefined,
+        );
+        const result = await service.executeDetailed(job('File Decryption'));
+        expect(result.ok).toBe(true);
+        expect(analysisCalls).toBe(3);
+        expect(fake.calls).toContain('decrypt-file');
+    });
+
+    it('takes the File Decryption job before applying the decrypt loadout', async () => {
+        const fake = actions();
+        const order: string[] = [];
+        let analysisCalls = 0;
+        fake.port.take = async () => { order.push('take'); return { ok: true as const, value: undefined }; };
+        fake.port.getFileAnalysis = async () => {
+            analysisCalls += 1;
+            return { ok: true as const, value: { canDecrypt: analysisCalls > 1, decryptPower: 12, tags: [], source: null } };
+        };
+        const service = new JobExecutionService(
+            fake.port,
+            undefined,
+            async () => { order.push('loadout'); return { ok: true as const, value: undefined }; },
+            {
+                solve: async () => ({ ok: true as const, value: { kind: 'config-hack' as const, solved: true } }),
+                cancel: async () => ({ ok: true as const, value: undefined }),
+            },
+        );
+        const result = await service.executeDetailed(job('File Decryption'));
+        expect(result.ok).toBe(true);
+        expect(order).toEqual(['take', 'loadout']);
+    });
+
+    it('does not swap the loadout when the current setup can already decrypt', async () => {
         const fake = actions();
         const order: string[] = [];
         fake.port.take = async () => { order.push('take'); return { ok: true as const, value: undefined }; };
@@ -113,11 +202,13 @@ describe('JobExecutionService', () => {
         );
         const result = await service.executeDetailed(job('File Decryption'));
         expect(result.ok).toBe(true);
-        expect(order).toEqual(['loadout', 'take']);
+        expect(order).toEqual(['take']);
+        expect(fake.calls).toEqual(['decrypt-file', 'complete']);
     });
 
-    it('stops before taking a File Decryption job when the targeted loadout is infeasible', async () => {
+    it('keeps the taken File Decryption job when the targeted loadout is infeasible', async () => {
         const fake = actions();
+        fake.port.getFileAnalysis = async () => ({ ok: true as const, value: { canDecrypt: false, decryptPower: 12, tags: [], source: null } });
         const service = new JobExecutionService(
             fake.port,
             undefined,
@@ -126,7 +217,7 @@ describe('JobExecutionService', () => {
         const result = await service.executeDetailed(job('File Decryption'));
         expect(result.ok).toBe(false);
         if (!result.ok) expect(result.error.code).toBe('DECRYPT_POWER_INSUFFICIENT');
-        expect(fake.calls).not.toContain('take');
+        expect(fake.calls).toEqual(['take']);
     });
 
     it('runs the completion hook before claiming the reward', async () => {

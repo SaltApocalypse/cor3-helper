@@ -70,7 +70,7 @@ describe('ChromeTabServerAccessAdapter', () => {
                 }
                 if (type === 'V2_HACK_START') {
                     hackCalls += 1;
-                    if (hackCalls === 1) return err({ code: 'sai-no-hack-software', message: 'no hack software' });
+                    if (hackCalls === 1) return err({ code: 'GAME_HACK_FAILED', message: 'sai-no-hack-software' });
                     hacked = true;
                     return ok({ autoHacked: true });
                 }

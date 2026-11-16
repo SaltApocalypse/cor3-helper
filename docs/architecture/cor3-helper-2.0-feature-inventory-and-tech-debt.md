@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-15 against build `2.0.2-salta.251`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (89 files / 406 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-15 against build `2.0.3-salta.263`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (92 files / 432 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.2-salta.251`)
+## Current completion snapshot (build `2.0.3-salta.263`)
 
 | Metric | Value |
 |---|---|
@@ -83,7 +83,7 @@ Reading the numbers:
 | Debug console (Jobs + Logs tabs, copy all) | `#autoJobsDebugConsole`, `#copyAllLogsBtn` | **Partial** | Merged “Status and report” + debug console; no separate job table |
 | Job history / locks | `autoJobsTracker`, `autoJobsLockedJobs` | **Implemented** | Persisted history store + locks; history is shown under Extension Status on the Overview page |
 | 9 supported job types | `src/auto-job-solver/solvers.js` | **Implemented** | `domains/jobs/model.ts`, `execution-service.ts` |
-| Path-through/maintenance/auto loadout | `steps.js`, `helpers.js`, `shared/loadout-resolver.js` | **Implemented with caveat** | Dynamic routing + capability preflight. File Decryption applies a targeted DECRYPT plan before `take`; a known file type never falls back to unrelated DECRYPT software. Job ordering differs (live route length vs v1 furthest-first table) |
+| Path-through/maintenance/auto loadout | `steps.js`, `helpers.js`, `shared/loadout-resolver.js` | **Implemented with caveat** | Dynamic routing + capability preflight. File Decryption takes the job first, routes/accesses the target, then applies a targeted DECRYPT plan before decrypting; a known file type never falls back to unrelated DECRYPT software. Job ordering differs (live route length vs v1 furthest-first table) |
 | Overview activity/credits/market summary/timers | No single v1 panel | **Implemented (v2-only)** | `OverviewPage.tsx` |
 | Progress page (network + market reputation) | No v1 page | **Implemented (v2-only)** | `ProgressPage.tsx` |
 
@@ -559,12 +559,12 @@ current owned hardware/software
 
 | Change | Effect |
 |---|---|
-| `strategy: 'best'` forces the strongest bootable owned PSU (`maximizePsu`) | Removes the “tied power keeps a weaker PSU” case behind `not-enough-resources`. |
+| `strategy: 'best'` keeps current sufficient hardware, otherwise uses the strongest bootable owned PSU | Removes unnecessary swaps for jobs while still selecting max power/PSU when a new loadout is required. |
 | Adaptive hardware order (`hardwareOrder`) | Installs the PSU first only when it can power the currently installed CPU/GPU; otherwise replaces the lower-draw component first. |
-| File Decryption applies the decrypt plan before `take` | Avoids changing hardware while a job is active. |
+| File Decryption takes the job first, then applies the decrypt plan after routing/access | Accepts jobs even when a loadout swap fails, avoids a duplicate DECRYPT→HACK→DECRYPT swap, and keeps failed decrypt jobs retryable. |
 | Known decrypt targets use exact-target planning | No unrelated DECRYPT fallback; an `.xvct` file only matches software that lists `.xvct`. |
 | Failures propagate by kind | `NO_PLAN`/`INFEASIBLE` → `DECRYPT_POWER_INSUFFICIENT` (skipped); `APPLY_FAILED`/`VERIFY_FAILED` → `ACTION_FAILED` (retry). |
-| Preflight uses the same capability check | A job is not taken when no owned DECRYPT/HACK module matches the known target; decrypt power is rechecked after the plan is applied. |
+| Preflight blocks only definitive capability gaps | A job is refused before `take` only when no owned DECRYPT/HACK software or hardware exists. Hardware/power transitions and loadout application are attempted after the job is taken and remain retryable. |
 | Diagnostics (`Loadout plan selected`, `Loadout step failed`) | Logs the chosen software/hardware and the exact failing equip step. |
 
 Residual risk: these changes have unit coverage but still need a live-game smoke run with `.xvct` and mixed file-type job sets.
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 89 files / 406 tests pass
-- `npm run build` — pass, `2.0.2-salta.251`
+- `npm test` — 92 files / 432 tests pass
+- `npm run build` — pass, `2.0.3-salta.263`
 
 ---
 
@@ -635,7 +635,7 @@ This pass closed the non-runtime items from the Part 6 review.
 
 ## Tests and CI
 
-- Added `decrypt-pipeline.integration.test.ts`: a real `LoadoutService` applies the exact `.xvct` plan before `JobExecutionService` takes the job, and the job completes; a missing module returns `DECRYPT_POWER_INSUFFICIENT` without taking the job.
+- Added `decrypt-pipeline.integration.test.ts`: a real `LoadoutService` takes the job first, applies the exact `.xvct` plan, and completes; a missing module keeps the taken job and returns `DECRYPT_POWER_INSUFFICIENT`.
 - Added `architecture-boundaries.test.ts`.
 - Added `.github/workflows/ci.yml` for push/PR verification.
 - Test suite: 80 files / 348 tests.
@@ -736,7 +736,7 @@ Fixes:
 
 - typecheck / lint pass
 - 80 test files / 355 tests
-- build `2.0.2-salta.251`
+- build `2.0.3-salta.263`
 
 ---
 
@@ -871,3 +871,101 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 - `manifest.json` permits the jsDelivr and GitHub raw hosts used by the fallbacks.
 - The side-panel bridge timeout for `system.updateCheck` is raised to 20 seconds, and the inline failure message exposes the underlying error in its tooltip.
 - Added a fallback test for the update checker.
+
+---
+
+# Part 21 — Automation Startup, Market Retry and File Selection Fixes (2.0.2-salta.252)
+
+- Auto Drone and Auto Daily now expose a waiting/loading state when game data is not ready. The Overview shows `Loading...` instead of a red `Data fetch failed`; real failures remain errors.
+- Auto Drone records `NO_COR3_TAB` and socket/bridge startup failures as `waiting` and retries them. `restore()` marks the restored last run as already viewed so stale session errors do not flash on startup.
+- Drone event resolution now sends the event `missionId` (with active-mission fallback), fixing the game-side `missionId must be a UUID` error.
+- Market sync retries transient `market-not-reachable`/timeout/socket responses before reporting `MARKET_FETCH_FAILED`.
+- Job file references now include nested `condition.details.files`; downloaded-file selection prefers the referenced file or the expected extension and refuses to reuse an unrelated `.bin`/`.12vvsh` file.
+- Decrypt loadout analysis is re-read with a short settle window after equipping, so a successful plan is not immediately reported as insufficient power.
+- HACK retries now recognize `GAME_HACK_FAILED` messages containing `sai-no-hack-software`/`sai-hack-impossible` and apply the HACK loadout.
+- Auto Finish error handling is defensive around missing error details; logs now distinguish `no jobs to run` from selections that skipped jobs.
+- The expedition active card and stage stats wrap long location text and are clamped to the panel width.
+
+---
+
+# Part 22 — Longer Market Receive Window and v1-style Update Check (2.0.2-salta.253)
+
+- Market `get.options` / `get.lots` / `get.jobs` requests now allow 35 seconds instead of 15/18 seconds; pending market actions expire after 45 seconds. This covers unstable servers that respond slowly under load.
+- Market sync still retries transient `market-not-reachable`, timeout, socket and rate-limit responses before reporting `MARKET_FETCH_FAILED`.
+- Update checks now query the GitHub Releases API first, then package metadata from `v2`, `main`, jsDelivr and GitHub raw. Request aborts are disabled by default to match v1; the bridge wait is 120 seconds.
+- `ChromePopupPortal.updateCheck()` performs the v1-style direct fetch from the popup/side panel before falling back to the background bridge.
+- `api.github.com` is included in host permissions.
+- Update failures show a direct link to the Releases page so users can check manually when the network blocks all update endpoints.
+
+---
+
+# Part 23 — Decrypt Loadout Hardware Swap Order (2.0.2-salta.255)
+
+- A decrypt plan could select a valid final CPU/GPU/PSU combination but fail on `equip-cpu` with `not-enough-resources` because the intermediate hardware swap exceeded the currently installed PSU.
+- `hardwareOrder()` now simulates both CPU-first and GPU-first intermediate draws against the PSU that will be active at that point and picks an order that stays bootable. A target PSU that can power the current pair is installed first; the CPU/GPU order is then evaluated against that target PSU rather than only the final pair.
+- All equipped software is now unequipped before hardware swaps, then the target software is equipped after. Keeping active software during a CPU/GPU swap can make the game reject an otherwise valid plan.
+- Loadout traces now include the current CPU/GPU/RAM/PSU/software alongside the selected plan, so future `not-enough-resources` reports can distinguish a bad plan from a bad swap order.
+
+
+---
+
+# Part 24 — Take Decrypt Jobs Before Loadout and Drone Policy Cleanup (2.0.2-salta.257)
+
+- File Decryption now takes the job before applying the decrypt loadout, matching v1. Previously a loadout failure (`equip-cpu: not-enough-resources`) aborted execution before `job.take`, so every decrypt job stayed unaccepted and was reported as retrying.
+- The loadout is still applied before routing to the target server. If it fails, the job remains in the taken/retryable state and can be retried instead of disappearing from the run.
+- The integration test now asserts take-before-loadout, and the execution test asserts that a loadout failure keeps the taken job.
+- The drone in-mission decision dropdown no longer offers `Veterans first (highest risk)`: drone events do not expose veteran/mercenary data, so the option only duplicated a risk sort. Existing stored `veterans` values migrate to `loot`.
+- Expedition/mercenary decisions keep all four policies; only the drone dropdown changed.
+
+
+---
+
+# Part 25 — Preflight, Transition, Mail and Route Access Audit (2.0.2-salta.258)
+
+- `JobPreflight` now mirrors `RouteExecutor`: it checks the current endpoint and its direct/current-node route before falling back to the home route. A target reachable directly is no longer skipped because the home path crosses a maintenance node.
+- HACK capability checks consider routes from the current endpoint as well as home. A route that needs no HACK from the current endpoint is not blocked by a home route that does.
+- Preflight blocks only `NO_SOFTWARE` and `NO_HARDWARE`. `NO_BOOTABLE_COMBINATION` is treated as a post-take loadout problem, matching the take-first File Decryption flow.
+- `LoadoutService` always invalidates its capability cache after a failed or unverified apply, and returns `partial: true` when software/hardware was already changed before the failure. The target software is now re-equipped unconditionally after the hardware swap; it had been unequipped first and could previously be skipped.
+- `MailService.claimForSource` marks a source claimed only when the claim completed without failures and without `stashFull`.
+- Auto Mail schedules a five-minute retry for transient whole-collect failures (timeout, socket, tab, bridge, temporary).
+- Auto Finish's prefetched fast path now checks the retry-exhausted budget, and Job Queue guards a missing auto-dismisser instead of using a non-null assertion.
+- Auto Daily no longer calls `solveHack` when the daily state cannot be read; it records a loading/waiting state and uses the existing short-retry schedule.
+- `RouteExecutor` ensures target access when the player is already at the target endpoint and reports `accessEnsured` so Job Routing and Valuable do not repeat the login/access command.
+
+
+---
+
+# Part 26 — Retry Failed Markets Inside the Auto Jobs Queue (2.0.2-salta.259)
+
+- `JobMarketSync.syncAll()` now performs one retry pass for markets that failed transiently on the first pass, inside the same `NetworkOperationQueue` Auto Jobs operation.
+- The retry pass waits 1.5–2.5 seconds, refreshes the network snapshot, and retries only transient/network/route failures. Maintenance failures are left for the next scheduled cycle.
+- A successful retry replaces the failed market entry, appends its jobs, and publishes the partial snapshot so the UI leaves the "data fetch failed" state without waiting for the next Auto Jobs interval.
+- Retry logs use `Market retry complete` / `Market retry failed` with an `attempt: retry` field; initial-pass logs keep their existing messages.
+- `isRetryableMarketFailure()` is exported for tests and does not retry `TARGET_IN_MAINTENANCE` / `MAINTENANCE_BLOCKED`.
+
+
+---
+
+# Part 27 — Loadout Serialization, Best Semantics and Pacing (2.0.3-salta.263)
+
+- `LoadoutService.ensure()` and the manual equip/unequip handlers now share one mutation queue. UI, decrypt, HACK and SEARCH can no longer interleave unequip/equip commands. The runtime is re-read inside the serialized section.
+- The capability cache TTL is reduced to 5 seconds, entries are pruned and bounded to 64, and the runtime fingerprint includes hardware consumption/PSU specs. Apply, verify, manual mutations and a game tab becoming ready invalidate the cache immediately.
+- `best` semantics changed: when the current hardware can already run the target software, the current plan is kept (no hardware or PSU churn). When a hardware change is required, the highest ability power is selected and the max-PSU policy chooses the strongest bootable PSU. `weakest` still minimizes ability power and PSU.
+- The Loadout page button label now says “keep current if sufficient”.
+- Apply steps are listed up front, sleep only between commands (not after the last one), support configurable command gaps, and retry a rate-limited command after a 3-second backoff.
+- The capability cache key includes PSU policy versions; `MaxPowerPsuPolicy` and `MinPowerPsuPolicy` now use `psuProtection` as an equal-power tie-break before the current-PSU preference.
+- `hardwareOrder()` falls back to CPU/GPU before PSU when current hardware specs are missing, instead of assuming zero draw.
+- Fallback software (`fallbackToAnyAbility`) is rejected for positive power requirements; it is only valid for the unknown-file-type capability check.
+- File Decryption no longer applies DECRYPT before routing. It takes the job, routes/accesses the target, then applies DECRYPT only if the file is not already decryptable. This avoids a DECRYPT → HACK → DECRYPT duplicate swap.
+- Valuable SEARCH caches the last successful `(server type, power, strategy)` alongside `LoadoutService.revision()` for at most 30 seconds; consecutive same-type servers skip the read/optimize cycle, while any HACK/manual mutation forces a fresh SEARCH plan.
+- The loadout trace now includes strategy, policy ID/version, fallback usage and `keptCurrentHardware`.
+- Added tests for current-hardware retention, max-PSU selection after a required swap, PSU protection tie-breaks, fallback rejection, concurrent ensure serialization, rate-limit backoff and software re-equip after a hardware swap.
+
+---
+
+# Part 28 — Release 2.0.3-salta
+
+- Consolidates the post-2.0.2 automation fixes: decrypt jobs take first, market sync retries failed markets in the Auto Jobs queue, and job preflight mirrors direct/current-endpoint routing.
+- Loadout changes keep the current sufficient hardware under `best`, serialize UI/automation mutations, shorten capability-cache TTL, retry rate-limited commands, and avoid a duplicate DECRYPT→HACK→DECRYPT swap.
+- Mail partial claims stay retryable, transient Auto Mail failures retry in five minutes, Auto Daily waits when its state is unavailable, and target access is ensured when the player is already at the target endpoint.
+- Release identity: `package.json.version = 2.0.3`, `cor3Fork.releaseLabel = salta`, tag `v2.0.3-salta`; the local build counter remains separate from the release version.

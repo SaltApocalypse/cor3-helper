@@ -59,6 +59,45 @@ describe('Loadout optimizer', () => {
         expect(result.plan?.policyId).toBe(new MaxPowerPsuPolicy().id);
     });
 
+    it('keeps the current sufficient hardware under the best strategy', () => {
+        const current: InventorySnapshot = {
+            ...inventory(['cpu1', 'gpu1', 'ram1', 'psu100', 'psu200']),
+            equippedHardware: { cpu: 'cpu1', gpu: 'gpu1', ram: 'ram1', psu: 'psu100' },
+            equippedSoftwareIds: ['sw1'],
+        };
+        const result = optimizeLoadout({
+            catalog,
+            inventory: current,
+            ability: 'HACK',
+            target: 'CEDRT',
+            requiredPower: 10,
+            strategy: 'best',
+        });
+        expect(result.feasible).toBe(true);
+        expect(result.plan?.hardware.psu.id).toBe('psu100');
+        expect(result.plan?.switchCost).toBe(0);
+    });
+
+    it('prefers higher PSU protection on equal power', () => {
+        const protectedPsu: HardwareDefinition = { id: 'psu-protected', name: 'PSU Protected', slot: 'psu', specs: { psuPower: 100, psuProtection: 5 } };
+        const result = optimizeLoadout({
+            catalog: {
+                ...catalog,
+                hardware: [cpu, gpu, ram, psu100, protectedPsu],
+            },
+            inventory: {
+                ...inventory(['cpu1', 'gpu1', 'ram1', 'psu100', 'psu-protected']),
+                equippedHardware: {},
+            },
+            ability: 'HACK',
+            target: 'CEDRT',
+            requiredPower: 10,
+            strategy: 'best',
+        });
+        expect(result.feasible).toBe(true);
+        expect(result.plan?.hardware.psu.id).toBe('psu-protected');
+    });
+
     it('selects the weakest feasible plan with the weakest strategy', () => {
         const weakCpu: HardwareDefinition = { id: 'cpu-weak', name: 'CPU Weak', slot: 'cpu', specs: { cpuFrequency: 10, cpuCores: 2, cpuConsuming: 10 } };
         const strongCpu: HardwareDefinition = { id: 'cpu-strong', name: 'CPU Strong', slot: 'cpu', specs: { cpuFrequency: 20, cpuCores: 8, cpuConsuming: 10 } };

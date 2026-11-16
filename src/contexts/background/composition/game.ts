@@ -119,6 +119,7 @@ export function createGameRuntime(core: CoreRuntime): GameRuntime {
     const endpointCommands = new ChromeTabEndpointCommandAdapter(tabs);
     const routeExecutor = new RouteExecutor(endpointCommands, serverAccess, endpointLeases, new SystemClock(), endpointMutex);
     const valuableAdapter = new ChromeTabValuableActionAdapter(tabs);
+    let lastSearchLoadout: { readonly key: string; readonly revision: number; readonly at: number } | null = null;
     const valuableSeller = new ValuableSellerService(
         snapshots,
         routeExecutor,
@@ -126,12 +127,22 @@ export function createGameRuntime(core: CoreRuntime): GameRuntime {
         valuableAdapter,
         new SystemClock(),
         async (serverId, serverTypeName) => {
-            const result = await loadout.ensure({ ability: 'SEARCH', target: serverTypeName ?? serverId, requiredPower: 0 });
-            if (!result.ok) {
+            const target = serverTypeName ?? serverId;
+            const key = `SEARCH|${target}|0|best`;
+            if (lastSearchLoadout?.key === key
+                && lastSearchLoadout.revision === loadout.revision()
+                && Date.now() - lastSearchLoadout.at < 30_000) {
+                return ok(undefined);
+            }
+            const result = await loadout.ensure({ ability: 'SEARCH', target, requiredPower: 0 });
+            if (result.ok) {
+                lastSearchLoadout = { key, revision: loadout.revision(), at: Date.now() };
+            } else {
+                lastSearchLoadout = null;
                 // v1 kept scanning with the current loadout when no matching
                 // SEARCH software was owned. Skipping the server would hide
                 // valuable files that the equipped loadout can still reveal.
-                logger.warn('valuable', `SEARCH loadout unavailable for ${serverTypeName ?? serverId}; continuing with the current loadout`, {
+                logger.warn('valuable', `SEARCH loadout unavailable for ${target}; continuing with the current loadout`, {
                     code: result.error.code,
                     message: result.error.message,
                 });

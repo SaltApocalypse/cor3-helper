@@ -72,11 +72,11 @@ async function requestMap(): Promise<BridgeResult<RawNetworkMap>> {
 }
 
 async function fetchMarket(marketId: string): Promise<BridgeResult<RawMarketSnapshot>> {
-    const options = await game.request('game.requestMarketOptions', { marketId }, z.unknown(), 18000);
+    const options = await game.request('game.requestMarketOptions', { marketId }, z.unknown(), 35_000);
     if (!options.ok) return options;
-    const lots = await game.request('game.requestMarketLots', { marketId }, z.unknown(), 18000);
+    const lots = await game.request('game.requestMarketLots', { marketId }, z.unknown(), 35_000);
     if (!lots.ok) return lots;
-    const jobs = await game.request('game.requestMarketJobs', { marketId }, z.unknown(), 18000);
+    const jobs = await game.request('game.requestMarketJobs', { marketId }, z.unknown(), 35_000);
     if (!jobs.ok) return jobs;
     const parsed = rawMarketSnapshotSchema.safeParse({ options: options.value, lots: lots.value, jobs: jobs.value });
     if (!parsed.success) {
@@ -395,7 +395,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
             sendResponse({ ok: false, error: { code: 'INVALID_MARKET', message: 'Invalid market id' } });
             return true;
         }
-        void game.request('game.requestMarketOptions', { marketId }, z.unknown(), 18000).then((result) => sendResponse(result));
+        void game.request('game.requestMarketOptions', { marketId }, z.unknown(), 35_000).then((result) => sendResponse(result));
         return true;
     }
     if (type === 'V2_FETCH_MARKET') {
@@ -413,7 +413,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
             sendResponse({ ok: false, error: { code: 'INVALID_MARKET', message: 'Invalid market id' } });
             return true;
         }
-        void game.request('game.requestMarketJobs', { marketId }, z.unknown(), 18000).then((result) => sendResponse(result));
+        void game.request('game.requestMarketJobs', { marketId }, z.unknown(), 35_000).then((result) => sendResponse(result));
         return true;
     }
     return false;

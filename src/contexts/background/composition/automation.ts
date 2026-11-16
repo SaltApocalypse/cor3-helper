@@ -268,6 +268,7 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
         events,
         autoJobs,
         syncAutoSolvers: core.syncAutoSolvers,
+        onReady: () => game.loadout.invalidate(),
     });
 
     return {

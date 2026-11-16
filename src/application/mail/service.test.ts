@@ -110,4 +110,27 @@ describe('MailService', () => {
             expect(result.value.fallbackUsed).toBe(true);
         }
     });
+
+    it('does not mark a source claimed after a partial claim', async () => {
+        let marked = 0;
+        const tracker = {
+            isClaimed: async () => false,
+            markClaimed: async () => { marked += 1; },
+        };
+        const port: MailPort = {
+            getMail: async () => ({ ok: true, value: mailState }),
+            claimAll: async (messageId) => messageId === 'm1'
+                ? { ok: true, value: { results: [{ attachmentId: 'a1', status: 'claimed' }] } }
+                : { ok: false, error: { code: 'MAIL_FAILED', message: 'temporary failure' } },
+            claimItem: async () => ({ ok: true, value: undefined }),
+        };
+        const service = new MailService(port, stash, tracker, async () => undefined, 0);
+        const result = await service.claimForSource('EXPEDITION', 'exp-1');
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.value.claimed).toBe(1);
+            expect(result.value.failed).toHaveLength(1);
+        }
+        expect(marked).toBe(0);
+    });
 });

@@ -22,6 +22,8 @@ export interface LoadoutServiceError {
         | 'APPLY_FAILED'
         | 'VERIFY_FAILED';
     readonly message: string;
+    /** True when some hardware/software commands succeeded before the failure. */
+    readonly partial?: boolean;
 }
 
 export interface LoadoutCapability {
@@ -29,8 +31,8 @@ export interface LoadoutCapability {
     readonly reason: string | null;
 }
 
-// Install the PSU first: swapping a CPU/GPU before its power supply can fail
-// with the game's "not-enough-resources" error even though the final plan is valid.
+// Fallback verification order when the current hardware is already the target
+// or the current hardware specs are unavailable.
 const SLOTS: readonly HardwareSlot[] = ['psu', 'cpu', 'gpu', 'ram'];
 /**
  * The game applies loadout changes asynchronously. v1 spaced these commands by
@@ -38,15 +40,26 @@ const SLOTS: readonly HardwareSlot[] = ['psu', 'cpu', 'gpu', 'ram'];
  * the same server rate-limit window during automatic job runs.
  */
 const COMMAND_GAP_MS = 500;
+const RATE_LIMIT_BACKOFF_MS = 3_000;
 const VERIFY_ATTEMPTS = 4;
 const VERIFY_GAP_MS = 300;
-const CAPABILITY_TTL_MS = 15_000;
+const CAPABILITY_TTL_MS = 5_000;
+const MAX_CAPABILITY_ENTRIES = 64;
+
+export interface LoadoutServiceOptions {
+    readonly commandGapMs?: number;
+    readonly rateLimitBackoffMs?: number;
+}
+
+function isRateLimitFailure(message: string): boolean {
+    return /too many requests|rate[\s-]?limit|busy|processing|try again|cooldown/i.test(message);
+}
 
 function runtimeFingerprint(runtime: LoadoutRuntime): string {
     const inventory = runtime.inventory;
     return [
         runtime.catalog.catalogVersion,
-        runtime.catalog.hardware.map((item) => item.id).sort().join(','),
+        runtime.catalog.hardware.map((item) => `${item.id}:${item.specs.cpuConsuming ?? ''}/${item.specs.gpuConsuming ?? ''}/${item.specs.psuPower ?? ''}`).sort().join(','),
         runtime.catalog.software.map((item) => item.id).sort().join(','),
         [...inventory.ownedHardwareIds].sort().join(','),
         [...inventory.ownedSoftwareIds].sort().join(','),
@@ -81,30 +94,90 @@ function hardwareOrder(
     inventory: { readonly equippedHardware: Partial<Record<HardwareSlot, string>> },
     catalog: { readonly hardware: readonly { readonly id: string; readonly slot: HardwareSlot; readonly specs: { readonly cpuConsuming?: number; readonly gpuConsuming?: number; readonly psuPower?: number } }[] },
 ): readonly HardwareSlot[] {
-    if (inventory.equippedHardware.psu === plan.hardware.psu.id) return SLOTS;
     const byId = new Map(catalog.hardware.map((item) => [item.id, item]));
     const currentCpu = inventory.equippedHardware.cpu ? byId.get(inventory.equippedHardware.cpu) : undefined;
     const currentGpu = inventory.equippedHardware.gpu ? byId.get(inventory.equippedHardware.gpu) : undefined;
-    const currentDraw = (currentCpu?.specs.cpuConsuming ?? 0) + (currentGpu?.specs.gpuConsuming ?? 0);
-    const targetPsuPower = plan.hardware.psu.specs.psuPower ?? 0;
-    if (targetPsuPower >= currentDraw) return SLOTS;
-    const currentCpuDraw = currentCpu?.specs.cpuConsuming ?? 0;
+    const currentPsu = inventory.equippedHardware.psu ? byId.get(inventory.equippedHardware.psu) : undefined;
+    if (!currentCpu || !currentGpu || !currentPsu) {
+        // Without current specs we cannot prove an intermediate PSU state is
+        // safe. Replace the compute hardware before touching the PSU.
+        return ['cpu', 'gpu', 'psu', 'ram'];
+    }
+    const currentCpuDraw = currentCpu.specs.cpuConsuming ?? 0;
+    const currentGpuDraw = currentGpu.specs.gpuConsuming ?? 0;
     const targetCpuDraw = plan.hardware.cpu.specs.cpuConsuming ?? 0;
-    return targetCpuDraw <= currentCpuDraw
-        ? ['cpu', 'gpu', 'psu', 'ram']
-        : ['gpu', 'cpu', 'psu', 'ram'];
+    const targetGpuDraw = plan.hardware.gpu.specs.gpuConsuming ?? 0;
+    const currentDraw = currentCpuDraw + currentGpuDraw;
+    const targetPsuPower = plan.hardware.psu.specs.psuPower ?? 0;
+    const psuPower = currentPsu.specs.psuPower ?? 0;
+    const psuUnchanged = inventory.equippedHardware.psu === plan.hardware.psu.id;
+
+    // If the target PSU can power the current pair, installing it first is
+    // safe. Once it is installed, still choose the CPU/GPU order against the
+    // target PSU; the final pair fitting does not guarantee that a CPU-first
+    // intermediate fits.
+    const psuFirst = !psuUnchanged && targetPsuPower >= currentDraw;
+    const planningPsuPower = psuFirst ? targetPsuPower : psuPower;
+
+    // Replace the component that reduces intermediate draw first. This matters
+    // when the active PSU is already at its limit: installing a higher-draw CPU
+    // before lowering the GPU (or vice versa) fails with `not-enough-resources`
+    // even though the final pair fits.
+    const cpuFirstDraw = targetCpuDraw + currentGpuDraw;
+    const gpuFirstDraw = currentCpuDraw + targetGpuDraw;
+    const fits = (draw: number): boolean => planningPsuPower <= 0 || draw <= planningPsuPower;
+    let order: HardwareSlot[];
+    if (fits(cpuFirstDraw) && (!fits(gpuFirstDraw) || cpuFirstDraw <= gpuFirstDraw)) {
+        order = ['cpu', 'gpu'];
+    } else if (fits(gpuFirstDraw)) {
+        order = ['gpu', 'cpu'];
+    } else {
+        order = cpuFirstDraw <= gpuFirstDraw ? ['cpu', 'gpu'] : ['gpu', 'cpu'];
+    }
+    return psuUnchanged || psuFirst ? ['psu', ...order, 'ram'] : [...order, 'psu', 'ram'];
 }
 
 export class LoadoutService {
     private readonly capabilityCache = new Map<string, { readonly at: number; readonly fingerprint: string; readonly value: LoadoutCapability }>();
     private capabilityRuntime: { readonly at: number; readonly value: LoadoutRuntime } | null = null;
+    private mutationQueue: Promise<unknown> = Promise.resolve();
+    private mutationVersion = 0;
+    private readonly commandGapMs: number;
+    private readonly rateLimitBackoffMs: number;
 
     constructor(
         private readonly runtime: LoadoutRuntimePort,
         private readonly applier: LoadoutApplyPort,
         private readonly sleep: (ms: number) => Promise<void> = defaultSleep,
         private readonly trace?: (message: string, data?: unknown) => void,
-    ) {}
+        options: LoadoutServiceOptions = {},
+    ) {
+        this.commandGapMs = options.commandGapMs ?? COMMAND_GAP_MS;
+        this.rateLimitBackoffMs = options.rateLimitBackoffMs ?? RATE_LIMIT_BACKOFF_MS;
+    }
+
+    /** Monotonic revision used by callers that cache "already ensured" results. */
+    revision(): number {
+        return this.mutationVersion;
+    }
+
+    private serialize<T>(run: () => Promise<T>): Promise<T> {
+        const next = this.mutationQueue.then(run, run);
+        this.mutationQueue = next.then(() => undefined, () => undefined);
+        return next;
+    }
+
+    private pruneCapabilityCache(): void {
+        const now = Date.now();
+        for (const [key, entry] of this.capabilityCache) {
+            if (now - entry.at >= CAPABILITY_TTL_MS) this.capabilityCache.delete(key);
+        }
+        while (this.capabilityCache.size > MAX_CAPABILITY_ENTRIES) {
+            const oldest = this.capabilityCache.keys().next().value;
+            if (oldest === undefined) break;
+            this.capabilityCache.delete(oldest);
+        }
+    }
 
     /**
      * Read-only capability check used before taking a job. It verifies that the
@@ -113,6 +186,7 @@ export class LoadoutService {
      * automatic job runs ask the same question for every job.
      */
     async canSatisfy(request: LoadoutRequest): Promise<Result<LoadoutCapability, LoadoutServiceError>> {
+        this.pruneCapabilityCache();
         const strategy = request.strategy ?? 'best';
         const policy = policyFor(request);
         const key = [
@@ -152,20 +226,51 @@ export class LoadoutService {
             strategy,
             policy,
         });
+        const fallbackBlocked = optimized.fallbackUsed && request.requiredPower > 0;
         const value: LoadoutCapability = {
-            feasible: optimized.feasible && optimized.plan !== null,
-            reason: optimized.reason,
+            feasible: optimized.feasible && optimized.plan !== null && !fallbackBlocked,
+            reason: fallbackBlocked ? 'NO_SOFTWARE' : optimized.reason,
         };
         this.capabilityCache.set(key, { at: Date.now(), fingerprint, value });
+        this.pruneCapabilityCache();
         return ok(value);
     }
 
     invalidate(): void {
         this.capabilityCache.clear();
         this.capabilityRuntime = null;
+        this.mutationVersion += 1;
     }
 
     async ensure(request: LoadoutRequest): Promise<Result<LoadoutPlan, LoadoutServiceError>> {
+        return this.serialize(() => this.ensureInternal(request));
+    }
+
+    async equipHardware(id: string): Promise<Result<void, { readonly code: string; readonly message: string }>> {
+        return this.serialize(async () => {
+            const result = await this.applier.equipHardware(id);
+            this.invalidate();
+            return result;
+        });
+    }
+
+    async equipSoftware(id: string): Promise<Result<void, { readonly code: string; readonly message: string }>> {
+        return this.serialize(async () => {
+            const result = await this.applier.equipSoftware(id);
+            this.invalidate();
+            return result;
+        });
+    }
+
+    async unequipSoftware(id: string): Promise<Result<void, { readonly code: string; readonly message: string }>> {
+        return this.serialize(async () => {
+            const result = await this.applier.unequipSoftware(id);
+            this.invalidate();
+            return result;
+        });
+    }
+
+    private async ensureInternal(request: LoadoutRequest): Promise<Result<LoadoutPlan, LoadoutServiceError>> {
         const runtime = await this.runtime.get();
         if (!runtime.ok) {
             return err({ code: 'RUNTIME_UNAVAILABLE', message: runtime.error.message });
@@ -185,6 +290,9 @@ export class LoadoutService {
         if (!optimized.plan) {
             return err({ code: 'NO_PLAN', message: optimized.reason ?? 'No loadout plan' });
         }
+        if (optimized.fallbackUsed && request.requiredPower > 0) {
+            return err({ code: 'INFEASIBLE', message: 'Fallback software cannot satisfy a positive power requirement' });
+        }
         if (!optimized.feasible) {
             return err({ code: 'INFEASIBLE', message: 'Best available loadout is still below the required power' });
         }
@@ -192,6 +300,11 @@ export class LoadoutService {
         this.trace?.('Loadout plan selected', {
             ability: plan.ability,
             target: plan.target,
+            strategy,
+            policyId: plan.policyId,
+            policyVersion: plan.policyVersion,
+            fallbackToAnyAbility: request.fallbackToAnyAbility === true,
+            fallbackUsed: optimized.fallbackUsed,
             requiredPower: plan.requiredPower,
             power: plan.power,
             software: plan.software.name,
@@ -200,6 +313,12 @@ export class LoadoutService {
             ram: plan.hardware.ram.name,
             psu: plan.hardware.psu.name,
             switchCost: plan.switchCost,
+            keptCurrentHardware: sameHardware(plan, runtime.value.inventory.equippedHardware),
+            currentCpu: runtime.value.inventory.equippedHardware.cpu ?? null,
+            currentGpu: runtime.value.inventory.equippedHardware.gpu ?? null,
+            currentRam: runtime.value.inventory.equippedHardware.ram ?? null,
+            currentPsu: runtime.value.inventory.equippedHardware.psu ?? null,
+            currentSoftware: runtime.value.inventory.equippedSoftwareIds,
         });
         if (sameHardware(plan, runtime.value.inventory.equippedHardware) &&
             hasSoftware(runtime.value.inventory, plan.software.id) &&
@@ -208,16 +327,32 @@ export class LoadoutService {
         }
 
         const applied = await this.apply(plan, runtime.value.inventory, runtime.value.catalog);
-        if (!applied.ok) return applied;
+        if (!applied.ok) {
+            // The applier may have already unequipped software or changed some
+            // hardware before the failing step. Do not keep a capability
+            // snapshot that describes the pre-failure hardware.
+            this.invalidate();
+            if (applied.error.partial) {
+                this.trace?.('Loadout apply left a partial state; next run will re-read inventory', {
+                    code: applied.error.code,
+                    message: applied.error.message,
+                });
+            }
+            return applied;
+        }
         this.invalidate();
         const verified = await this.verifyWithRetry(plan);
         if (verified) return ok(plan);
 
         const current = await this.runtime.get();
         const retry = await this.apply(plan, current.ok ? current.value.inventory : runtime.value.inventory, current.ok ? current.value.catalog : runtime.value.catalog);
-        if (!retry.ok) return retry;
+        if (!retry.ok) {
+            this.invalidate();
+            return retry;
+        }
         this.invalidate();
         if (await this.verifyWithRetry(plan)) return ok(plan);
+        this.invalidate();
         return err({ code: 'VERIFY_FAILED', message: 'Target software/hardware did not appear after apply' });
     }
 
@@ -226,43 +361,72 @@ export class LoadoutService {
         inventory: { readonly equippedHardware: Partial<Record<HardwareSlot, string>>; readonly equippedSoftwareIds: readonly string[] },
         catalog: { readonly hardware: readonly { readonly id: string; readonly slot: HardwareSlot; readonly specs: { readonly cpuConsuming?: number; readonly gpuConsuming?: number; readonly psuPower?: number } }[] },
     ): Promise<Result<void, LoadoutServiceError>> {
+        interface ApplyStep {
+            readonly label: string;
+            readonly data: Record<string, unknown>;
+            readonly run: () => Promise<Result<void, { readonly code: string; readonly message: string }>>;
+        }
+        const steps: ApplyStep[] = [];
+        // Unequip every software module before changing hardware. The game
+        // validates the active software against the new hardware while the
+        // swap is applied; keeping the target software equipped can make a
+        // valid CPU/GPU plan fail with `not-enough-resources`.
+        for (const softwareId of inventory.equippedSoftwareIds) {
+            steps.push({
+                label: 'unequip-software',
+                data: { id: softwareId },
+                run: () => this.applier.unequipSoftware(softwareId),
+            });
+        }
+        for (const slot of hardwareOrder(plan, inventory, catalog)) {
+            if (inventory.equippedHardware[slot] === plan.hardware[slot].id) continue;
+            steps.push({
+                label: `equip-${slot}`,
+                data: { id: plan.hardware[slot].id, name: plan.hardware[slot].name },
+                run: () => this.applier.equipHardware(plan.hardware[slot].id),
+            });
+        }
+        // Every equipped software module was unequipped above, including the
+        // target module. Always re-equip it after the hardware swap.
+        steps.push({
+            label: 'equip-software',
+            data: { id: plan.software.id, name: plan.software.name },
+            run: () => this.applier.equipSoftware(plan.software.id),
+        });
+
+        let mutated = false;
         try {
-            for (const softwareId of inventory.equippedSoftwareIds) {
-                if (softwareId === plan.software.id) continue;
-                const result = await this.applier.unequipSoftware(softwareId);
-                if (!result.ok) {
-                    this.trace?.('Loadout step failed', { step: 'unequip-software', id: softwareId, message: result.error.message });
-                    return err({ code: 'APPLY_FAILED', message: result.error.message });
-                }
-                await this.sleep(COMMAND_GAP_MS);
-            }
-            for (const slot of hardwareOrder(plan, inventory, catalog)) {
-                if (inventory.equippedHardware[slot] === plan.hardware[slot].id) continue;
-                const result = await this.applier.equipHardware(plan.hardware[slot].id);
-                if (!result.ok) {
-                    this.trace?.('Loadout step failed', {
-                        step: `equip-${slot}`,
-                        id: plan.hardware[slot].id,
-                        name: plan.hardware[slot].name,
+            for (let index = 0; index < steps.length; index += 1) {
+                const step = steps[index]!;
+                let result = await step.run();
+                if (!result.ok && isRateLimitFailure(result.error.message)) {
+                    this.trace?.('Loadout command rate-limited; backing off', {
+                        step: step.label,
+                        ...step.data,
                         message: result.error.message,
                     });
-                    return err({ code: 'APPLY_FAILED', message: result.error.message });
+                    await this.sleep(this.rateLimitBackoffMs);
+                    result = await step.run();
                 }
-                await this.sleep(COMMAND_GAP_MS);
-            }
-            if (!inventory.equippedSoftwareIds.includes(plan.software.id)) {
-                const result = await this.applier.equipSoftware(plan.software.id);
                 if (!result.ok) {
-                    this.trace?.('Loadout step failed', { step: 'equip-software', id: plan.software.id, name: plan.software.name, message: result.error.message });
-                    return err({ code: 'APPLY_FAILED', message: result.error.message });
+                    this.trace?.('Loadout step failed', {
+                        step: step.label,
+                        ...step.data,
+                        message: result.error.message,
+                    });
+                    return err({ code: 'APPLY_FAILED', message: result.error.message, partial: mutated });
                 }
-                await this.sleep(COMMAND_GAP_MS);
+                mutated = true;
+                // No trailing sleep after the final command; verification reads
+                // the fresh state immediately after the last mutation.
+                if (index < steps.length - 1) await this.sleep(this.commandGapMs);
             }
             return ok(undefined);
         } catch (error) {
             return err({
                 code: 'APPLY_FAILED',
                 message: error instanceof Error ? error.message : String(error),
+                partial: mutated,
             });
         }
     }

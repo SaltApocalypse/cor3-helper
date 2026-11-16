@@ -114,7 +114,7 @@ export class AutoFinishCoordinator {
             }
             return { ok: true as const, value: finished };
         });
-        if (!result.ok) return { ok: false, error: { code: result.error.code, message: result.error.message } };
+        if (!result.ok) return { ok: false, error: { code: result.error?.code ?? 'AUTO_FINISH_FAILED', message: result.error?.message ?? 'Auto Finish failed' } };
         return result.value as unknown as { readonly ok: true; readonly value: AutoFinishRunResult };
     }
 
@@ -132,12 +132,13 @@ export class AutoFinishCoordinator {
             const preRunnable = prefetched.jobs.filter((job) => {
                 if (job.serverId === null && !isServerlessJob(job.type)) return false;
                 if (!preAllowed.has(job.type)) return false;
+                if (this.deps.locks.isRetryExhausted(job.id)) return false;
                 if (this.deps.locks.isLocked(job.id)) return false;
                 const resetAt = preResets.get(job.marketKey) ?? null;
                 return !(resetAt !== null && preStored.completedJobs[job.id] === resetAt);
             });
             if (preRunnable.length === 0) {
-                this.deps.logger.info('auto-jobs', 'Auto Finish selection skipped every job', {
+                this.deps.logger.info('auto-jobs', prefetched.jobs.length === 0 ? 'Auto Finish: no jobs to run' : 'Auto Finish selection skipped every job', {
                     jobs: prefetched.jobs.length,
                     allowedTypes: [...preAllowed],
                     completedJobs: Object.keys(preStored.completedJobs).length,

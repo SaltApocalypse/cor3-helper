@@ -1,8 +1,8 @@
-import { isServerlessJob, type JobOffer } from '../../domains/jobs/model.js';
+import { decryptFileType, isServerlessJob, type JobOffer } from '../../domains/jobs/model.js';
 import type { GameError } from '../game/ports.js';
 import { err, ok, type Result } from '../../kernel/result.js';
 import type { JobExecutionPort, JobReward } from './runner.js';
-import { conditionsOf, fileReferencesFromConditions, ipsFromConditions, type DownloadFile, type JobActionPort } from './job-actions.js';
+import { conditionsOf, fileReferencesFromConditions, ipsFromConditions, type DownloadFile, type FileAnalysis, type JobActionPort } from './job-actions.js';
 import type { MinigamePort } from './minigame-port.js';
 import { sleep as defaultSleep } from '../../kernel/sleep.js';
 
@@ -134,14 +134,6 @@ export class JobExecutionService implements JobExecutionPort {
                         stage: 'preflight',
                     });
                 }
-            }
-            // File Decryption picks an already-downloaded file. Apply the
-            // decrypt loadout before the job is taken: changing hardware while
-            // a job is active can be rejected by the game with
-            // "not-enough-resources" even though the plan is valid.
-            if (current.type === 'File Decryption' && this.beforeDecrypt) {
-                const prepared = await this.prepareDecryptLoadout(current);
-                if (!prepared.ok) return prepared;
             }
             if (this.beforeTake) {
                 const market = await this.beforeTake(current);
@@ -290,17 +282,46 @@ export class JobExecutionService implements JobExecutionPort {
         if (!listing.ok) return err({ code: 'FILE_NOT_FOUND', message: listing.error.message });
         const files = listing.value;
         const refs = fileReferencesFromConditions(job);
+        const expectedType = decryptFileType(job, preferredName)?.toLowerCase() ?? null;
+        const matchesExpectedType = (file: DownloadFile): boolean =>
+            expectedType === null || file.name.toLowerCase().endsWith(expectedType);
         const target =
             files.find((file) => job.fileInfo?.id === file.id)
             ?? files.find((file) => refs.some((ref) => ref.fileId === file.id))
             ?? files.find((file) => job.fileInfo?.name !== undefined && job.fileInfo.name === file.name)
             ?? files.find((file) => refs.some((ref) => ref.name !== undefined && ref.name === file.name))
-            ?? (preferredName ? files.find((file) => baseName(file.name) === baseName(preferredName)) : undefined)
-            ?? files.find((file) => file.isEncrypted)
-            ?? files.find((file) => file.isNew)
-            ?? files.at(-1);
-        if (!target) return err({ code: 'FILE_NOT_FOUND', message: 'No file found in the Downloads folder' });
+            ?? (preferredName ? files.find((file) => baseName(file.name) === baseName(preferredName) && matchesExpectedType(file)) : undefined)
+            ?? files.find((file) => file.isEncrypted && matchesExpectedType(file))
+            ?? files.find((file) => file.isNew && matchesExpectedType(file))
+            ?? (expectedType === null ? files.at(-1) : undefined);
+        if (!target) {
+            this.trace?.('No downloaded file matched the job', {
+                jobId: job.id,
+                expectedType,
+                available: files.map((file) => file.name),
+            });
+            return err({
+                code: 'FILE_NOT_FOUND',
+                message: expectedType === null
+                    ? 'No file found in the Downloads folder'
+                    : `No downloaded file matching ${expectedType}`,
+            });
+        }
         return ok(target);
+    }
+
+    /**
+     * Equipping a decrypt module can take a moment to be reflected in
+     * `get.file.analysis`; an immediate re-read produced false "insufficient
+     * power" skips right after a successful loadout plan.
+     */
+    private async analyzeFileAfterLoadout(fileId: string): Promise<Result<FileAnalysis, GameError>> {
+        let analysis = await this.actions.getFileAnalysis(fileId);
+        for (let attempt = 0; attempt < 2 && !(analysis.ok && analysis.value.canDecrypt === true); attempt++) {
+            await this.sleep(700);
+            analysis = await this.actions.getFileAnalysis(fileId);
+        }
+        return analysis;
     }
 
     private async activeMinigameLock(): Promise<number | null> {
@@ -321,36 +342,13 @@ export class JobExecutionService implements JobExecutionPort {
         });
     }
 
-    /**
-     * Applies the decrypt loadout for a File Decryption job before taking it.
-     * The downloaded file is already available, so the target/power can be read
-     * without an active job.
-     */
-    private async prepareDecryptLoadout(job: JobOffer): Promise<Result<void, JobExecutionError>> {
-        if (!this.beforeDecrypt) return ok(undefined);
-        const download = await this.findDownloadedFile(job);
-        if (!download.ok || download.value.isEncrypted === false) return ok(undefined);
-        const analysis = await this.actions.getFileAnalysis(download.value.id);
-        const requiredPower = analysis.ok && analysis.value.canDecrypt === false
-            ? analysis.value.decryptPower ?? undefined
-            : undefined;
-        const ready = await this.beforeDecrypt(job, download.value, requiredPower);
-        if (ready.ok) return ok(undefined);
-        return err({
-            code: ready.error.code === 'DECRYPT_POWER_INSUFFICIENT' ? 'DECRYPT_POWER_INSUFFICIENT' : 'ACTION_FAILED',
-            message: ready.error.message,
-            ...(ready.error.retryable !== undefined ? { retryable: ready.error.retryable } : {}),
-            stage: 'loadout',
-        });
-    }
-
     private async decryptAndComplete(job: JobOffer, file: DownloadFile): Promise<Result<JobReward, JobExecutionError>> {
         const initialLock = await this.activeMinigameLock();
         if (initialLock !== null) return this.lockedError(initialLock);
         // A decoded file can be picked up again when the user solved it manually
         // or when a previous run already decrypted it. Completing directly avoids
         // re-opening the minigame and avoids reporting "insufficient power (0)".
-        this.trace?.(`Decrypt target file selected: ${file.name} (${file.id})`, { jobId: job.id, fileId: file.id, fileName: file.name, encrypted: file.isEncrypted });
+        this.trace?.(`Decrypt target file selected: ${file.name} (${file.id})`, { jobId: job.id, fileId: file.id, fileName: file.name, expectedType: decryptFileType(job, file.name), encrypted: file.isEncrypted });
         if (file.isEncrypted === false) return this.completeAfterDecrypt(job, file.id);
         let analysis = await this.actions.getFileAnalysis(file.id);
         this.trace?.(
@@ -385,7 +383,7 @@ export class JobExecutionService implements JobExecutionPort {
                         stage: 'loadout',
                     });
                 }
-                analysis = await this.actions.getFileAnalysis(file.id);
+                analysis = await this.analyzeFileAfterLoadout(file.id);
             }
         }
         if (analysis.ok && analysis.value.canDecrypt === false) {

@@ -66,10 +66,12 @@ export const rawDroneEventSchema = z.object({
     type: z.string().optional(),
     event: z.object({
         eventId: z.string().optional(),
+        missionId: z.string().optional(),
         type: z.string().optional(),
         isResolvable: z.boolean().optional(),
         isResolved: z.boolean().optional(),
         options: z.array(rawDroneEventOptionSchema).optional(),
     }).passthrough().optional(),
     options: z.array(rawDroneEventOptionSchema).optional(),
+    mission: z.object({ id: z.string().optional(), missionId: z.string().optional() }).passthrough().optional(),
 }).passthrough();

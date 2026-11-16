@@ -74,7 +74,12 @@ export class DroneAutoService {
             const option = chooseDroneEventOption(event.value, settings.decisionPolicy);
             this.trace?.('Drone event option selected', { eventId: event.value.eventId, option: option?.id ?? null, label: option?.label ?? null });
             if (option) {
-                const resolved = await this.drone.resolve(event.value.eventId, option.id);
+                let missionId = event.value.missionId;
+                if (!missionId) {
+                    const view = await this.drone.view();
+                    if (view.ok) missionId = view.value.activeMissionId ?? '';
+                }
+                const resolved = await this.drone.resolve(event.value.eventId, option.id, missionId || undefined);
                 return resolved.ok
                     ? { ok: true, value: { status: 'launched', message: `Resolved ${event.value.type}: ${option.label}`, missionId: event.value.missionId, eventId: event.value.eventId } }
                     : { ok: false, error: resolved.error };
@@ -104,6 +109,9 @@ export class DroneAutoService {
         if (settings.repairEnabled) {
             const threshold = Math.max(0, Math.min(100, settings.repairThreshold));
             const needsDurabilityRepair = state.drone.durability <= threshold;
+            // The game does not expose a separate charging flag; charging and
+            // idle are both non-mission states. `repairOnCharge` therefore
+            // applies to any low-battery idle drone with missing durability.
             const needsLowBatteryRepair = settings.repairOnCharge
                 && state.battery < 30
                 && state.drone.durability < state.drone.maxDurability;

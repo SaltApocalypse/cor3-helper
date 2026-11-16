@@ -34,13 +34,31 @@ export interface MarketSyncResult {
     readonly market: RawMarketSnapshot;
 }
 
+export interface MarketSyncOptions {
+    readonly retryDelayMs?: number;
+    readonly sleep?: (ms: number) => Promise<void>;
+}
+
+function isTransientMarketFetchError(error: GameError): boolean {
+    return error.code === 'GAME_TIMEOUT'
+        || error.code === 'GAME_MARKET_FAILED'
+        || /market-not-reachable|not[-\s]?reachable|timeout|timed out|socket|websocket|busy|processing|rate[\s-]?limit/i.test(error.message);
+}
+
 export class MarketSyncService {
+    private readonly retryDelayMs: number;
+    private readonly sleep: (ms: number) => Promise<void>;
+
     constructor(
         private readonly snapshots: Pick<NetworkSnapshotService, 'get'>,
         private readonly executor: RouteExecutor,
         private readonly markets: MarketSnapshotPort,
         private readonly clock: Clock = new SystemClock(),
-    ) {}
+        options: MarketSyncOptions = {},
+    ) {
+        this.retryDelayMs = options.retryDelayMs ?? 500;
+        this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    }
 
     async sync(request: MarketSyncRequest): Promise<Result<MarketSyncResult, MarketSyncError>> {
         const snapshot = request.snapshot
@@ -73,7 +91,11 @@ export class MarketSyncService {
                 message: `${route.error?.message ?? 'No usable route'}${details ? ` — ${details}` : ''}`,
             });
         }
-        const market = await this.markets.fetchMarket(request.marketId);
+        let market = await this.markets.fetchMarket(request.marketId);
+        for (let attempt = 0; attempt < 2 && !market.ok && isTransientMarketFetchError(market.error); attempt++) {
+            await this.sleep(this.retryDelayMs);
+            market = await this.markets.fetchMarket(request.marketId);
+        }
         if (!market.ok) return err({ code: 'MARKET_FETCH_FAILED', message: market.error.message });
         return ok({
             snapshot: snapshot.value,

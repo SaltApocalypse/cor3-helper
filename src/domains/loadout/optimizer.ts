@@ -23,7 +23,7 @@ export interface LoadoutOptimizationRequest {
     readonly policy?: PsuSelectionPolicy;
     /** Use any owned software with the requested ability when no target match exists. */
     readonly fallbackToAnyAbility?: boolean;
-    /** 'best' maximizes power; 'weakest' keeps the lowest feasible power. */
+    /** 'best' keeps current sufficient hardware, otherwise maximizes power; 'weakest' minimizes power. */
     readonly strategy?: 'best' | 'weakest';
 }
 
@@ -36,6 +36,8 @@ export interface LoadoutOptimizationResult {
     readonly feasible: boolean;
     readonly plan: LoadoutPlan | null;
     readonly reason: LoadoutInfeasibleReason | null;
+    /** True when the candidate software came from fallbackToAnyAbility. */
+    readonly fallbackUsed: boolean;
 }
 
 const SLOTS: readonly HardwareSlot[] = ['cpu', 'gpu', 'ram', 'psu'];
@@ -82,13 +84,15 @@ export function optimizeLoadout(request: LoadoutOptimizationRequest): LoadoutOpt
     let software = request.catalog.software.filter((item) =>
         request.inventory.ownedSoftwareIds.has(item.id) && matchesTarget(item, request.ability, request.target),
     );
+    let fallbackUsed = false;
     if (software.length === 0 && request.fallbackToAnyAbility) {
         software = request.catalog.software.filter((item) =>
             request.inventory.ownedSoftwareIds.has(item.id) && item.abilities.some((ability) => ability.type === request.ability),
         );
+        fallbackUsed = software.length > 0;
     }
-    if (software.length === 0) return { feasible: false, plan: null, reason: 'NO_SOFTWARE' };
-    if (SLOTS.some((slot) => hardware[slot].length === 0)) return { feasible: false, plan: null, reason: 'NO_HARDWARE' };
+    if (software.length === 0) return { feasible: false, plan: null, reason: 'NO_SOFTWARE', fallbackUsed: false };
+    if (SLOTS.some((slot) => hardware[slot].length === 0)) return { feasible: false, plan: null, reason: 'NO_HARDWARE', fallbackUsed };
 
     const currentSoftwareIds = request.currentSoftwareIds ?? request.inventory.equippedSoftwareIds;
     const currentHardware = request.currentHardware ?? request.inventory.equippedHardware;
@@ -107,8 +111,13 @@ export function optimizeLoadout(request: LoadoutOptimizationRequest): LoadoutOpt
     for (const sw of software) {
         let bestSoftwarePlan: LoadoutPlan | null = null;
         for (const cpu of hardware.cpu) {
+            const cpuDraw = cpu.specs.cpuConsuming ?? 0;
             for (const gpu of hardware.gpu) {
+                const requiredPsuPower = cpuDraw + (gpu.specs.gpuConsuming ?? 0);
                 for (const psu of hardware.psu) {
+                    // A PSU below the CPU+GPU draw can never boot this pair.
+                    // Skip the expensive loadout analysis for those candidates.
+                    if ((psu.specs.psuPower ?? 0) < requiredPsuPower) continue;
                     for (const ram of hardware.ram) {
                         const set: HardwareSet = { cpu, gpu, ram, psu };
                         const analysis = calculateLoadout(set, [sw]);
@@ -138,10 +147,16 @@ export function optimizeLoadout(request: LoadoutOptimizationRequest): LoadoutOpt
         }
     }
 
-    if (best) best = applyPsuPolicy(best, hardware.psu, policy, currentHardware, context);
+    if (best) {
+        // "best" keeps the current hardware when it is already sufficient.
+        // Only a plan that actually needs a hardware change is re-ranked by
+        // the max-power PSU policy.
+        const keepCurrentHardware = strategy === 'best' && best.switchCost === 0;
+        if (!keepCurrentHardware) best = applyPsuPolicy(best, hardware.psu, policy, currentHardware, context);
+    }
     return best
-        ? { feasible: best.feasible, plan: best, reason: null }
-        : { feasible: false, plan: null, reason: 'NO_BOOTABLE_COMBINATION' };
+        ? { feasible: best.feasible, plan: best, reason: null, fallbackUsed }
+        : { feasible: false, plan: null, reason: 'NO_BOOTABLE_COMBINATION', fallbackUsed };
 }
 
 interface BetterContext {
@@ -158,30 +173,42 @@ function isCurrentSoftware(softwareId: string, currentSoftwareIds: readonly stri
 
 function isBetterPlan(plan: LoadoutPlan, best: LoadoutPlan, ctx: BetterContext): boolean {
     if (ctx.requiredPower > 0 && plan.feasible !== best.feasible) return plan.feasible;
+
     const planCurrent = isCurrentSoftware(plan.software.id, ctx.currentSoftwareIds);
     const bestCurrent = isCurrentSoftware(best.software.id, ctx.currentSoftwareIds);
+    const planCurrentHardware = plan.switchCost === 0;
+    const bestCurrentHardware = best.switchCost === 0;
 
-    // Best mode: when both plans satisfy the requirement, avoid unnecessary
-    // software/hardware churn before comparing raw power.
-    if (ctx.strategy === 'best' && ctx.requiredPower > 0 && plan.feasible && best.feasible) {
+    if (ctx.strategy === 'best') {
+        // Job-driven loadouts should not churn hardware when the current
+        // hardware can already run the target software.
+        if (planCurrentHardware !== bestCurrentHardware) return planCurrentHardware;
+
+        if (planCurrentHardware) {
+            // Keep the current software first; if neither candidate is the
+            // current module, prefer the higher-power result.
+            if (planCurrent !== bestCurrent) return planCurrent;
+            if (plan.power !== best.power) return plan.power > best.power;
+            const psuCmp = ctx.policy.compare(plan.hardware.psu, best.hardware.psu, ctx.context);
+            return psuCmp > 0;
+        }
+
+        // A hardware change is required: "best" means the highest power
+        // available, with the max-power PSU policy as the tie-break.
+        if (plan.power !== best.power) return plan.power > best.power;
         if (planCurrent !== bestCurrent) return planCurrent;
         if (plan.switchCost !== best.switchCost) return plan.switchCost < best.switchCost;
+        const psuCmp = ctx.policy.compare(plan.hardware.psu, best.hardware.psu, ctx.context);
+        return psuCmp > 0;
     }
-    if (plan.power !== best.power) {
-        return ctx.strategy === 'weakest' ? plan.power < best.power : plan.power > best.power;
-    }
+
     // Weakest mode prefers the smallest PSU even when that means switching
     // hardware, so PSU ranking comes before switch cost.
-    if (ctx.strategy === 'weakest') {
-        const psuCmp = ctx.policy.compare(plan.hardware.psu, best.hardware.psu, ctx.context);
-        if (psuCmp !== 0) return psuCmp > 0;
-    }
+    if (plan.power !== best.power) return plan.power < best.power;
+    const psuCmp = ctx.policy.compare(plan.hardware.psu, best.hardware.psu, ctx.context);
+    if (psuCmp !== 0) return psuCmp > 0;
     if (planCurrent !== bestCurrent) return planCurrent;
     if (plan.switchCost !== best.switchCost) return plan.switchCost < best.switchCost;
-    if (ctx.strategy === 'best') {
-        const psuCmp = ctx.policy.compare(plan.hardware.psu, best.hardware.psu, ctx.context);
-        if (psuCmp !== 0) return psuCmp > 0;
-    }
     return false;
 }
 
@@ -198,7 +225,9 @@ function applyPsuPolicy(
     context: PsuPolicyContext,
 ): LoadoutPlan {
     let selected: HardwareDefinition | null = null;
+    const requiredPsuPower = (plan.hardware.cpu.specs.cpuConsuming ?? 0) + (plan.hardware.gpu.specs.gpuConsuming ?? 0);
     for (const psu of psus) {
+        if ((psu.specs.psuPower ?? 0) < requiredPsuPower) continue;
         const set: HardwareSet = { ...plan.hardware, psu };
         if (!calculateLoadout(set, [plan.software]).canBoot) continue;
         if (selected === null || policy.compare(psu, selected, context) > 0) selected = psu;

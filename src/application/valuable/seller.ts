@@ -168,7 +168,7 @@ export class ValuableSellerService {
                 serverFailures.push({ target: server.name, message: reached.error?.message ?? 'No route' });
                 continue;
             }
-            if (this.access) {
+            if (this.access && !reached.accessEnsured) {
                 const access = await this.access.ensureAccess(server.id, {
                     ...(server.typeName ? { serverTypeName: server.typeName } : {}),
                 });

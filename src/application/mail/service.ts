@@ -105,7 +105,12 @@ export class MailService {
             message.attachments.some((attachment) => attachment.source === source && attachment.sourceId === sourceId),
         );
         const result = await this.claimMessages(matching);
-        if (result.claimed > 0 && this.sourceTracker) await this.sourceTracker.markClaimed(source, sourceId);
+        // A partial claim (stash full or a failed attachment) must stay
+        // retryable. Marking the source complete after one successful
+        // attachment would hide the remaining loot from later passes.
+        if (result.claimed > 0 && result.failed.length === 0 && !result.stashFull && this.sourceTracker) {
+            await this.sourceTracker.markClaimed(source, sourceId);
+        }
         return ok(result);
     }
 

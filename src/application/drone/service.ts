@@ -9,7 +9,7 @@ export interface DronePort {
     getLatestEvent(): Promise<Result<unknown, { readonly code: string; readonly message: string }>>;
     getCompleted(): Promise<Result<unknown, { readonly code: string; readonly message: string }>>;
     launch(locationConfigId: string, missionConfigId: string): Promise<Result<void, { readonly code: string; readonly message: string }>>;
-    resolve(eventId: string, optionId: string): Promise<Result<void, { readonly code: string; readonly message: string }>>;
+    resolve(eventId: string, optionId: string, missionId?: string): Promise<Result<void, { readonly code: string; readonly message: string }>>;
     repair(targetDurability: number): Promise<Result<void, { readonly code: string; readonly message: string }>>;
 }
 
@@ -60,7 +60,7 @@ export class DroneService {
         return this.drone.repair(targetDurability);
     }
 
-    async resolve(eventId: string, optionId: string): Promise<Result<void, { readonly code: string; readonly message: string }>> {
-        return this.drone.resolve(eventId, optionId);
+    async resolve(eventId: string, optionId: string, missionId?: string): Promise<Result<void, { readonly code: string; readonly message: string }>> {
+        return this.drone.resolve(eventId, optionId, missionId);
     }
 }

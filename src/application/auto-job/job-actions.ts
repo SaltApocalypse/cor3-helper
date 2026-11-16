@@ -84,7 +84,12 @@ export function fileReferencesFromConditions(job: JobOffer): FileReference[] {
         }
     }
     for (const condition of conditionsOf(job)) {
-        const candidates: unknown[] = [condition, condition.details];
+        const candidates: unknown[] = [
+            condition,
+            condition.details,
+            ...(Array.isArray(condition.details?.files) ? condition.details.files : []),
+            ...(Array.isArray((condition as { files?: unknown }).files) ? (condition as { files: unknown[] }).files : []),
+        ];
         for (const candidate of candidates) {
             if (!candidate || typeof candidate !== 'object') continue;
             const entry = candidate as { fileId?: unknown; id?: unknown; fileName?: unknown; name?: unknown };

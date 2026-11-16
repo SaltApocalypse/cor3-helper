@@ -108,6 +108,8 @@ const EN = {
     'settings.about.updateAvailable': 'Update available: {version}',
     'settings.about.download': 'Download',
     'settings.about.checkFailed': 'Could not check for updates.',
+    'settings.about.checkManually': 'Check the releases page manually',
+    'settings.about.releases': 'Releases',
 
     'developer.title': 'Developer tools',
     'developer.intro': 'Diagnostics for bug reports. Normal use does not need this page.',
@@ -259,6 +261,8 @@ const ZH: Dictionary = {
     'settings.about.updateAvailable': '发现新版本：{version}',
     'settings.about.download': '前往下载',
     'settings.about.checkFailed': '无法检查更新。',
+    'settings.about.checkManually': '请前往 Releases 页面手动检查',
+    'settings.about.releases': 'Releases',
 
     'developer.title': '开发者工具',
     'developer.intro': '用于反馈问题的诊断信息，正常使用无需打开此页。',

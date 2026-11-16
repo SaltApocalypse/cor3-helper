@@ -74,6 +74,9 @@ export function classifyJobFailure(input: JobOutcomeInput, _now = Date.now()): J
     if (code === 'TYPE_DISABLED') {
         return skippedOutcome('type-disabled');
     }
+    if (code === 'LOADOUT_NO_PLAN' || code === 'NO_PLAN' || /no[_-]?software|no\s+software|loadout.*infeasible/i.test(text)) {
+        return skippedOutcome('capability');
+    }
     if (code === 'PREFLIGHT_FAILED') {
         if (input.lockExpiresAt !== undefined || LOCK_HINTS.test(message)) return retryOutcome('minigame-lock', at);
         if (MAINTENANCE_HINTS.test(message)) return retryOutcome('maintenance', at);

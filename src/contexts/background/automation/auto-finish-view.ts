@@ -108,6 +108,7 @@ export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketRes
         const marketJobs = synced.jobs.filter((job) => job.marketKey === market.marketKey);
         const jobs: AutoFinishJobResult[] = marketJobs.map((job): AutoFinishJobResult => {
             const failure = failedById.get(job.id);
+            const failureError = failure?.error;
             const outcome = outcomes.get(job.id);
             if (!job.serverId && !isServerlessJob(job.type)) {
                 return {
@@ -174,7 +175,7 @@ export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketRes
                     status: 'expired',
                     rewardCredits: job.rewardCredits,
                     rewardReputation: job.rewardReputation,
-                    error: failure?.error.message ?? 'Job expired before completion',
+                    error: failureError?.message ?? 'Job expired before completion',
                     code: 'EXPIRED',
                     stage: 'expire',
                 };
@@ -189,13 +190,13 @@ export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketRes
                     status: 'retry',
                     rewardCredits: job.rewardCredits,
                     rewardReputation: job.rewardReputation,
-                    error: exhausted ? 'Retry budget exhausted for this market reset' : failure.error.message,
-                    code: exhausted ? 'RETRY_EXHAUSTED' : failure.error.detailCode ?? failure.error.code,
+                    error: exhausted ? 'Retry budget exhausted for this market reset' : failureError?.message ?? 'Job failed',
+                    code: exhausted ? 'RETRY_EXHAUSTED' : failureError?.detailCode ?? failureError?.code ?? 'JOB_FAILED',
                     ...(exhausted ? { retryExhausted: true } : {}),
-                    ...(failure.error.retryable !== undefined ? { retryable: failure.error.retryable } : {}),
-                    ...(failure.error.retryAt !== undefined ? { retryAt: failure.error.retryAt } : {}),
-                    ...(failure.error.lockExpiresAt !== undefined ? { lockExpiresAt: failure.error.lockExpiresAt } : {}),
-                    ...(failure.error.stage !== undefined ? { stage: failure.error.stage } : {}),
+                    ...(failureError?.retryable !== undefined ? { retryable: failureError.retryable } : {}),
+                    ...(failureError?.retryAt !== undefined ? { retryAt: failureError.retryAt } : {}),
+                    ...(failureError?.lockExpiresAt !== undefined ? { lockExpiresAt: failureError.lockExpiresAt } : {}),
+                    ...(failureError?.stage !== undefined ? { stage: failureError.stage } : {}),
                 };
             }
             if (outcome?.status === 'failed' && failure) {
@@ -207,12 +208,12 @@ export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketRes
                     status: 'failed',
                     rewardCredits: job.rewardCredits,
                     rewardReputation: job.rewardReputation,
-                    error: failure.error.message,
-                    code: failure.error.detailCode ?? failure.error.code,
-                    ...(failure.error.retryable !== undefined ? { retryable: failure.error.retryable } : {}),
-                    ...(failure.error.retryAt !== undefined ? { retryAt: failure.error.retryAt } : {}),
-                    ...(failure.error.lockExpiresAt !== undefined ? { lockExpiresAt: failure.error.lockExpiresAt } : {}),
-                    ...(failure.error.stage !== undefined ? { stage: failure.error.stage } : {}),
+                    error: failureError?.message ?? 'Job failed',
+                    code: failureError?.detailCode ?? failureError?.code ?? 'JOB_FAILED',
+                    ...(failureError?.retryable !== undefined ? { retryable: failureError.retryable } : {}),
+                    ...(failureError?.retryAt !== undefined ? { retryAt: failureError.retryAt } : {}),
+                    ...(failureError?.lockExpiresAt !== undefined ? { lockExpiresAt: failureError.lockExpiresAt } : {}),
+                    ...(failureError?.stage !== undefined ? { stage: failureError.stage } : {}),
                 };
             }
             if (outcome?.status === 'skipped') {
@@ -224,9 +225,9 @@ export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketRes
                     status: 'skipped',
                     rewardCredits: job.rewardCredits,
                     rewardReputation: job.rewardReputation,
-                    error: failure?.error.message ?? outcomeReasonText(outcome),
-                    code: codeForOutcome(outcome, failure?.error.detailCode ?? failure?.error.code ?? 'SKIPPED'),
-                    stage: failure?.error.stage ?? 'select',
+                    error: failureError?.message ?? outcomeReasonText(outcome),
+                    code: codeForOutcome(outcome, failureError?.detailCode ?? failureError?.code ?? 'SKIPPED'),
+                    stage: failureError?.stage ?? 'select',
                 };
             }
             if (resetAt !== null && completedJobs[job.id] === resetAt) {

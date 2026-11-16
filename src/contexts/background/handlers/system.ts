@@ -5,7 +5,7 @@ import { PHASE, VERSION, isFreshLogEvent, type CoreRuntime } from '../compositio
 import type { GameRuntime } from '../composition/game.js';
 import type { AutomationRuntime } from '../composition/automation.js';
 import { jobLocation } from '../automation/job-outcome.js';
-import { isAutoDailyWaiting } from '../automation/auto-daily.js';
+import { isAutoDailyLoading, isAutoDailyWaiting } from '../automation/auto-daily.js';
 
 export interface SystemHandlerDeps {
     readonly core: CoreRuntime;
@@ -225,6 +225,7 @@ export function registerSystemHandlers(server: CoreRuntime['server'], deps: Syst
                     running: automation.drone.isRunning(),
                     lastAt: droneLast?.at ?? null,
                     lastError: droneLast?.status === 'error' && droneLast.at > droneViewedAt ? droneLast.message : null,
+                    waiting: droneLast?.status === 'waiting',
                 },
                 {
                     key: 'auto-expedition',
@@ -235,7 +236,7 @@ export function registerSystemHandlers(server: CoreRuntime['server'], deps: Syst
                     lastError: expeditionLast?.error && expeditionLast.at > expeditionViewedAt ? expeditionLast.error : null,
                 },
                 { key: 'auto-mail', label: 'Mailbox collect', enabled: currentSettings.mailAutoClaimEnabled, running: automation.mail.isRunning(), lastAt: automation.mail.lastRun()?.at ?? null, lastError: automation.mail.lastRun()?.error ?? null },
-                { key: 'auto-daily', label: 'Auto Daily', enabled: currentSettings.dailyHackEnabled, running: automation.daily.isRunning(), lastAt: dailyLast?.at ?? null, lastError: dailyLast && !dailyLast.solved && !isAutoDailyWaiting(dailyLast) ? dailyLast.message : null },
+                { key: 'auto-daily', label: 'Auto Daily', enabled: currentSettings.dailyHackEnabled, running: automation.daily.isRunning(), lastAt: dailyLast?.at ?? null, lastError: dailyLast && !dailyLast.solved && !isAutoDailyWaiting(dailyLast) && !isAutoDailyLoading(dailyLast) ? dailyLast.message : null, waiting: isAutoDailyLoading(dailyLast) },
                 { key: 'seller', label: 'Valuable Search & Sale', enabled: false, running: valuable.isRunning(), lastAt: null, lastError: valuable.lastError() },
             ],
             timers,

@@ -42,6 +42,8 @@ export interface RouteExecutionResult {
     readonly error?: RouteExecutionError;
     /** True when the target was reached without path-through. */
     readonly direct?: boolean;
+    /** True when target access was already ensured by the executor. */
+    readonly accessEnsured?: boolean;
     /** Direct target failure, retained when path-through succeeds. */
     readonly directError?: GameError;
 }
@@ -102,7 +104,13 @@ export class RouteExecutor {
             if (!options.skipDirect) {
                 const direct = await this.tryDirect(graph, targetId, currentEndpoint);
                 if (direct.ok) {
-                    return { ok: true, route: direct.route, attempts: [], direct: true };
+                    return {
+                        ok: true,
+                        route: direct.route,
+                        attempts: [],
+                        direct: true,
+                        ...(direct.accessEnsured ? { accessEnsured: true } : {}),
+                    };
                 }
                 directError = direct.error;
             }
@@ -184,9 +192,17 @@ export class RouteExecutor {
         graph: NetworkGraph,
         targetId: ServerId,
         currentEndpoint: ServerId | null,
-    ): Promise<{ readonly ok: true; readonly route: RoutePlan } | { readonly ok: false; readonly error: GameError }> {
+    ): Promise<{ readonly ok: true; readonly route: RoutePlan; readonly accessEnsured?: boolean } | { readonly ok: false; readonly error: GameError }> {
         if (currentEndpoint === targetId) {
-            return { ok: true, route: this.directRoute(graph, currentEndpoint, targetId) };
+            // Already being at the endpoint is not enough after a session/tab
+            // change: the server login/access may have been lost while the
+            // network snapshot still points at the target.
+            const server = graph.getServer(targetId);
+            const access = await this.access.ensureAccess(targetId, {
+                ...(server?.typeName ? { serverTypeName: server.typeName } : {}),
+            });
+            if (!access.ok) return { ok: false, error: access.error };
+            return { ok: true, route: this.directRoute(graph, currentEndpoint, targetId), accessEnsured: true };
         }
         const direct = await this.commands.setEndpoint(targetId);
         if (direct.ok) {

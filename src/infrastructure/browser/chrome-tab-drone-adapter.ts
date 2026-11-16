@@ -14,8 +14,12 @@ export class ChromeTabDroneAdapter implements DronePort {
         const result = await this.action('launch', { locationConfigId, missionConfigId });
         return result.ok ? ok(undefined) : result;
     }
-    async resolve(eventId: string, optionId: string): Promise<Result<void, GameError>> {
-        const result = await this.action('resolveEvent', { eventId, optionId });
+    async resolve(eventId: string, optionId: string, missionId?: string): Promise<Result<void, GameError>> {
+        const result = await this.action('resolveEvent', {
+            eventId,
+            optionId,
+            ...(missionId ? { missionId } : {}),
+        });
         return result.ok ? ok(undefined) : result;
     }
     async repair(targetDurability: number): Promise<Result<void, GameError>> {

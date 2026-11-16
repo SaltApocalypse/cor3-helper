@@ -56,18 +56,15 @@ export function registerLoadoutHandlers(server: CoreRuntime['server'], deps: Loa
         });
     });
     server.register('loadout.equipHardware', loadoutModuleSchema, async ({ moduleConfigId }) => {
-        const result = await game.loadoutAdapter.equipHardware(moduleConfigId);
-        if (result.ok) game.loadout.invalidate();
+        const result = await game.loadout.equipHardware(moduleConfigId);
         return result.ok ? ok(undefined) : { ok: false, error: { code: result.error.code, message: result.error.message } };
     });
     server.register('loadout.equipSoftware', loadoutModuleSchema, async ({ moduleConfigId }) => {
-        const result = await game.loadoutAdapter.equipSoftware(moduleConfigId);
-        if (result.ok) game.loadout.invalidate();
+        const result = await game.loadout.equipSoftware(moduleConfigId);
         return result.ok ? ok(undefined) : { ok: false, error: { code: result.error.code, message: result.error.message } };
     });
     server.register('loadout.unequipSoftware', loadoutModuleSchema, async ({ moduleConfigId }) => {
-        const result = await game.loadoutAdapter.unequipSoftware(moduleConfigId);
-        if (result.ok) game.loadout.invalidate();
+        const result = await game.loadout.unequipSoftware(moduleConfigId);
         return result.ok ? ok(undefined) : { ok: false, error: { code: result.error.code, message: result.error.message } };
     });
 }

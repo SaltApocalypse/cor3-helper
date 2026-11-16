@@ -8,43 +8,50 @@ export function jobLocation(name: string, serverName: string | null): string {
     return serverName ? `${name} @ ${serverName}` : name;
 }
 
+function errorOf(entry: AutoJobQueueFailure) {
+    return entry.error ?? { code: 'JOB_FAILED', message: 'Job failed without error details' };
+}
+
 export function jobFailureView(entry: AutoJobQueueFailure) {
+    const error = errorOf(entry);
     return {
         jobId: entry.job.id,
         name: entry.job.name,
         serverName: entry.job.serverName,
-        code: entry.error.detailCode ?? entry.error.code,
-        message: entry.error.message,
-        ...(entry.error.retryable !== undefined ? { retryable: entry.error.retryable } : {}),
-        ...(entry.error.retryAt !== undefined ? { retryAt: entry.error.retryAt } : {}),
-        ...(entry.error.lockExpiresAt !== undefined ? { lockExpiresAt: entry.error.lockExpiresAt } : {}),
-        ...(entry.error.stage !== undefined ? { stage: entry.error.stage } : {}),
+        code: error.detailCode ?? error.code,
+        message: error.message,
+        ...(error.retryable !== undefined ? { retryable: error.retryable } : {}),
+        ...(error.retryAt !== undefined ? { retryAt: error.retryAt } : {}),
+        ...(error.lockExpiresAt !== undefined ? { lockExpiresAt: error.lockExpiresAt } : {}),
+        ...(error.stage !== undefined ? { stage: error.stage } : {}),
     };
 }
 
 export function outcomeInputOf(entry: AutoJobQueueFailure) {
+    const error = errorOf(entry);
     return {
-        code: entry.error.code,
-        ...(entry.error.detailCode !== undefined ? { detailCode: entry.error.detailCode } : {}),
-        message: entry.error.message,
-        ...(entry.error.stage !== undefined ? { stage: entry.error.stage } : {}),
-        ...(entry.error.retryable !== undefined ? { retryable: entry.error.retryable } : {}),
-        ...(entry.error.retryAt !== undefined ? { retryAt: entry.error.retryAt } : {}),
-        ...(entry.error.lockExpiresAt !== undefined ? { lockExpiresAt: entry.error.lockExpiresAt } : {}),
+        code: error.code,
+        ...(error.detailCode !== undefined ? { detailCode: error.detailCode } : {}),
+        message: error.message,
+        ...(error.stage !== undefined ? { stage: error.stage } : {}),
+        ...(error.retryable !== undefined ? { retryable: error.retryable } : {}),
+        ...(error.retryAt !== undefined ? { retryAt: error.retryAt } : {}),
+        ...(error.lockExpiresAt !== undefined ? { lockExpiresAt: error.lockExpiresAt } : {}),
     };
 }
 
 export function failureOf(entry: AutoJobQueueFailure): AutoFinishFailure {
+    const error = errorOf(entry);
     return {
         jobId: entry.job.id,
         name: entry.job.name,
         serverName: entry.job.serverName,
-        code: entry.error.detailCode ?? entry.error.code,
-        message: entry.error.message,
-        ...(entry.error.retryable !== undefined ? { retryable: entry.error.retryable } : {}),
-        ...(entry.error.retryAt !== undefined ? { retryAt: entry.error.retryAt } : {}),
-        ...(entry.error.lockExpiresAt !== undefined ? { lockExpiresAt: entry.error.lockExpiresAt } : {}),
-        ...(entry.error.stage !== undefined ? { stage: entry.error.stage } : {}),
+        code: error.detailCode ?? error.code,
+        message: error.message,
+        ...(error.retryable !== undefined ? { retryable: error.retryable } : {}),
+        ...(error.retryAt !== undefined ? { retryAt: error.retryAt } : {}),
+        ...(error.lockExpiresAt !== undefined ? { lockExpiresAt: error.lockExpiresAt } : {}),
+        ...(error.stage !== undefined ? { stage: error.stage } : {}),
     };
 }
 

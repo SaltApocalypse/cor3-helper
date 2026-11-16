@@ -46,6 +46,32 @@ describe('MarketSyncService', () => {
         }
     });
 
+    it('retries a transient market-not-reachable response', async () => {
+        const clock = new FakeClock(0);
+        const executor = new RouteExecutor({
+            setEndpoint: async () => ({ ok: true, value: undefined }),
+        }, {
+            ensureAccess: async () => ({ ok: true, value: undefined }),
+        }, new InMemoryEndpointLeaseService(clock), clock);
+        let calls = 0;
+        const service = new MarketSyncService(
+            { get: async () => ({ ok: true, value: snapshot }) },
+            executor,
+            {
+                fetchMarket: async () => {
+                    calls += 1;
+                    if (calls === 1) return { ok: false, error: { code: 'GAME_MARKET_FAILED', message: 'market-not-reachable' } };
+                    return { ok: true, value: { options: {}, lots: [], jobs: [] } };
+                },
+            },
+            clock,
+            { retryDelayMs: 0, sleep: async () => undefined },
+        );
+        const result = await service.sync({ marketId: 'm1', serverId: market, owner: 'market', reason: 'test' });
+        expect(result.ok).toBe(true);
+        expect(calls).toBe(2);
+    });
+
     it('does not fetch market data when routing fails', async () => {
         const clock = new FakeClock(0);
         let fetched = false;

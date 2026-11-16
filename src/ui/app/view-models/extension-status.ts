@@ -16,6 +16,7 @@ export function automationTone(automation: OverviewAutomation, now: number): Sta
         && automation.lastAt !== null
         && now - automation.lastAt < RECENT_ERROR_MS;
     if (recentError) return 'error';
+    if (automation.waiting) return 'warn';
     if (automation.running) return 'ok';
     if (automation.enabled) return automation.lastError ? 'warn' : 'ok';
     return automation.lastError ? 'warn' : 'muted';

@@ -32,6 +32,7 @@ function makeCoordinator(runOnce: ReturnType<typeof vi.fn>) {
 describe('AutoDroneCoordinator startup status', () => {
     it('classifies socket and startup failures as transient', () => {
         expect(isTransientDroneFailure('GAME_NO_SOCKET', 'No game WebSocket is available')).toBe(true);
+        expect(isTransientDroneFailure('NO_COR3_TAB', 'No cor3.gg tab found')).toBe(true);
         expect(isTransientDroneFailure('GAME_TIMEOUT', 'Timed out waiting for drone view')).toBe(true);
         expect(isTransientDroneFailure('DRONE_FAILED', 'Drone is destroyed')).toBe(false);
     });

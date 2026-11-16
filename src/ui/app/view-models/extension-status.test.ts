@@ -107,6 +107,7 @@ describe('automationTone', () => {
         expect(automationTone(automation({ enabled: false }), NOW)).toBe('muted');
         expect(automationTone(automation({ lastError: 'ROUTE_FAILED', lastAt: NOW - 1_000 }), NOW)).toBe('error');
         expect(automationTone(automation({ lastError: 'ROUTE_FAILED', lastAt: NOW - 11 * 60_000 }), NOW)).toBe('warn');
+        expect(automationTone(automation({ waiting: true }), NOW)).toBe('warn');
     });
 });
 

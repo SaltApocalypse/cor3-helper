@@ -1,11 +1,11 @@
 {
     "name": "cor3-helper",
-    "version": "2.0.2",
+    "version": "2.0.3",
     "private": true,
     "description": "COR3 Helper 2.0 — Chrome extension for cor3.gg",
     "cor3Fork": {
         "releaseLabel": "salta",
-        "build": 251
+        "build": 263
     },
     "engines": {
         "node": ">=24"

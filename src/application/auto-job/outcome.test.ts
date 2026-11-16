@@ -7,6 +7,8 @@ describe('classifyJobFailure', () => {
         expect(classifyJobFailure({ code: 'DECRYPT_POWER_INSUFFICIENT', message: 'Insufficient decrypt power (12)' }).status).toBe('skipped');
         expect(classifyJobFailure({ code: 'TYPE_DISABLED', message: 'Job type disabled' }).status).toBe('skipped');
         expect(classifyJobFailure({ code: 'NO_SERVER', message: 'No target server' }).status).toBe('skipped');
+        expect(classifyJobFailure({ code: 'LOADOUT_NO_PLAN', message: 'NO_SOFTWARE' }).status).toBe('skipped');
+        expect(classifyJobFailure({ code: 'JOB_FAILED', detailCode: 'LOADOUT_NO_PLAN', message: 'NO_SOFTWARE' }).status).toBe('skipped');
     });
 
     it('retries conditions-not-met and server-state failures', () => {

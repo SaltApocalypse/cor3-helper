@@ -356,7 +356,7 @@ export const ZH_MESSAGES: Readonly<Record<string, string>> = {
     'file types': '文件类型',
     'server types': '服务器类型',
     'Apply weakest (min power)': '应用最弱（最低功率）',
-    'Apply optimized (max power)': '应用优化（最高功率）',
+    'Apply optimized (keep current if sufficient)': '应用优化（当前够用则保留）',
     'Hardwares': '硬件',
     '{count} owned': '已拥有 {count}',
     'No hardware equipped': '未装备硬件',

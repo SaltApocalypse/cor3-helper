@@ -41,9 +41,20 @@ const MERC_MARKET_LABEL: Record<string, string> = {
     'usol-elite': 'USOL Elite',
 };
 
-const DECISION_OPTIONS = [
+const MERC_DECISION_OPTIONS = [
     { value: 'off', label: 'Off (let the system decide)' },
     { value: 'veterans', label: 'Veterans first (highest risk)' },
+    { value: 'loot', label: 'Highest loot first' },
+    { value: 'risk', label: 'Lowest risk first' },
+] as const;
+
+/**
+ * Drone events do not carry mercenary/veteran data, so "veterans first" can
+ * only fall back to the highest-risk option. Keep it out of the drone dropdown
+ * instead of offering a choice that has no drone-specific meaning.
+ */
+const DRONE_DECISION_OPTIONS = [
+    { value: 'off', label: 'Off (let the system decide)' },
     { value: 'loot', label: 'Highest loot first' },
     { value: 'risk', label: 'Lowest risk first' },
 ] as const;
@@ -494,7 +505,7 @@ export function AutoExpeditionCard({
                                 value={settings?.mercDecisionPolicy ?? 'off'}
                                 onInput={(event) => void updateSettings({ mercDecisionPolicy: (event.currentTarget as HTMLSelectElement).value as SettingsV1['mercDecisionPolicy'] })}
                             >
-                                {DECISION_OPTIONS.map((option) => <option key={option.value} value={option.value}>{tr(option.label)}</option>)}
+                                {MERC_DECISION_OPTIONS.map((option) => <option key={option.value} value={option.value}>{tr(option.label)}</option>)}
                             </select>
                         </label>
                     </div>
@@ -666,10 +677,10 @@ export function AutoExpeditionCard({
                         <label class="v2-field">
                             <span>{tr('In-mission decisions')}</span>
                             <select
-                                value={settings?.droneDecisionPolicy ?? 'off'}
+                                value={settings?.droneDecisionPolicy === 'veterans' ? 'loot' : settings?.droneDecisionPolicy ?? 'off'}
                                 onInput={(event) => void updateSettings({ droneDecisionPolicy: (event.currentTarget as HTMLSelectElement).value as SettingsV1['droneDecisionPolicy'] })}
                             >
-                                {DECISION_OPTIONS.map((option) => <option key={option.value} value={option.value}>{tr(option.label)}</option>)}
+                                {DRONE_DECISION_OPTIONS.map((option) => <option key={option.value} value={option.value}>{tr(option.label)}</option>)}
                             </select>
                         </label>
                     </div>

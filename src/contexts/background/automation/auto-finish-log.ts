@@ -42,14 +42,14 @@ export function logAutoFinishJobs(deps: FinishLogDeps): void {
             deps.runLogs.add(deps.runId, 'info', 'auto-jobs', `Skipped ${jobLocation(entry.job.name, entry.job.serverName)}: ${outcomeReasonText(outcome)} (${outcome.reason})`, {
                 jobId: entry.job.id,
                 reason: outcome.reason,
-                message: entry.error.message,
+                message: entry.error?.message ?? 'Job failed',
             });
         }
     }
     for (const entry of deps.effectiveFailed) {
         const outcome = deps.outcomes.get(entry.job.id);
         if (outcome?.status === 'expired') {
-            deps.runLogs.add(deps.runId, 'info', 'auto-jobs', `Expired ${jobLocation(entry.job.name, entry.job.serverName)}: ${entry.error.message}`, {
+            deps.runLogs.add(deps.runId, 'info', 'auto-jobs', `Expired ${jobLocation(entry.job.name, entry.job.serverName)}: ${entry.error?.message ?? 'Job failed'}`, {
                 jobId: entry.job.id,
                 reason: outcome.reason,
             });

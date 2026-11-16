@@ -17,7 +17,7 @@ This branch (`v2`) contains the **2.0 release line**. It is not the stable v1 ex
 - Branch: `v2`
 - Architecture: typed, layered 2.0 rewrite (domain / application / infrastructure / contexts)
 - Build output: `dist/` (Manifest V3)
-- Verification: typecheck, lint, Vitest (89 files / 406 tests) and build pass at `2.0.2-salta.251`; CI runs the same checks on pull requests
+- Verification: typecheck, lint, Vitest (92 files / 432 tests) and build pass at `2.0.3-salta.263`; CI runs the same checks on pull requests
 - Known gaps: the static catalog artifact still needs a real module dump, and background/content/portal plus UI rendering tests remain incomplete; see [feature inventory](./docs/architecture/cor3-helper-2.0-feature-inventory-and-tech-debt.md)
 
 ## Requirements

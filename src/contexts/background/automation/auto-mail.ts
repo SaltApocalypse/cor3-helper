@@ -12,6 +12,12 @@ export interface AutoMailLast {
     readonly error: string | null;
 }
 
+const TRANSIENT_MAIL_FAILURE = /no cor3\.gg tab|no game websocket|socket|timed? ?out|timeout|connection|network|bridge|mail[_\s-]?(?:busy|timeout)|not[-\s]?reachable|temporary|try again/i;
+
+export function isTransientMailFailure(code: string, message: string): boolean {
+    return code === 'MAIL_TIMEOUT' || code === 'MAIL_BUSY' || TRANSIENT_MAIL_FAILURE.test(`${code} ${message}`);
+}
+
 export interface AutoMailDeps {
     readonly settings: SettingsPort;
     readonly scheduler: SchedulerPort;
@@ -124,6 +130,9 @@ export class AutoMailCoordinator {
                     code: result.error.code,
                     message: result.error.message,
                 });
+                if (isTransientMailFailure(result.error.code, result.error.message)) {
+                    this.deps.scheduler.create(AUTO_MAIL_RETRY_ALARM, { when: this.deps.clock.now() + 5 * 60_000 });
+                }
             }
             await this.deps.state.set('auto-mail', {
                 phase: result.ok ? 'done' : 'blocked',

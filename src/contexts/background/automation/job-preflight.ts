@@ -1,5 +1,6 @@
-import { NetworkGraph } from '../../../domains/network/graph.js';
+import { NetworkGraph, type NetworkError } from '../../../domains/network/graph.js';
 import type { NetworkSnapshot } from '../../../domains/network/model.js';
+import type { RoutePlan } from '../../../domains/network/model.js';
 import { decryptFileType, type JobOffer } from '../../../domains/jobs/model.js';
 import type { GameError } from '../../../application/game/ports.js';
 import type { LoadoutService } from '../../../application/loadout/service.js';
@@ -23,13 +24,36 @@ function checkJobTarget(snapshot: NetworkSnapshot, job: JobOffer): Result<void, 
     if (!targetId) {
         return err({ code: 'SERVER_LOCKED', message: `Target server ${job.serverName ?? job.id} is not on the network map` });
     }
+    const target = asServerId(targetId);
+    const start = snapshot.endpointId ?? snapshot.homeId;
     const graph = new NetworkGraph(snapshot);
-    const route = graph.findRoute(asServerId(targetId));
-    return route.ok ? ok(undefined) : err({ code: route.error.code, message: route.error.message });
+    if (start === target) {
+        // findRouteFrom still validates target maintenance even for a self-route.
+        const self = graph.findRouteFrom(start, target);
+        return self.ok ? ok(undefined) : err(self.error);
+    }
+    // Execution tries the current endpoint first. Checking only the home path
+    // here would skip jobs whose home route is blocked by maintenance even
+    // though the player can reach the target directly.
+    const fromCurrent = start === snapshot.homeId ? null : graph.findRouteFrom(start, target);
+    if (fromCurrent?.ok) return ok(undefined);
+    const fromHome = graph.findRoute(target);
+    if (fromHome.ok) return ok(undefined);
+    const errors: NetworkError[] = [];
+    if (fromCurrent && !fromCurrent.ok) errors.push(fromCurrent.error);
+    errors.push(fromHome.error);
+    return err(errors.find((entry) => isMaintenancePreflightError(entry.code)) ?? fromHome.error);
 }
 
 function isMaintenancePreflightError(code: string): boolean {
     return code === 'TARGET_IN_MAINTENANCE' || code === 'MAINTENANCE_BLOCKED';
+}
+
+function isDefinitiveCapabilityGap(reason: string | null): boolean {
+    // Hardware/power plans can change after the job is taken and a loadout is
+    // applied. Only missing software or wholly missing hardware is a definitive
+    // reason to refuse the job before `take`.
+    return reason === 'NO_SOFTWARE' || reason === 'NO_HARDWARE';
 }
 
 function jobRequiresDecrypt(job: JobOffer): boolean {
@@ -57,7 +81,8 @@ function lockMessage(expiresAt: number, now: number): string {
  * - an active minigame lock means neither hacking nor decryption can run
  *
  * A stale/unknown map or an unavailable loadout snapshot deliberately does not
- * block the job. Only a definitive "no owned software" result does.
+ * block the job. Only a definitive missing software/hardware result does;
+ * hardware/power transitions are handled after the job is taken.
  */
 export class JobPreflight {
     private lastMapRefreshAt = 0;
@@ -86,17 +111,33 @@ export class JobPreflight {
             if (!capability.ok) {
                 this.deps.logger.warn('auto-job', `Decrypt capability check unavailable for ${job.name}`, { message: capability.error.message });
             } else if (!capability.value.feasible) {
-                missing.push(`DECRYPT ${fileType ?? 'software'}`);
+                if (isDefinitiveCapabilityGap(capability.value.reason)) {
+                    missing.push(`DECRYPT ${fileType ?? 'software'}`);
+                } else {
+                    this.deps.logger.debug('auto-job', 'Decrypt loadout will be attempted after take', {
+                        jobId: job.id,
+                        reason: capability.value.reason,
+                    });
+                }
             }
         }
 
         const targetId = snapshot ? targetServerId(snapshot, job) : null;
         if (snapshot && targetId) {
-            const routes = new NetworkGraph(snapshot).findRoutes(asServerId(targetId), 3);
-            if (routes.ok) {
+            const graph = new NetworkGraph(snapshot);
+            const target = asServerId(targetId);
+            const start = snapshot.endpointId ?? snapshot.homeId;
+            const routeSets: RoutePlan[] = [];
+            const fromCurrent = graph.findRoutesFrom(start, target, 3);
+            if (fromCurrent.ok) routeSets.push(...fromCurrent.value);
+            if (start !== snapshot.homeId) {
+                const fromHome = graph.findRoutes(target, 3);
+                if (fromHome.ok) routeSets.push(...fromHome.value);
+            }
+            if (routeSets.length > 0) {
                 const missingByRoute: string[] = [];
                 let hasCapableRoute = false;
-                for (const route of routes.value) {
+                for (const route of routeSets) {
                     const routeMissing: string[] = [];
                     let routeNeedsMinigame = false;
                     for (const node of route.nodes) {
@@ -108,7 +149,13 @@ export class JobPreflight {
                         if (!capability.ok) {
                             this.deps.logger.warn('auto-job', `Hack capability check unavailable for ${server.name}`, { message: capability.error.message });
                         } else if (!capability.value.feasible) {
-                            routeMissing.push(`HACK ${server.typeName}`);
+                            if (isDefinitiveCapabilityGap(capability.value.reason)) {
+                                routeMissing.push(`HACK ${server.typeName}`);
+                            } else {
+                                this.deps.logger.debug('auto-job', `Hack loadout will be attempted after take for ${server.name}`, {
+                                    reason: capability.value.reason,
+                                });
+                            }
                         }
                     }
                     if (routeMissing.length === 0) {

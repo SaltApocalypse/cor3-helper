@@ -97,6 +97,7 @@ export class JobRouting {
         if (!route.ok) {
             return { ok: false as const, error: { code: route.error?.code ?? 'ROUTE_FAILED', message: route.error?.message ?? 'No route to job server' } };
         }
+        if (route.accessEnsured) return ok(undefined);
         const access = await this.deps.serverAccess.ensureAccess(targetId, {
             ...(target?.typeName ? { serverTypeName: target.typeName } : {}),
         });

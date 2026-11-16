@@ -52,21 +52,17 @@ export function decryptFileType(job: JobOffer, fileName?: string): string | null
                 const normalized = normalizeFileType(extension);
                 if (normalized) return normalized;
             }
+            // Prefer the file named by the job condition over the generic
+            // downloaded-file fallback. A .bin downloaded for an upload job
+            // must not make a DecryptDownloadedFile job look like .bin.
+            const fromConditionName = extensionOf(typeof file.name === 'string' ? file.name : undefined);
+            if (fromConditionName) return fromConditionName;
         }
     }
     const fromJobFile = extensionOf(job.fileInfo?.name);
     if (fromJobFile) return fromJobFile;
     const fromDownload = extensionOf(fileName);
     if (fromDownload) return fromDownload;
-    for (const condition of job.conditions ?? []) {
-        const type = condition.type;
-        if (type !== undefined && type !== 'DecryptFile' && type !== 'DecryptDownloadedFile') continue;
-        for (const file of condition.details?.files ?? []) {
-            const name = typeof file.name === 'string' ? file.name : undefined;
-            const fromCondition = extensionOf(name);
-            if (fromCondition) return fromCondition;
-        }
-    }
     return null;
 }
 

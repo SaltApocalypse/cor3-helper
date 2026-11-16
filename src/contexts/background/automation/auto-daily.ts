@@ -21,9 +21,15 @@ export interface AutoDailyLast {
  * "Already claimed" is the normal end state after a successful run. It is not
  * an error, even though the run itself did not solve a puzzle.
  */
+export function isAutoDailyLoading(last: AutoDailyLast | null): boolean {
+    if (!last) return false;
+    return /no cor3\.gg tab|no game websocket|state unavailable|timed? ?out|timeout|not ready/i.test(last.message);
+}
+
 export function isAutoDailyWaiting(last: AutoDailyLast | null): boolean {
     if (!last) return false;
-    return last.puzzle === 'claimed' || /already (claimed|completed)|waiting for next reset|task.*completed/i.test(last.message);
+    return last.puzzle === 'claimed'
+        || /already (claimed|completed)|waiting for next reset|task.*completed/i.test(last.message);
 }
 
 export interface AutoDailyDeps {
@@ -194,7 +200,21 @@ export class AutoDailyCoordinator {
                 nextTaskTime: stateBefore?.nextTaskTime ?? null,
                 ...(before.ok ? {} : { code: before.error.code, message: before.error.message }),
             });
-            if (stateBefore?.hasClaimedToday) {
+            if (!stateBefore) {
+                // Do not attempt the hack without knowing whether today's task
+                // is already claimed. The next schedule is a short retry.
+                this.last = {
+                    at: this.deps.clock.now(),
+                    solved: false,
+                    puzzle: 'unknown',
+                    message: 'Daily state unavailable; retrying',
+                };
+                await this.deps.state.set('auto-daily', { phase: 'waiting', lastError: null, payload: { last: this.last } });
+                this.deps.logger.info('daily-hack', 'Daily state unavailable; retry scheduled');
+                this.deps.events.publish('daily.auto.done', null);
+                return;
+            }
+            if (stateBefore.hasClaimedToday) {
                 this.last = { at: this.deps.clock.now(), solved: false, puzzle: 'claimed', message: 'Already claimed today; waiting for next reset' };
                 await this.deps.cache.persist(stateBefore);
                 await this.deps.state.set('auto-daily', { phase: 'waiting', lastError: null, payload: { last: this.last } });

@@ -90,7 +90,11 @@ export function mapDroneEvent(raw: unknown): DroneMissionEvent | null {
     if (event && event.isResolvable === false) return null;
     if (event && event.isResolved === true) return null;
     return {
-        missionId: parsed.data.missionId ?? '',
+        missionId: parsed.data.missionId
+            ?? event?.missionId
+            ?? parsed.data.mission?.missionId
+            ?? parsed.data.mission?.id
+            ?? '',
         eventId: event?.eventId ?? parsed.data.eventId ?? '',
         type: event?.type ?? parsed.data.type ?? 'EVENT',
         options: options.map((option) => ({

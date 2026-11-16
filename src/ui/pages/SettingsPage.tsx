@@ -323,7 +323,11 @@ export function SettingsPage({
                         {updateChecking ? t(language, 'settings.about.checking') : t(language, 'settings.about.check')}
                     </button>
                     {updateError ? (
-                        <span class="v2-text-error" title={updateError}>{t(language, 'settings.about.checkFailed')}</span>
+                        <span class="v2-text-error" title={updateError}>
+                            {t(language, 'settings.about.checkFailed')}
+                            {' · '}
+                            <a href={FORK_RELEASES_URL} target="_blank" rel="noreferrer">{t(language, 'settings.about.checkManually')}</a>
+                        </span>
                     ) : updateInfo ? (
                         updateInfo.updateAvailable ? (
                             <span class="v2-text-warn">
@@ -343,7 +347,7 @@ export function SettingsPage({
                 <p class="v2-muted">{t(language, 'settings.about.upstream')}</p>
                 <div class="v2-about-links">
                     <a href={FORK_REPO_URL} target="_blank" rel="noreferrer">Fork</a>
-                    <a href={FORK_RELEASES_URL} target="_blank" rel="noreferrer">Releases</a>
+                    <a href={FORK_RELEASES_URL} target="_blank" rel="noreferrer">{t(language, 'settings.about.releases')}</a>
                     <a href={FORK_ISSUES_URL} target="_blank" rel="noreferrer">Issues</a>
                     <a href={UPSTREAM_REPO_URL} target="_blank" rel="noreferrer">Upstream</a>
                 </div>

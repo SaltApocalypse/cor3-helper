@@ -4,6 +4,7 @@ import type { MarketView } from '../../../domains/markets/model.js';
 import { mapMarketSnapshotJobs, type SkippedJob } from '../../../application/auto-job/market-mapper.js';
 import { mapMarketView } from '../../../application/markets/map.js';
 import type { NetworkSnapshotService } from '../../../application/network/snapshot-service.js';
+import type { NetworkSnapshot } from '../../../domains/network/model.js';
 import type { MarketSyncService } from '../../../application/network/market-sync.js';
 import type { MarketCacheStore } from '../../../infrastructure/storage/market-cache-store.js';
 import type { AutomationLogger, EventPublisher } from '../../../application/automation/ports.js';
@@ -43,6 +44,23 @@ function defaultHumanDelay(minMs = 450, maxMs = 900): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, minMs + Math.floor(Math.random() * Math.max(1, maxMs - minMs + 1))));
 }
 
+/**
+ * A failed market is retried once in the same queued Auto Jobs operation.
+ * Maintenance and other terminal states are not retried immediately; they are
+ * left to the next scheduled cycle.
+ */
+export function isRetryableMarketFailure(entry: Pick<JobMarketSyncEntry, 'ok' | 'error' | 'errorCode'> | undefined): boolean {
+    if (!entry || entry.ok) return false;
+    const code = entry.errorCode ?? '';
+    const message = entry.error ?? '';
+    if (code === 'TARGET_IN_MAINTENANCE' || code === 'MAINTENANCE_BLOCKED' || /maintenance/i.test(message)) return false;
+    return code === 'MARKET_FETCH_FAILED'
+        || code === 'ROUTE_FAILED'
+        || code === 'SNAPSHOT_FAILED'
+        || code === 'NO_COR3_TAB'
+        || /market-not-reachable|not[-\s]?reachable|timeout|timed out|socket|websocket|busy|processing|rate[\s-]?limit|connection|network|bridge/i.test(`${code} ${message}`);
+}
+
 export class JobMarketSync {
     private readonly now: () => number;
     private readonly humanDelay: (minMs?: number, maxMs?: number) => Promise<void>;
@@ -70,69 +88,127 @@ export class JobMarketSync {
     ): Promise<{ jobs: JobOffer[]; markets: JobMarketSyncEntry[] }> {
         const selected = targets ?? JOB_MARKETS;
         const jobs: JobOffer[] = [];
-        const markets: JobMarketSyncEntry[] = [];
+        const marketEntries = new Map<string, JobMarketSyncEntry>();
         const networkSnapshot = await this.deps.snapshots.get();
+        const failed: JobMarketDefinition[] = [];
+        const publish = (): void => {
+            onMarket?.({ jobs: [...jobs], markets: [...marketEntries.values()] });
+        };
+
         for (const market of selected) {
             if (shouldStop?.()) break;
-            const synced = await this.deps.marketSync.sync({
-                marketId: market.marketId,
-                serverId: asServerId(market.routeServerId),
+            const synced = await this.syncMarketEntry(
+                market,
                 owner,
-                reason: `${reason}:${market.key}`,
-                ...(networkSnapshot.ok ? { snapshot: networkSnapshot.value } : {}),
+                reason,
+                networkSnapshot.ok ? networkSnapshot.value : undefined,
+                'initial',
+            );
+            jobs.push(...synced.jobs);
+            marketEntries.set(market.key, synced.entry);
+            if (!synced.entry.ok) failed.push(market);
+            publish();
+            if (selected.indexOf(market) < selected.length - 1) await this.humanDelay(350, 700);
+        }
+
+        // Retry a failed market once inside the same queued operation. The
+        // initial pass deliberately keeps going when one market is slow, so a
+        // transient timeout does not leave the UI stuck on "fetch failed".
+        const retryable = failed.filter((market) => isRetryableMarketFailure(marketEntries.get(market.key)));
+        if (retryable.length > 0 && !shouldStop?.()) {
+            this.deps.logger.info('auto-jobs', `Retrying ${retryable.length} market(s) after fetch failure`, {
+                markets: retryable.map((market) => market.key),
             });
-            if (!synced.ok) {
-                this.deps.logger.warn('auto-jobs', 'Market refresh failed', {
-                    market: market.key,
-                    label: market.label,
-                    code: synced.error.code,
-                    message: synced.error.message,
-                });
-                markets.push({
+            await this.humanDelay(1_500, 2_500);
+            const refreshed = await this.deps.snapshots.get(true);
+            const retrySnapshot = refreshed.ok ? refreshed.value : undefined;
+            for (const market of retryable) {
+                if (shouldStop?.()) break;
+                const synced = await this.syncMarketEntry(
+                    market,
+                    owner,
+                    `${reason}:retry`,
+                    retrySnapshot,
+                    'retry',
+                );
+                jobs.push(...synced.jobs);
+                marketEntries.set(market.key, synced.entry);
+                publish();
+                if (retryable.indexOf(market) < retryable.length - 1) await this.humanDelay(350, 700);
+            }
+        }
+
+        return { jobs, markets: [...marketEntries.values()] };
+    }
+
+    private async syncMarketEntry(
+        market: JobMarketDefinition,
+        owner: string,
+        reason: string,
+        snapshot: NetworkSnapshot | undefined,
+        phase: 'initial' | 'retry',
+    ): Promise<{ readonly entry: JobMarketSyncEntry; readonly jobs: readonly JobOffer[] }> {
+        const synced = await this.deps.marketSync.sync({
+            marketId: market.marketId,
+            serverId: asServerId(market.routeServerId),
+            owner,
+            reason: `${reason}:${market.key}`,
+            ...(snapshot ? { snapshot } : {}),
+        });
+        if (!synced.ok) {
+            this.deps.logger.warn('auto-jobs', phase === 'retry' ? 'Market retry failed' : 'Market refresh failed', {
+                market: market.key,
+                label: market.label,
+                code: synced.error.code,
+                message: synced.error.message,
+                attempt: phase,
+            });
+            return {
+                entry: {
                     marketKey: market.key,
                     label: market.label,
                     ok: false,
                     skipped: 0,
                     error: synced.error.message,
                     errorCode: synced.error.code,
-                });
-            } else {
-                const mapped = mapMarketSnapshotJobs(synced.value.market, market.marketId, market.key, market.completionServerId ?? market.routeServerId);
-                const view = mapMarketView(synced.value.market);
-                if (view) {
-                    await this.deps.marketCache.set(market.marketId, view);
-                    this.deps.events.publish('market.reputation.updated', { marketId: market.marketId, credits: view.credits, reputation: view.reputation });
-                }
-                jobs.push(...mapped.jobs);
-                this.deps.logger.info('auto-jobs', 'Market refresh complete', {
-                    market: market.key,
-                    label: market.label,
-                    jobs: mapped.jobs.length,
-                    skipped: mapped.skipped,
-                    failed: mapped.failed,
-                    expired: mapped.expired,
-                    resetAt: mapped.resetAt ?? null,
-                    direct: synced.value.direct,
-                    ...(synced.value.directError ? {
-                        directError: `${synced.value.directError.code}: ${synced.value.directError.message}`,
-                    } : {}),
-                    route: synced.value.route.map((node) => node.name).join(' > '),
-                });
-                markets.push({
-                    marketKey: market.key,
-                    label: market.label,
-                    ok: true,
-                    skipped: mapped.skipped,
-                    failed: mapped.failed,
-                    expired: mapped.expired,
-                    skippedJobs: mapped.skippedJobs,
-                    resetAt: mapped.resetAt ?? null,
-                });
-            }
-            onMarket?.({ jobs: [...jobs], markets: [...markets] });
-            if (selected.indexOf(market) < selected.length - 1) await this.humanDelay(350, 700);
+                },
+                jobs: [],
+            };
         }
-        return { jobs, markets };
+        const mapped = mapMarketSnapshotJobs(synced.value.market, market.marketId, market.key, market.completionServerId ?? market.routeServerId);
+        const view = mapMarketView(synced.value.market);
+        if (view) {
+            await this.deps.marketCache.set(market.marketId, view);
+            this.deps.events.publish('market.reputation.updated', { marketId: market.marketId, credits: view.credits, reputation: view.reputation });
+        }
+        this.deps.logger.info('auto-jobs', phase === 'retry' ? 'Market retry complete' : 'Market refresh complete', {
+            market: market.key,
+            label: market.label,
+            jobs: mapped.jobs.length,
+            skipped: mapped.skipped,
+            failed: mapped.failed,
+            expired: mapped.expired,
+            resetAt: mapped.resetAt ?? null,
+            direct: synced.value.direct,
+            ...(synced.value.directError ? {
+                directError: `${synced.value.directError.code}: ${synced.value.directError.message}`,
+            } : {}),
+            route: synced.value.route.map((node) => node.name).join(' > '),
+            attempt: phase,
+        });
+        return {
+            entry: {
+                marketKey: market.key,
+                label: market.label,
+                ok: true,
+                skipped: mapped.skipped,
+                failed: mapped.failed,
+                expired: mapped.expired,
+                skippedJobs: mapped.skippedJobs,
+                resetAt: mapped.resetAt ?? null,
+            },
+            jobs: mapped.jobs,
+        };
     }
 
     async fetchOptionsView(marketId: string): Promise<{ ok: true; value: Omit<MarketView, 'lots' | 'jobs' | 'recentJobs' | 'nextJobsResetAt'> } | { ok: false; error: { code: string; message: string } }> {
