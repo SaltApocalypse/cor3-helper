@@ -16,8 +16,8 @@ export interface WelcomeAppProps {
 type PingState = 'idle' | 'checking' | 'ok' | 'error';
 
 /**
- * Small launcher shown from the browser toolbar. The full workspace lives in
- * the side panel or a detached window so the popup can stay lightweight.
+ * Small launcher shown from the browser toolbar. The full workspace can be
+ * opened in this popup, the side panel, or a detached window.
  */
 export function WelcomeApp({ portal }: WelcomeAppProps) {
     const [ping, setPing] = useState<PingState>('idle');
@@ -62,6 +62,11 @@ export function WelcomeApp({ portal }: WelcomeAppProps) {
             if (response.ok) setSettings(response.value);
         });
     }, [settings, portal]);
+
+    const openInPopup = useCallback(async () => {
+        const opened = await portal.openInPopup();
+        if (!opened) setMessage(t(language, 'welcome.openInPopupFailed'));
+    }, [portal, language]);
 
     const openSidePanel = useCallback(async () => {
         const opened = await portal.openSidePanel();
@@ -121,7 +126,10 @@ export function WelcomeApp({ portal }: WelcomeAppProps) {
                 <p class="v2-muted">{t(language, 'welcome.description')}</p>
                 {message ? <p class="v2-text-warn">{message}</p> : null}
                 <div class="v2-actions">
-                    <button type="button" class="v2-primary" onClick={() => void openSidePanel()}>
+                    <button type="button" class="v2-primary" onClick={() => void openInPopup()}>
+                        {t(language, 'welcome.openInPopup')}
+                    </button>
+                    <button type="button" onClick={() => void openSidePanel()}>
                         {t(language, 'welcome.open')}
                     </button>
                     <button type="button" onClick={() => void openWindow()}>

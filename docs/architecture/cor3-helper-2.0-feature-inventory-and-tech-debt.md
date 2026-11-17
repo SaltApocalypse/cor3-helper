@@ -52,8 +52,8 @@ Reading the numbers:
 | Fork/upstream links | `src/popup/fork-config.js` | **Implemented** | `ui/app/fork-info.ts`; Settings footer Fork/Releases/Issues/Upstream |
 | Footer status text | `#status`, `src/html/popup.html` | **Replaced** | Header chips `OK/OFFLINE`, `AUTH/NEEDS REFRESH`, `ENDPOINT` in `AppShell.tsx` |
 | Last-updated timestamps | `src/popup/timestamps.js`, `.last-updated` DOM ids | **Missing** | No per-section timestamps; only market/snapshot ages |
-| Popup/side-panel layout | `src/popup/panel-controls.js` | **Partial** | v2 toolbar popup is a launcher; full workspace is side-panel-only |
-| Welcome launcher | v1 popup was the full UI | **Implemented (v2-only)** | `WelcomeApp.tsx` |
+| Popup/side-panel layout | `src/popup/panel-controls.js` | **Implemented** | Toolbar popup offers a launcher plus an in-popup full workspace; side panel and detached window remain optional entry points |
+| Welcome launcher | v1 popup was the full UI | **Implemented (v2-only)** | `WelcomeApp.tsx`; "Use in this popup" navigates to `sidepanel.html?mode=popup` |
 | Settings export/import/reset | No v1 equivalent | **Implemented (v2-only)** | `SettingsPage.tsx`; `settings.export/import/reset` in background |
 | Session panel | Scattered in v1 | **Implemented (v2-only)** | Auth/endpoint/snapshot/readiness in `SettingsPage.tsx` |
 | Developer mode toggle | No visible v1 toggle | **Implemented (v2-only)** | Settings; defaults on |

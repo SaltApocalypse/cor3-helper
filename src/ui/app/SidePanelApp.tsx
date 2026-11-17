@@ -39,9 +39,10 @@ import { isAutomationDebugLive } from './view-models/automation-status.js';
 export interface SidePanelAppProps {
     readonly portal: PopupPortal;
     readonly windowMode?: boolean;
+    readonly popupMode?: boolean;
 }
 
-export function SidePanelApp({ portal, windowMode = false }: SidePanelAppProps) {
+export function SidePanelApp({ portal, windowMode = false, popupMode = false }: SidePanelAppProps) {
     const [activePage, setActivePage] = useState<PopupPage>('overview');
     const [now, setNow] = useState(Date.now());
 
@@ -200,6 +201,8 @@ export function SidePanelApp({ portal, windowMode = false }: SidePanelAppProps) 
                 activePage={activePage}
                 developerMode={settings.settings?.developerMode !== false}
                 windowMode={windowMode}
+                popupMode={popupMode}
+                onOpenSidePanel={popupMode ? () => void portal.openSidePanel() : undefined}
                 onOpenWindow={windowMode ? undefined : () => void portal.openWindow()}
                 onPageChange={setActivePage}
             >

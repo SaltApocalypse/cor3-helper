@@ -12,6 +12,8 @@ export interface AppShellProps {
     readonly activePage: PopupPage;
     readonly developerMode: boolean;
     readonly windowMode?: boolean;
+    readonly popupMode?: boolean;
+    readonly onOpenSidePanel?: (() => void) | undefined;
     readonly onOpenWindow?: (() => void) | undefined;
     readonly onPageChange: (page: PopupPage) => void;
     readonly children: ComponentChildren;
@@ -26,6 +28,8 @@ export function AppShell({
     activePage,
     developerMode,
     windowMode = false,
+    popupMode = false,
+    onOpenSidePanel,
     onOpenWindow,
     onPageChange,
     children,
@@ -39,7 +43,7 @@ export function AppShell({
         ...(developerMode ? [['developer', t(language, 'nav.developer')] as const] : []),
     ];
     return (
-        <main class={`v2-shell${windowMode ? ' v2-window-shell' : ''}`}>
+        <main class={`v2-shell${windowMode ? ' v2-window-shell' : ''}${popupMode ? ' v2-popup-shell' : ''}`}>
             <BrandHeader>
                 <span class={`v2-status v2-status-${ping === 'ok' ? 'ok' : ping === 'error' ? 'error' : ''}`} title={t(language, 'status.pingHint')}>
                     {ping === 'ok' ? t(language, 'status.ok') : ping === 'error' ? t(language, 'status.offline') : '…'}
@@ -50,6 +54,17 @@ export function AppShell({
                 <span class={`v2-status ${hasEndpoint ? 'v2-status-ok' : 'v2-status-muted'}`} title={t(language, 'status.endpointHint')}>
                     {hasEndpoint ? t(language, 'status.endpoint') : t(language, 'status.noEndpoint')}
                 </span>
+                {onOpenSidePanel ? (
+                    <button
+                        type="button"
+                        class="v2-header-action"
+                        title={t(language, 'header.openSidePanel')}
+                        aria-label={t(language, 'header.openSidePanel')}
+                        onClick={onOpenSidePanel}
+                    >
+                        ▣
+                    </button>
+                ) : null}
                 {onOpenWindow ? (
                     <button
                         type="button"

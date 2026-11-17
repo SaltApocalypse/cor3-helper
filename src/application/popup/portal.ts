@@ -497,6 +497,8 @@ export interface PopupPortal {
     subscribeEvents(listener: (event: BackgroundEvent) => void): () => void;
     versionInfo(): PopupVersionInfo;
     openSidePanel(): Promise<boolean>;
+    /** Opens the full workspace inside the current browser action popup. */
+    openInPopup(): Promise<boolean>;
     /** Opens the full workspace in a detached Chrome popup window. */
     openWindow(): Promise<boolean>;
     ping(): Promise<BridgeResult<{ readonly version: string; readonly phase: string }>>;

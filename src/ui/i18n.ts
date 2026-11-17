@@ -148,12 +148,15 @@ const EN = {
     'developer.scanning': 'Scanning known IPs...',
 
     'welcome.title': 'Welcome',
-    'welcome.description': 'Manage markets, automation and game tools from the side panel or a separate window.',
+    'welcome.description': 'Manage markets, automation and game tools in this popup, the side panel, or a separate window.',
+    'welcome.openInPopup': 'Use in this popup',
+    'welcome.openInPopupFailed': 'Could not open the workspace in this popup.',
     'welcome.open': 'Open side panel',
     'welcome.opening': 'Opening side panel...',
     'welcome.openWindow': 'Open in window',
     'welcome.openFailed': 'Could not open the side panel from this context.',
     'welcome.openWindowFailed': 'Could not open the window from this context.',
+    'header.openSidePanel': 'Open in the side panel',
     'header.openWindow': 'Open in a separate window',
 
     'helper.title': 'Helper Mode',
@@ -301,12 +304,15 @@ const ZH: Dictionary = {
     'developer.scanning': '正在扫描已知 IP...',
 
     'welcome.title': '欢迎',
-    'welcome.description': '在侧边栏或独立窗口中管理市场、自动化与游戏工具。',
+    'welcome.description': '可在此弹窗、侧边栏或独立窗口中管理市场、自动化与游戏工具。',
+    'welcome.openInPopup': '在此弹窗中使用',
+    'welcome.openInPopupFailed': '无法在此弹窗中打开工作区。',
     'welcome.open': '打开侧边栏',
     'welcome.opening': '正在打开侧边栏...',
     'welcome.openWindow': '在独立窗口中打开',
     'welcome.openFailed': '无法在当前上下文打开侧边栏。',
     'welcome.openWindowFailed': '无法在当前上下文打开独立窗口。',
+    'header.openSidePanel': '在侧边栏中打开',
     'header.openWindow': '在独立窗口中打开',
 
     'helper.title': '辅助模式',

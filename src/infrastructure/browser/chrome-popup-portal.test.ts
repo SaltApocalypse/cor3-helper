@@ -151,6 +151,35 @@ describe('ChromePopupPortal detached window', () => {
     });
 });
 
+describe('ChromePopupPortal in-popup workspace', () => {
+    const baseUrl = 'chrome-extension://test-id/sidepanel.html';
+    const portal = (): ChromePopupPortal => portalWithRequest(vi.fn());
+
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('navigates the current popup document to the full workspace', async () => {
+        const replace = vi.fn();
+        vi.stubGlobal('chrome', {
+            runtime: { getURL: (path: string) => `chrome-extension://test-id/${path}` },
+        });
+        vi.stubGlobal('window', { location: { replace } });
+
+        await expect(portal().openInPopup()).resolves.toBe(true);
+        expect(replace).toHaveBeenCalledWith(`${baseUrl}?mode=popup`);
+    });
+
+    it('reports failure when the browser blocks the navigation', async () => {
+        vi.stubGlobal('chrome', {
+            runtime: { getURL: (path: string) => `chrome-extension://test-id/${path}` },
+        });
+        vi.stubGlobal('window', {
+            location: { replace: vi.fn().mockImplementation(() => { throw new Error('blocked'); }) },
+        });
+
+        await expect(portal().openInPopup()).resolves.toBe(false);
+    });
+});
+
 describe('Auto Jobs snapshot compatibility', () => {
     it('keeps the short error code for failed markets', async () => {
         const request = vi.fn().mockResolvedValue({

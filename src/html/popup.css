@@ -960,3 +960,33 @@ select:not([multiple]) {
 .v2-status-chip.is-error .v2-status-dot { background:var(--v2-error); }
 .v2-status-chip-state { color:var(--v2-muted); font-size:8px; }
 .v2-status-last-error { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding-top:8px; border-top:1px dashed var(--v2-border); font-size:10px; }
+
+/* Full workspace rendered inside the browser action popup */
+body.v2-popup-mode {
+    width: 400px;
+    min-width: 360px;
+    max-width: 400px;
+    max-height: 600px;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+.v2-popup-shell { padding: 12px; }
+.v2-popup-shell .v2-header { gap: 6px; margin-bottom: 10px; }
+.v2-popup-shell .v2-header h1 { font-size: 16px; }
+.v2-popup-shell .v2-brand-logo { width: 24px; height: 24px; }
+.v2-popup-shell .v2-header-meta { gap: 4px; }
+.v2-popup-shell .v2-status { padding: 2px 6px; font-size: 9px; }
+.v2-popup-shell .v2-header-action { padding: 2px 6px; font-size: 11px; }
+.v2-popup-shell .v2-top-nav {
+    flex-wrap: wrap;
+    gap: 3px;
+    margin: 0 -12px 8px;
+    padding: 5px 12px;
+}
+.v2-popup-shell .v2-top-nav button,
+.v2-popup-shell .v2-sub-nav button { padding: 4px 6px; font-size: 9px; }
+.v2-popup-shell .v2-card { padding: 10px; }
+.v2-popup-shell .v2-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.v2-popup-shell .v2-market-summary-grid { grid-template-columns: minmax(0, 1fr); }
+.v2-popup-shell .v2-item-list li { grid-template-columns: 18px minmax(0, 1fr) 60px 34px 60px 70px; font-size: 9px; }
+.v2-popup-shell .v2-modal { max-height: 92vh; }

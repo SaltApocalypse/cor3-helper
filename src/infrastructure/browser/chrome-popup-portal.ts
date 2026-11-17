@@ -730,6 +730,16 @@ export class ChromePopupPortal implements PopupPortal {
         }
     }
 
+    async openInPopup(): Promise<boolean> {
+        try {
+            const url = `${chrome.runtime.getURL('sidepanel.html')}?mode=popup`;
+            window.location.replace(url);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
     async openWindow(): Promise<boolean> {
         try {
             const baseUrl = chrome.runtime.getURL('sidepanel.html');
