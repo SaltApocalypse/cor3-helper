@@ -184,7 +184,10 @@ export class JobPreflight {
             });
         }
 
-        if (needsMinigame && this.deps.jobActions.getMinigameLock) {
+        // Decrypt jobs are taken first and re-check the minigame lock in the
+        // execution service. Blocking them here made the UI look like the job
+        // was skipped without ever being accepted.
+        if (needsMinigame && !jobRequiresDecrypt(job) && this.deps.jobActions.getMinigameLock) {
             const lock = await this.deps.jobActions.getMinigameLock();
             if (lock !== null && lock > this.now()) {
                 return err({ code: 'PREFLIGHT_FAILED', message: lockMessage(lock, this.now()) });

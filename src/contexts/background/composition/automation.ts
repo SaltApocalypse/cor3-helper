@@ -172,7 +172,20 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
                 requiredPower,
                 strategy: 'best',
             });
-            if (result.ok) return ok(undefined);
+            if (result.ok) {
+                logger.info('auto-job', 'Decrypt loadout ready', {
+                    target,
+                    requiredPower,
+                    power: result.value.power,
+                    feasible: result.value.feasible,
+                    switchCost: result.value.switchCost,
+                    software: result.value.software.name,
+                    cpu: result.value.hardware.cpu.name,
+                    gpu: result.value.hardware.gpu.name,
+                    psu: result.value.hardware.psu.name,
+                });
+                return ok(undefined);
+            }
             logger.warn('loadout', `Decrypt loadout failed for ${target} (${result.error.code}): ${result.error.message}`, {
                 target,
                 requiredPower,

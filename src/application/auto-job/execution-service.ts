@@ -392,12 +392,40 @@ export class JobExecutionService implements JobExecutionPort {
                     });
                 }
                 analysis = await this.analyzeFileAfterLoadout(file.id);
+                this.trace?.(
+                    `Decrypt analysis after loadout: canDecrypt=${analysis.ok ? analysis.value.canDecrypt : 'error'}, power=${analysis.ok ? analysis.value.decryptPower : '?'}`,
+                    {
+                        jobId: job.id,
+                        fileId: file.id,
+                        fileName: file.name,
+                        requiredPower: requiredPower ?? null,
+                        canDecrypt: analysis.ok ? analysis.value.canDecrypt : null,
+                        decryptPower: analysis.ok ? analysis.value.decryptPower : null,
+                    },
+                );
             }
         }
         if (analysis.ok && analysis.value.canDecrypt === false) {
-            return err({
-                code: 'DECRYPT_POWER_INSUFFICIENT',
-                message: `Insufficient decrypt power${analysis.value.decryptPower !== null ? ` (${analysis.value.decryptPower})` : ''}`,
+            const zeroPower = analysis.value.decryptPower === null || analysis.value.decryptPower === 0;
+            if (!zeroPower) {
+                this.trace?.('Decrypt power still insufficient after loadout', {
+                    jobId: job.id,
+                    fileId: file.id,
+                    fileName: file.name,
+                    decryptPower: analysis.value.decryptPower,
+                });
+                return err({
+                    code: 'DECRYPT_POWER_INSUFFICIENT',
+                    message: `Insufficient decrypt power${analysis.value.decryptPower !== null ? ` (${analysis.value.decryptPower})` : ''}`,
+                });
+            }
+            // power=0 with canDecrypt=false can mean "already decrypted", a
+            // stale analysis, or no decrypt software. Try opening once and let
+            // the game's already-decrypted/missing-software path decide.
+            this.trace?.('Decrypt power is zero; attempting decryption', {
+                jobId: job.id,
+                fileId: file.id,
+                fileName: file.name,
             });
         }
         if (!this.minigames) {

@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-15 against build `2.0.4-salta.268`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (93 files / 445 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-15 against build `2.0.5-salta.272`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (93 files / 448 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.4-salta.268`)
+## Current completion snapshot (build `2.0.5-salta.272`)
 
 | Metric | Value |
 |---|---|
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 93 files / 445 tests pass
-- `npm run build` — pass, `2.0.4-salta.268`
+- `npm test` — 93 files / 448 tests pass
+- `npm run build` — pass, `2.0.5-salta.272`
 
 ---
 
@@ -736,7 +736,7 @@ Fixes:
 
 - typecheck / lint pass
 - 80 test files / 355 tests
-- build `2.0.4-salta.268`
+- build `2.0.5-salta.272`
 
 ---
 
@@ -1023,3 +1023,41 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 - Release `2.0.4-salta` consolidates the post-2.0.3 fixes: expedition total-cost cap and configured-cost launch guard, decrypt/download suffix isolation, bridge audit guard, Auto Expedition/Auto Finish skip diagnostics, and version headers in automation debug logs.
 - Release identity: `package.json.version = 2.0.4`, `cor3Fork.releaseLabel = salta`, tag `v2.0.4-salta`; the local build counter remains separate.
+
+
+---
+
+# Part 34 — Zero-Power Decrypt Analysis Retry (2.0.4-salta.269)
+
+- `canDecrypt=false` with `decryptPower=0` after a loadout is ambiguous: it can mean already decrypted, stale analysis, or no decrypt software. The job service now attempts `decrypt.file` instead of immediately returning `DECRYPT_POWER_INSUFFICIENT`.
+- The game's `file-already-decrypted` / `cannot-read-sai-file` path still completes the job; missing software/other failures propagate as retryable action errors.
+- Added concise diagnostics: `Decrypt loadout ready` (target, required/plan power, software/hardware) and `Decrypt analysis after loadout` / `Decrypt power still insufficient after loadout`.
+- Added a regression test for the stale/zero-power attempt path.
+
+
+---
+
+# Part 35 — Loadout Latency and Take-First Decrypt Locks (2.0.4-salta.270)
+
+- Loadout `get.options` requests now allow 35 seconds in both the content bridge and the game socket hub (previously 18 s / 15 s), covering slow responses that were being reported as `RUNTIME_UNAVAILABLE`.
+- `LoadoutService` now caches optimized plans for 60 seconds by ability/target/requiredPower/strategy/policy plus the runtime fingerprint. Repeated decrypt jobs with the same target avoid recomputing the exhaustive plan; inventory/catalog changes invalidate the fingerprint.
+- Decrypt jobs are no longer blocked by the minigame-lock preflight. They are taken first and the execution service re-checks the lock after take, so the job is visibly accepted before a lock failure/retry.
+- Added a preflight test for taking a File Decryption job while the minigame is locked.
+
+
+---
+
+# Part 36 — Complete Claimable Jobs Before Locks/Budgets (2.0.4-salta.271)
+
+- Auto Finish now treats `alreadyTaken && canComplete` jobs as claim-only. They bypass retry-exhausted budgets, minigame locks and the completed-job cache, because only `job.complete` remains; no minigame needs to run.
+- This prevents a decrypted/claimable job from being stranded when a stale lock or retry budget still applies. `JobExecutionService` already returns to `complete()` before take/preflight for this state; the selection layer now lets those jobs reach it.
+- Added a regression test for completing a claimable taken job without taking it again.
+- Carried the loadout latency work: 35 s `get.options` timeouts, 60 s optimized-plan cache, and take-first handling for decrypt jobs while the minigame is locked.
+
+
+---
+
+# Part 37 — Release 2.0.5-salta
+
+- Release `2.0.5-salta` consolidates the post-2.0.4 loadout and completion fixes: 35 s loadout request window, 60 s optimized-plan cache, take-first decrypt jobs during minigame locks, zero-power decrypt attempts, claim-only completion bypassing stale locks/retry budgets, and expedition/download/bridge hardening.
+- Release identity: `package.json.version = 2.0.5`, `cor3Fork.releaseLabel = salta`, tag `v2.0.5-salta`; the local build counter remains separate.

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "COR3 Helper 2.0",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "COR3 Helper 2.0 (Salta fork).",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnPdVGAehExmT/UEBwLfE5Gzyx+q/kKSBaEyx65rZLXeww3SPOd+JtvXIm6L6JTtsZRKfSJY/Q63V64NtYH7k00qp5mt53MJkwnby+PfuWVAOtmB5q6Cqbp1fZdYsJCvFGN9lzd0Pian1MpFdy21zxpZpUtPAtg9HzWA5yseM7i7QXUovLUkoIQvTrVC27mfBY8Djb0C7LAOzoP/vQX/jXWA9A/BZkobhKl0HfHt/T2DaTcaR7aV1i+qAo4eNTtobrZNpPZr+niPAPYG0wDT51fHXXMFKasQIdWFSY3q1TlLJ7gnt5ffn2TEvWUXtDxPwegtvAVfheu+swq6vLLt31QIDAQAB",
   "permissions": [

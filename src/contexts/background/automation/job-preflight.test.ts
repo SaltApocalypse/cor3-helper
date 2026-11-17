@@ -68,6 +68,7 @@ function job(overrides: Partial<JobOffer> = {}): JobOffer {
 function preflight(
     snap: NetworkSnapshot,
     canSatisfy: JobPreflightDeps['loadout']['canSatisfy'],
+    minigameLock: number | null = null,
 ): JobPreflight {
     const logger = {
         debug: () => undefined,
@@ -78,7 +79,7 @@ function preflight(
     return new JobPreflight({
         snapshots: { get: async () => ok(snap) },
         loadout: { canSatisfy },
-        jobActions: { getMinigameLock: async () => null },
+        jobActions: { getMinigameLock: async () => minigameLock },
         logger,
         now: () => 1,
     });
@@ -132,6 +133,22 @@ describe('JobPreflight', () => {
                 serverId: null,
                 serverName: null,
             }));
+        expect(result.ok).toBe(true);
+    });
+
+    it('lets a decrypt job be taken while the minigame is locked', async () => {
+        const snap = snapshot([server(home, 'Home', { access: true })], []);
+        const result = await preflight(
+            snap,
+            async () => ok({ feasible: true, reason: null }),
+            2_000,
+        ).preflight(job({
+            id: 'decrypt',
+            name: 'File Decryption',
+            type: 'File Decryption',
+            serverId: null,
+            serverName: null,
+        }));
         expect(result.ok).toBe(true);
     });
 

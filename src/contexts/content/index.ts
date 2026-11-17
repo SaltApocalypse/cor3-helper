@@ -374,7 +374,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
         return true;
     }
     if (type === 'V2_LOADOUT_GET') {
-        void game.request('game.getLoadout', {}, z.unknown(), 18000).then((result) => sendResponse(result));
+        void game.request('game.getLoadout', {}, z.unknown(), 35_000).then((result) => sendResponse(result));
         return true;
     }
     if (type === 'V2_EQUIP_HARDWARE' || type === 'V2_EQUIP_SOFTWARE' || type === 'V2_UNEQUIP_SOFTWARE') {

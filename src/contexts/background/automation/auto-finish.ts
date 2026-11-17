@@ -132,6 +132,10 @@ export class AutoFinishCoordinator {
             const preRunnable = prefetched.jobs.filter((job) => {
                 if (job.serverId === null && !isServerlessJob(job.type)) return false;
                 if (!preAllowed.has(job.type)) return false;
+                // A taken job that is already claimable only needs `job.complete`;
+                // do not let a minigame lock or a stale retry/completion cache
+                // leave it unclaimed.
+                if (job.alreadyTaken && job.canComplete) return true;
                 if (this.deps.locks.isRetryExhausted(job.id)) return false;
                 if (this.deps.locks.isLocked(job.id)) return false;
                 const resetAt = preResets.get(job.marketKey) ?? null;
@@ -212,6 +216,10 @@ export class AutoFinishCoordinator {
             const runnable = synced.jobs.filter((job) => {
                 if (job.serverId === null && !isServerlessJob(job.type)) return false;
                 if (!allowedTypes.has(job.type)) return false;
+                // Claim-only jobs bypass locks and retry/completion budgets:
+                // the decryption/minigame is already finished, only completion
+                // remains, so a stale lock must not strand them as claimable.
+                if (job.alreadyTaken && job.canComplete) return true;
                 if (this.deps.locks.isRetryExhausted(job.id)) return false;
                 if (this.deps.locks.isLocked(job.id)) return false;
                 const resetAt = resetByMarket.get(job.marketKey) ?? null;

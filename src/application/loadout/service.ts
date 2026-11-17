@@ -1,5 +1,5 @@
 import type { LoadoutPlan, HardwareSlot } from '../../domains/loadout/model.js';
-import { optimizeLoadout } from '../../domains/loadout/optimizer.js';
+import { optimizeLoadout, type LoadoutOptimizationResult } from '../../domains/loadout/optimizer.js';
 import { MaxPowerPsuPolicy, MinPowerPsuPolicy } from '../../domains/loadout/psu-policy.js';
 import type { AbilityType } from '../../domains/loadout/model.js';
 import { err, ok, type Result } from '../../kernel/result.js';
@@ -45,6 +45,8 @@ const VERIFY_ATTEMPTS = 4;
 const VERIFY_GAP_MS = 300;
 const CAPABILITY_TTL_MS = 5_000;
 const MAX_CAPABILITY_ENTRIES = 64;
+const PLAN_TTL_MS = 60_000;
+const MAX_PLAN_ENTRIES = 32;
 
 export interface LoadoutServiceOptions {
     readonly commandGapMs?: number;
@@ -139,6 +141,7 @@ function hardwareOrder(
 
 export class LoadoutService {
     private readonly capabilityCache = new Map<string, { readonly at: number; readonly fingerprint: string; readonly value: LoadoutCapability }>();
+    private readonly planCache = new Map<string, { readonly at: number; readonly fingerprint: string; readonly value: LoadoutOptimizationResult }>();
     private capabilityRuntime: { readonly at: number; readonly value: LoadoutRuntime } | null = null;
     private mutationQueue: Promise<unknown> = Promise.resolve();
     private mutationVersion = 0;
@@ -165,6 +168,18 @@ export class LoadoutService {
         const next = this.mutationQueue.then(run, run);
         this.mutationQueue = next.then(() => undefined, () => undefined);
         return next;
+    }
+
+    private prunePlanCache(): void {
+        const now = Date.now();
+        for (const [key, entry] of this.planCache) {
+            if (now - entry.at >= PLAN_TTL_MS) this.planCache.delete(key);
+        }
+        while (this.planCache.size > MAX_PLAN_ENTRIES) {
+            const oldest = this.planCache.keys().next().value;
+            if (oldest === undefined) break;
+            this.planCache.delete(oldest);
+        }
     }
 
     private pruneCapabilityCache(): void {
@@ -277,16 +292,34 @@ export class LoadoutService {
         }
         const strategy = request.strategy ?? 'best';
         const policy = policyFor(request);
-        const optimized = optimizeLoadout({
-            catalog: runtime.value.catalog,
-            inventory: runtime.value.inventory,
-            ability: request.ability,
-            target: request.target,
-            requiredPower: request.requiredPower,
-            ...(request.fallbackToAnyAbility ? { fallbackToAnyAbility: true } : {}),
+        const fingerprint = runtimeFingerprint(runtime.value);
+        const cacheKey = [
+            request.ability,
+            request.target.toLowerCase(),
+            request.requiredPower,
+            request.fallbackToAnyAbility === true ? 'fallback' : 'exact',
             strategy,
-            policy,
-        });
+            policy.id,
+            policy.version,
+        ].join('|');
+        const cached = this.planCache.get(cacheKey);
+        let optimized: LoadoutOptimizationResult;
+        if (cached && Date.now() - cached.at < PLAN_TTL_MS && cached.fingerprint === fingerprint) {
+            optimized = cached.value;
+        } else {
+            optimized = optimizeLoadout({
+                catalog: runtime.value.catalog,
+                inventory: runtime.value.inventory,
+                ability: request.ability,
+                target: request.target,
+                requiredPower: request.requiredPower,
+                ...(request.fallbackToAnyAbility ? { fallbackToAnyAbility: true } : {}),
+                strategy,
+                policy,
+            });
+            this.planCache.set(cacheKey, { at: Date.now(), fingerprint, value: optimized });
+            this.prunePlanCache();
+        }
         if (!optimized.plan) {
             return err({ code: 'NO_PLAN', message: optimized.reason ?? 'No loadout plan' });
         }

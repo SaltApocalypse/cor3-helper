@@ -1,9 +1,9 @@
 # cor3-helper 2.0 — Architecture Decision Record
 
-- **Status:** Accepted; implementation ongoing on `v2` (build `2.0.4-salta.268`)
+- **Status:** Accepted; implementation ongoing on `v2` (build `2.0.5-salta.272`)
 - **Date:** 2026-11-08
 - **Last status update:** 2026-11-15
-- **Current verification:** typecheck, lint, Vitest (93 files / 445 tests) and build pass at this build.
+- **Current verification:** typecheck, lint, Vitest (93 files / 448 tests) and build pass at this build.
 - **Baseline:** `experimental` at `c7b69c7` (`v1.8.6-salta-exp.2`)
 - **Related audit:** [`cor3-helper-2.0-architecture-audit.md`](./cor3-helper-2.0-architecture-audit.md)
 - **Scope:** architecture, technology selection, security, repository strategy, UI, loadout data, release identity
@@ -650,7 +650,7 @@ Status: **2.0 rewrite implemented on `v2`; H9 is complete and H10 is partially a
 
 - Source was promoted from the transitional `v2/` workspace to the repository root `src/`.
 - v1 source was removed from the working tree; it remains in git history as the behavior reference.
-- Build output is `dist/`; current build is `2.0.4-salta.268`.
+- Build output is `dist/`; current build is `2.0.5-salta.272`.
 - Background split (H8): 54-line composition root, 103 bridge commands across 17 handler modules, and port-driven automation coordinators.
 - Side panel split: per-domain hooks, pure view models and page panels.
 - H1 release workflow fixed: typecheck/lint/test/build, zip `dist/`, generated release notes.

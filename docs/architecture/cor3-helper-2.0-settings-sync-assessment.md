@@ -1,7 +1,7 @@
 # Settings / Storage Sync Assessment — COR3 Helper 2.0
 
 - **Date:** 2026-11-14
-- **Status:** Proposed — not implemented in the current 2.0 build (rechecked at `2.0.4-salta.268`; tracked as O-016)
+- **Status:** Proposed — not implemented in the current 2.0 build (rechecked at `2.0.5-salta.272`; tracked as O-016)
 - **Scope:** should v2 sync settings and/or cached data across Chrome profiles and devices?
 - **Current v2 state:** all settings live in `chrome.storage.local` under `v2.settings`; data caches are also local. Users can export/import settings as a JSON backup.
 - **Current v1 state:** user-facing settings use `chrome.storage.sync`; large or device-specific game data uses `chrome.storage.local`.

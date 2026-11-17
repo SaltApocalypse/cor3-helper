@@ -1232,7 +1232,7 @@ export class GameSocketHub {
     }
 
     async getLoadout(): Promise<Result<unknown, GameError>> {
-        const response = await this.request('loadout', 'get.options', {}, 15000).catch((error) => error);
+        const response = await this.request('loadout', 'get.options', {}, 35_000).catch((error) => error);
         if (response instanceof Error) return err({ code: 'GAME_TIMEOUT', message: response.message });
         if (response.error) return err(gameError(response.error, 'GAME_LOADOUT_FAILED'));
         return ok(response.data);

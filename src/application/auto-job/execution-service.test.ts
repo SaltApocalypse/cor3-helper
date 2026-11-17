@@ -36,6 +36,17 @@ function actions() {
 }
 
 describe('JobExecutionService', () => {
+    it('completes a claimable taken job without taking it again', async () => {
+        const fake = actions();
+        const service = new JobExecutionService(fake.port);
+        const result = await service.executeDetailed(job('File Decryption', {
+            alreadyTaken: true,
+            canComplete: true,
+        }));
+        expect(result.ok).toBe(true);
+        expect(fake.calls).toEqual(['complete']);
+    });
+
     it('injects IPs and completes', async () => {
         const fake = actions();
         const service = new JobExecutionService(fake.port);
@@ -392,6 +403,19 @@ describe('JobExecutionService', () => {
         expect(result.ok).toBe(true);
         expect(fake.calls).toEqual(['take', 'complete']);
         expect(minigameCalls).toEqual([]);
+    });
+
+    it('attempts decryption when zero decrypt power may be stale', async () => {
+        const fake = actions();
+        fake.port.openFolder = async () => ({ ok: true as const, value: [{ id: 'desktop-file', name: 'report.xvct', isEncrypted: true }] });
+        fake.port.getFileAnalysis = async () => ({ ok: true as const, value: { canDecrypt: false, decryptPower: 0, tags: [], source: null } });
+        const service = new JobExecutionService(fake.port, undefined, undefined, {
+            solve: async () => ({ ok: true as const, value: { kind: 'config-hack' as const, solved: true } }),
+            cancel: async () => ({ ok: true as const, value: undefined }),
+        });
+        const result = await service.executeDetailed(job('File Decryption'));
+        expect(result.ok).toBe(true);
+        expect(fake.calls).toEqual(['take', 'decrypt-file', 'complete']);
     });
 
     it('requires a minigame adapter for decrypt jobs', async () => {
