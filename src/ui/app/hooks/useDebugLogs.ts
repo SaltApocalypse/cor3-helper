@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'preact/hooks';
 import type { DebugLogLine, PopupPortal } from '../../../application/popup/portal.js';
 import type { PopupPage } from '../AppShell.js';
+import { displayVersion } from '../view-models/version.js';
 
 /**
  * Merged automation debug log (H8 phase 7).
@@ -19,6 +20,29 @@ export interface DebugLogsState {
     readonly refreshDebugLogs: () => void;
     readonly copyDebugLogs: (text: string) => Promise<void>;
     readonly exportDebugLogs: (text: string) => void;
+}
+
+export function buildDebugLogStatusLine(
+    versionInfo: { readonly version: string; readonly versionName: string; readonly build: string | null },
+    lineCount: number,
+    runId: string | null,
+    refreshed: boolean,
+): DebugLogLine {
+    const display = displayVersion(versionInfo.versionName, versionInfo.build);
+    return {
+        at: Date.now(),
+        level: 'info',
+        scope: 'system',
+        message: `COR3 Helper ${display} · logs ${refreshed ? 'refreshed' : 'loaded'} · ${lineCount} line(s)`,
+        data: {
+            version: versionInfo.version,
+            versionName: versionInfo.versionName,
+            build: versionInfo.build,
+            runId,
+            lines: lineCount,
+            reason: refreshed ? 'refresh' : 'load',
+        },
+    };
 }
 
 export function useDebugLogs(portal: PopupPortal, deps: DebugLogsDeps): DebugLogsState {
@@ -42,7 +66,9 @@ export function useDebugLogs(portal: PopupPortal, deps: DebugLogsDeps): DebugLog
                 merged.set(`${line.at}:${line.level}:${line.scope}:${line.message}`, line);
             }
         }
-        setDebugLogs([...merged.values()].sort((left, right) => left.at - right.at).slice(-300));
+        const sorted = [...merged.values()].sort((left, right) => left.at - right.at).slice(-299);
+        const status = buildDebugLogStatusLine(portal.versionInfo(), sorted.length, runId, silent);
+        setDebugLogs([status, ...sorted]);
         if (!silent) setDebugLogsLoading(false);
     }, [portal, jobRunId, autoFinishRunId]);
 

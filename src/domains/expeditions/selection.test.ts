@@ -78,6 +78,14 @@ describe('selectMercenary', () => {
         expect(selectMercenary(candidates, { mode: 'global', marketOrder: ['core'], maxPrice: 15000 })?.mercenary.id).toBe('ok');
     });
 
+    it('does not apply the price cap to an estimated initial cost', () => {
+        const candidates = [
+            { ...candidate('estimated-cheap', 'core', 3000), costEstimated: true },
+            candidate('verified', 'core', 9000),
+        ];
+        expect(selectMercenary(candidates, { mode: 'global', marketOrder: ['core'], maxPrice: 15000 })?.mercenary.id).toBe('verified');
+    });
+
     it('separates USOL elite from normal USOL when elite is in the order', () => {
         const candidates = [
             candidate('usol-normal', 'usol', 7000),

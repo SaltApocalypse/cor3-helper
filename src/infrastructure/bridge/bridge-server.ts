@@ -68,7 +68,7 @@ export class BridgeServer {
                 target: request.target,
                 type: request.type,
                 ok: result.ok,
-                code: result.ok ? null : result.error.code,
+                code: result.ok ? null : result.error?.code ?? 'BRIDGE_HANDLER_ERROR',
                 durationMs: Date.now() - started,
                 payload: request.payload,
             });

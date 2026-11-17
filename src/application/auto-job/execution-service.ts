@@ -1,4 +1,4 @@
-import { decryptFileType, isServerlessJob, type JobOffer } from '../../domains/jobs/model.js';
+import { DECRYPT_CONDITION_TYPES, decryptFileType, isServerlessJob, type JobOffer } from '../../domains/jobs/model.js';
 import type { GameError } from '../game/ports.js';
 import { err, ok, type Result } from '../../kernel/result.js';
 import type { JobExecutionPort, JobReward } from './runner.js';
@@ -281,16 +281,21 @@ export class JobExecutionService implements JobExecutionPort {
         const listing = await this.actions.openFolder(folder.value.id);
         if (!listing.ok) return err({ code: 'FILE_NOT_FOUND', message: listing.error.message });
         const files = listing.value;
-        const refs = fileReferencesFromConditions(job);
+        const refs = fileReferencesFromConditions(job, DECRYPT_CONDITION_TYPES);
         const expectedType = decryptFileType(job, preferredName)?.toLowerCase() ?? null;
         const matchesExpectedType = (file: DownloadFile): boolean =>
             expectedType === null || file.name.toLowerCase().endsWith(expectedType);
         const target =
-            files.find((file) => job.fileInfo?.id === file.id)
-            ?? files.find((file) => refs.some((ref) => ref.fileId === file.id))
-            ?? files.find((file) => job.fileInfo?.name !== undefined && job.fileInfo.name === file.name)
-            ?? files.find((file) => refs.some((ref) => ref.name !== undefined && ref.name === file.name))
+            files.find((file) => job.fileInfo?.id === file.id && matchesExpectedType(file))
+            ?? files.find((file) => refs.some((ref) => ref.fileId === file.id) && matchesExpectedType(file))
+            ?? files.find((file) => job.fileInfo?.name !== undefined && job.fileInfo.name === file.name && matchesExpectedType(file))
+            ?? files.find((file) => refs.some((ref) => ref.name !== undefined && ref.name === file.name) && matchesExpectedType(file))
             ?? (preferredName ? files.find((file) => baseName(file.name) === baseName(preferredName) && matchesExpectedType(file)) : undefined)
+            // Data Download server files often use the original extension
+            // (`.dat`) while the encrypted download gets a different suffix
+            // (`.eb54x`). Match the base name when the suffix changed.
+            ?? (preferredName ? files.find((file) => baseName(file.name) === baseName(preferredName) && file.isEncrypted === true) : undefined)
+            ?? (preferredName ? files.find((file) => baseName(file.name) === baseName(preferredName)) : undefined)
             ?? files.find((file) => file.isEncrypted && matchesExpectedType(file))
             ?? files.find((file) => file.isNew && matchesExpectedType(file))
             ?? (expectedType === null ? files.at(-1) : undefined);
@@ -298,6 +303,9 @@ export class JobExecutionService implements JobExecutionPort {
             this.trace?.('No downloaded file matched the job', {
                 jobId: job.id,
                 expectedType,
+                preferredName: preferredName ?? null,
+                fileInfo: job.fileInfo ?? null,
+                refs,
                 available: files.map((file) => file.name),
             });
             return err({

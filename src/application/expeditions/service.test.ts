@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ExpeditionService, type ExpeditionPort } from './service.js';
+import { ExpeditionService, totalCostInfo, type ExpeditionPort } from './service.js';
 import type { ExpeditionLocation } from '../../domains/expeditions/model.js';
 
 const locations: ExpeditionLocation[] = [{
@@ -28,6 +28,16 @@ function port(configure: ReturnType<typeof vi.fn>): ExpeditionPort {
     };
 }
 
+describe('totalCostInfo', () => {
+    it('prefers an explicit nested totalCost over a root initial cost', () => {
+        expect(totalCostInfo({ cost: 3000, selection: { totalCost: 5179 } })).toEqual({ total: 5179, explicit: true });
+    });
+
+    it('marks a price-only response as estimated', () => {
+        expect(totalCostInfo({ mercenary: { price: 3000 } })).toEqual({ total: 3000, explicit: false });
+    });
+});
+
 describe('ExpeditionService candidates', () => {
     it('configures candidates with the requested location and goal', async () => {
         const configure = vi.fn().mockResolvedValue({ ok: true, value: { totalCost: 250, riskScore: 40 } });
@@ -49,5 +59,21 @@ describe('ExpeditionService candidates', () => {
             goalId: 'goal-b',
         }));
         if (result.ok) expect(result.value[0]).toMatchObject({ totalCost: 250, riskScore: 40 });
+    });
+
+    it('uses the configured total cost instead of the initial hire cost', async () => {
+        const configure = vi.fn().mockResolvedValue({ ok: true, value: { cost: 3000, selection: { totalCost: 5179 } } });
+        const service = new ExpeditionService(port(configure), async () => undefined);
+        const result = await service.candidates({
+            marketId: 'home',
+            marketKey: 'core',
+            hasInsurance: false,
+            locations,
+            locationConfigId: 'loc-a',
+            zoneConfigId: 'zone-a',
+            goalId: 'goal-b',
+        });
+        expect(result.ok).toBe(true);
+        if (result.ok) expect(result.value[0]).toMatchObject({ totalCost: 5179, costEstimated: false });
     });
 });

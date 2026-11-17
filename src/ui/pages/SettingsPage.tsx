@@ -325,7 +325,6 @@ export function SettingsPage({
                     {updateError ? (
                         <span class="v2-text-error" title={updateError}>
                             {t(language, 'settings.about.checkFailed')}
-                            {' · '}
                             <a href={FORK_RELEASES_URL} target="_blank" rel="noreferrer">{t(language, 'settings.about.checkManually')}</a>
                         </span>
                     ) : updateInfo ? (

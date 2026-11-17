@@ -80,6 +80,32 @@ describe('JobExecutionService', () => {
         expect(result).toEqual({ ok: false, error: { code: 'MINIGAME_REQUIRED', message: 'No minigame adapter is configured' } });
     });
 
+    it('finds the encrypted download when the server file suffix changed', async () => {
+        const fake = actions();
+        fake.port.getServerFiles = async () => ({
+            ok: true,
+            value: [{ fileId: 'f1', name: 'report_8918.dat', jobId: 'job1' }],
+        });
+        fake.port.openFolder = async () => ({
+            ok: true,
+            value: [{ id: 'encrypted', name: 'report_8918.eb54x', isEncrypted: true }],
+        });
+        const service = new JobExecutionService(
+            fake.port,
+            undefined,
+            undefined,
+            {
+                solve: async () => ({ ok: true as const, value: { kind: 'config-hack' as const, solved: true } }),
+                cancel: async () => ({ ok: true as const, value: undefined }),
+            },
+        );
+        const result = await service.executeDetailed(job('Data Download', {
+            conditions: [{ type: 'DecryptFile', details: { files: [{ name: 'report_8918.dat' }] } }],
+        }));
+        expect(result.ok).toBe(true);
+        expect(fake.calls).toEqual(['take', 'download-file', 'decrypt-file', 'complete']);
+    });
+
     it('decrypts a downloaded file and completes', async () => {
         const fake = actions();
         const minigameCalls: string[] = [];
@@ -104,8 +130,8 @@ describe('JobExecutionService', () => {
         fake.port.openFolder = async () => ({
             ok: true,
             value: [
-                { id: 'upload-bin', name: 'payload.bin', isEncrypted: true },
-                { id: 'target-file', name: 'report.ab52x', isEncrypted: true },
+                { id: 'upload-enc', name: 'payload.enc', isEncrypted: true },
+                { id: 'target-file', name: 'report.eb52x', isEncrypted: true },
             ],
         });
         fake.port.getFileAnalysis = async (fileId) => {
@@ -131,7 +157,11 @@ describe('JobExecutionService', () => {
             async () => undefined,
         );
         const result = await service.executeDetailed(job('File Decryption', {
-            conditions: [{ type: 'DecryptDownloadedFile', details: { files: [{ id: 'target-file', name: 'report.ab52x' }] } }],
+            fileInfo: { id: 'upload-enc', name: 'payload.enc' },
+            conditions: [
+                { type: 'DownloadFile', details: { files: [{ id: 'upload-enc', name: 'payload.enc' }] } },
+                { type: 'DecryptDownloadedFile', details: { files: [{ id: 'target-file', name: 'report.eb52x' }] } },
+            ],
         }));
         expect(result.ok).toBe(true);
         expect(picked).toEqual(['analysis:target-file', 'decrypt:target-file']);

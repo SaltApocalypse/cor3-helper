@@ -135,6 +135,28 @@ describe('JobPreflight', () => {
         expect(result.ok).toBe(true);
     });
 
+    it('treats a generic .enc extension as unknown during decrypt preflight', async () => {
+        const snap = snapshot([server(home, 'Home', { access: true })], []);
+        let fallbackUsed = false;
+        const result = await preflight(snap, async (request) => {
+            if (request.target === '.enc') return ok({ feasible: false, reason: 'NO_SOFTWARE' });
+            if (request.fallbackToAnyAbility) {
+                fallbackUsed = true;
+                return ok({ feasible: true, reason: null });
+            }
+            return ok({ feasible: false, reason: 'NO_SOFTWARE' });
+        }).preflight(job({
+            id: 'decrypt',
+            name: 'File Decryption',
+            type: 'File Decryption',
+            serverId: null,
+            serverName: null,
+            conditions: [{ type: 'DecryptFile', details: { fileExtension: '.enc' } }],
+        }));
+        expect(result.ok).toBe(true);
+        expect(fallbackUsed).toBe(true);
+    });
+
     it('still blocks a decrypt job when the required software is missing', async () => {
         const snap = snapshot([server(home, 'Home', { access: true })], []);
         const result = await preflight(snap, async () => ok({ feasible: false, reason: 'NO_SOFTWARE' }))

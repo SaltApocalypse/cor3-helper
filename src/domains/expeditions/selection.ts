@@ -8,6 +8,8 @@ export interface MercenaryCandidate {
     readonly marketKey: MercMarketKey;
     readonly totalCost: number;
     readonly riskScore: number;
+    /** True when totalCost fell back to the initial price and was not configured. */
+    readonly costEstimated?: boolean;
 }
 
 export interface MercenarySelectionOptions {
@@ -35,7 +37,7 @@ export function selectMercenary(
     const available = candidates.filter((candidate) => {
         const status = candidate.mercenary.status.toUpperCase();
         if (status !== 'AVAILABLE' && status !== 'UNKNOWN') return false;
-        if (options.maxPrice !== null && candidate.totalCost > options.maxPrice) return false;
+        if (options.maxPrice !== null && (candidate.costEstimated === true || candidate.totalCost > options.maxPrice)) return false;
         return true;
     });
     if (available.length === 0) return null;

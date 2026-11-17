@@ -26,6 +26,8 @@ import type { EventPublisher } from '../../../application/automation/ports.js';
 const manifest = chrome.runtime.getManifest();
 export const VERSION = manifest.version_name ?? manifest.version;
 export const PHASE = 'v2';
+const BUILD_NUMBER = typeof __COR3_BUILD_NUMBER__ === 'string' ? __COR3_BUILD_NUMBER__ : null;
+export const DISPLAY_VERSION = BUILD_NUMBER && !VERSION.endsWith(`.${BUILD_NUMBER}`) ? `${VERSION}.${BUILD_NUMBER}` : VERSION;
 
 const SESSION_LOG_KEY = 'v2.sessionLogs';
 const LOG_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -109,6 +111,13 @@ export function createCoreRuntime(): CoreRuntime {
             if (Array.isArray(stored)) logger.hydrate(stored.filter(isFreshLogEvent));
         }).catch(() => undefined);
     }
+    logger.info('system', `COR3 Helper initialized — ${DISPLAY_VERSION}`, {
+        version: VERSION,
+        displayVersion: DISPLAY_VERSION,
+        build: BUILD_NUMBER,
+        phase: PHASE,
+        initializedAt: Date.now(),
+    });
     const runLogs = new RunLogStore();
     setInterval(() => {
         logger.prune(isFreshLogEvent);

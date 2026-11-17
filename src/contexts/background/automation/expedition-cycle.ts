@@ -320,7 +320,20 @@ export class ExpeditionCycle {
                     paid,
                     message: 'No available mercenary matches the selection rules',
                 };
-                this.deps.logger.warn('auto-expedition', 'No available mercenary matches the selection rules', { candidates: candidates.length });
+                this.deps.logger.warn('auto-expedition', 'No available mercenary matches the selection rules', {
+                    candidates: candidates.length,
+                    maxPrice: current.mercMaxPriceEnabled ? current.mercMaxPrice : null,
+                    mode: current.mercSelectionMode,
+                    marketOrder: current.mercMarketOrder,
+                    rejected: candidates.slice(0, 20).map((candidate) => ({
+                        name: candidate.mercenary.name,
+                        marketKey: candidate.marketKey,
+                        status: candidate.mercenary.status,
+                        totalCost: candidate.totalCost,
+                        costEstimated: candidate.costEstimated === true,
+                        riskScore: candidate.riskScore,
+                    })),
+                });
                 return;
             }
 

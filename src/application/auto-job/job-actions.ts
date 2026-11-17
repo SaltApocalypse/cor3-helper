@@ -76,14 +76,16 @@ export interface FileReference {
     readonly name?: string;
 }
 
-export function fileReferencesFromConditions(job: JobOffer): FileReference[] {
+export function fileReferencesFromConditions(job: JobOffer, types?: readonly string[]): FileReference[] {
+    const conditions = conditionsOf(job).filter((condition) =>
+        !types || (condition.type !== undefined && types.includes(condition.type)));
     const refs: FileReference[] = [];
-    for (const condition of conditionsOf(job)) {
+    for (const condition of conditions) {
         if (condition.details?.fileIds) {
             for (const fileId of condition.details.fileIds) refs.push({ fileId });
         }
     }
-    for (const condition of conditionsOf(job)) {
+    for (const condition of conditions) {
         const candidates: unknown[] = [
             condition,
             condition.details,

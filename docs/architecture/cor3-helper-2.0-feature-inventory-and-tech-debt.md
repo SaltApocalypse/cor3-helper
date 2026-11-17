@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-15 against build `2.0.3-salta.263`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (92 files / 432 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-15 against build `2.0.4-salta.268`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (93 files / 445 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.3-salta.263`)
+## Current completion snapshot (build `2.0.4-salta.268`)
 
 | Metric | Value |
 |---|---|
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 92 files / 432 tests pass
-- `npm run build` — pass, `2.0.3-salta.263`
+- `npm test` — 93 files / 445 tests pass
+- `npm run build` — pass, `2.0.4-salta.268`
 
 ---
 
@@ -736,7 +736,7 @@ Fixes:
 
 - typecheck / lint pass
 - 80 test files / 355 tests
-- build `2.0.3-salta.263`
+- build `2.0.4-salta.268`
 
 ---
 
@@ -969,3 +969,57 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 - Loadout changes keep the current sufficient hardware under `best`, serialize UI/automation mutations, shorten capability-cache TTL, retry rate-limited commands, and avoid a duplicate DECRYPT→HACK→DECRYPT swap.
 - Mail partial claims stay retryable, transient Auto Mail failures retry in five minutes, Auto Daily waits when its state is unavailable, and target access is ensured when the player is already at the target endpoint.
 - Release identity: `package.json.version = 2.0.3`, `cor3Fork.releaseLabel = salta`, tag `v2.0.3-salta`; the local build counter remains separate from the release version.
+
+
+---
+
+# Part 29 — Version Header in Automation Debug Logs (2.0.3-salta.264)
+
+- The background worker now writes `COR3 Helper initialized — <version>` to the global log at startup, including `version`, `displayVersion`, `build`, `phase` and `initializedAt`.
+- The Automation/Developer debug console prepends a synthetic status line on every load/refresh: `COR3 Helper <version> · logs loaded/refreshed · N line(s)`, with the run ID and reason in `data`. It is included in Copy/Export but not persisted into the background buffer.
+- The first line therefore always identifies the running build, even when the underlying log buffer contains older session lines.
+- Log refresh triggers documented: initial Developer page load, manual Refresh, live refresh every 2 seconds while an automation is running, Auto Jobs/Auto Daily portal events, and tab/page re-entry.
+- Global logs remain capped at 500 entries, persisted in `chrome.storage.session` for up to 24 hours, and cleared by the DevTools Clear action; run logs remain in-memory per run (20 runs × 500 lines).
+
+
+---
+
+# Part 30 — Decrypt File Type Isolation (2.0.3-salta.265)
+
+- `decryptFileType()` now reads file extensions only from decrypt-related conditions (`DecryptFile`, `DecryptDownloadedFile`). A download/upload condition carrying a generic `.enc` or `.bin` no longer overrides the real decrypt extension (for example `.eb52x`).
+- Concrete file names from the decrypt condition, `fileInfo`, and the downloaded file are considered, and a real format is preferred over a generic `.enc`/`.bin` wrapper.
+- `findDownloadedFile()` uses decrypt-only condition references and requires `job.fileInfo`/reference matches to match the resolved expected extension. This prevents selecting an unrelated `.enc` download by ID/name.
+- Added tests for `.enc` plus `.eb52x` in mixed conditions, generic decrypt extensions, downloaded-file preference, and mixed download/decrypt references.
+
+
+---
+
+# Part 31 — Download Suffix, Lock Diagnostics and Bridge Guard (2.0.3-salta.266)
+
+- Data Download/Decrypt & Extract now matches a downloaded encrypted file by base name when the server file suffix changes (for example `report_8918.dat` → `report_8918.eb54x`).
+- The decrypt target prefers the actual downloaded file name (`preferFileName`) over a server-side/condition suffix, while still preferring real formats over `.enc`/`.bin`.
+- Decrypt preflight treats `.enc`/`.bin` as unknown wrapper extensions and falls back to “owns any DECRYPT software” instead of blocking on the wrapper.
+- Auto Expedition logs the rejected candidate list (status, market, cost, risk) and the active max-price/mode when no mercenary matches; selection behavior is unchanged.
+- Auto Finish “selection skipped every job” and run selection logs now include per-job skip reasons and minigame lock expiry, making locked jobs distinguishable from capability/type/completion skips.
+- `BridgeServer` no longer throws while auditing a malformed `{ ok: false }` handler result; the Auto Finish run handler also supplies a fallback error object. This addresses the observed `auto-finish.run: Cannot read properties of undefined (reading 'code')` failures.
+- Added tests for changed download suffixes, downloaded-file preference, and generic `.enc` preflight fallback.
+
+
+---
+
+# Part 32 — Expedition Total Cost Cap (2.0.3-salta.267)
+
+- Expedition configure responses can contain both a root `cost` (initial hire fee) and a nested `totalCost` (final cost). `totalCostInfo()` now searches for an explicit `totalCost` at any depth before falling back to `cost`/`price`.
+- `ExpeditionService.candidates()` marks a candidate `costEstimated: true` when only the initial price is available. `selectMercenary()` excludes estimated candidates whenever a max-price cap is enabled, so an unknown initial fee cannot pass as the total.
+- `ExpeditionService.configure()` now returns the configured response instead of discarding it.
+- Before the irreversible launch, `launchExpedition()` verifies the configured total cost against the cap and aborts with a logged error if the total is unavailable or exceeds the cap. This prevents a launched expedition from exceeding the configured maximum even if candidate ranking used a different cost value.
+- Auto Expedition diagnostics now include `costEstimated` per rejected candidate.
+- Added tests for nested totalCost preference, price-only estimation, candidate extraction, and capped selection.
+
+
+---
+
+# Part 33 — Release 2.0.4-salta
+
+- Release `2.0.4-salta` consolidates the post-2.0.3 fixes: expedition total-cost cap and configured-cost launch guard, decrypt/download suffix isolation, bridge audit guard, Auto Expedition/Auto Finish skip diagnostics, and version headers in automation debug logs.
+- Release identity: `package.json.version = 2.0.4`, `cor3Fork.releaseLabel = salta`, tag `v2.0.4-salta`; the local build counter remains separate.

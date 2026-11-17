@@ -138,10 +138,42 @@ export class AutoFinishCoordinator {
                 return !(resetAt !== null && preStored.completedJobs[job.id] === resetAt);
             });
             if (preRunnable.length === 0) {
+                const preRunnableIds = new Set(preRunnable.map((job) => job.id));
+                const preSkipped = { noServer: 0, typeDisabled: 0, locked: 0, retryExhausted: 0, completed: 0 };
+                const preBlocked: Array<{ jobId: string; name: string; marketKey: string; reason: string; lockExpiresAt?: number; resetAt?: string }> = [];
+                for (const job of prefetched.jobs) {
+                    if (preRunnableIds.has(job.id)) continue;
+                    const resetAt = preResets.get(job.marketKey) ?? null;
+                    if (job.serverId === null && !isServerlessJob(job.type)) {
+                        preSkipped.noServer += 1;
+                        preBlocked.push({ jobId: job.id, name: job.name, marketKey: job.marketKey, reason: 'no-server' });
+                    } else if (!preAllowed.has(job.type)) {
+                        preSkipped.typeDisabled += 1;
+                        preBlocked.push({ jobId: job.id, name: job.name, marketKey: job.marketKey, reason: 'type-disabled' });
+                    } else if (this.deps.locks.isLocked(job.id)) {
+                        preSkipped.locked += 1;
+                        const lockUntil = this.deps.locks.lockUntil(job.id);
+                        preBlocked.push({
+                            jobId: job.id,
+                            name: job.name,
+                            marketKey: job.marketKey,
+                            reason: 'minigame-lock',
+                            ...(lockUntil !== undefined ? { lockExpiresAt: lockUntil } : {}),
+                        });
+                    } else if (this.deps.locks.isRetryExhausted(job.id)) {
+                        preSkipped.retryExhausted += 1;
+                        preBlocked.push({ jobId: job.id, name: job.name, marketKey: job.marketKey, reason: 'retry-exhausted' });
+                    } else {
+                        preSkipped.completed += 1;
+                        preBlocked.push({ jobId: job.id, name: job.name, marketKey: job.marketKey, reason: 'completed', ...(resetAt ? { resetAt } : {}) });
+                    }
+                }
                 this.deps.logger.info('auto-jobs', prefetched.jobs.length === 0 ? 'Auto Finish: no jobs to run' : 'Auto Finish selection skipped every job', {
                     jobs: prefetched.jobs.length,
                     allowedTypes: [...preAllowed],
                     completedJobs: Object.keys(preStored.completedJobs).length,
+                    skipped: preSkipped,
+                    blocked: preBlocked.slice(0, 10),
                 });
                 return {
                     jobs: prefetched.jobs.length,
@@ -196,9 +228,29 @@ export class AutoFinishCoordinator {
                 else skipped.completed += 1;
             }
             if (runnable.length < synced.jobs.length) {
+                const blocked = synced.jobs
+                    .filter((job) => !runnableIds.has(job.id))
+                    .slice(0, 10)
+                    .map((job) => {
+                        const lockUntil = this.deps.locks.lockUntil(job.id);
+                        if (lockUntil !== undefined && lockUntil > this.now()) {
+                            return { jobId: job.id, name: job.name, marketKey: job.marketKey, reason: 'minigame-lock', lockExpiresAt: lockUntil };
+                        }
+                        if (this.deps.locks.isRetryExhausted(job.id)) {
+                            return { jobId: job.id, name: job.name, marketKey: job.marketKey, reason: 'retry-exhausted' };
+                        }
+                        if (job.serverId === null && !isServerlessJob(job.type)) {
+                            return { jobId: job.id, name: job.name, marketKey: job.marketKey, reason: 'no-server' };
+                        }
+                        if (!allowedTypes.has(job.type)) {
+                            return { jobId: job.id, name: job.name, marketKey: job.marketKey, reason: 'type-disabled' };
+                        }
+                        return { jobId: job.id, name: job.name, marketKey: job.marketKey, reason: 'completed' };
+                    });
                 this.deps.runLogs.add(runId, 'info', 'auto-jobs', `Selection: ${runnable.length}/${synced.jobs.length} runnable; skipped ${synced.jobs.length - runnable.length}`, {
                     ...skipped,
                     allowedTypes: [...allowedTypes],
+                    blocked,
                 });
             }
             this.live = {

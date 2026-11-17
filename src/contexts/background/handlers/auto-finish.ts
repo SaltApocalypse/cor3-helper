@@ -17,7 +17,9 @@ export function registerAutoFinishHandlers(server: CoreRuntime['server'], deps: 
     const { core, automation } = deps;
     server.register('auto-finish.run', autoFinishRunSchema, async ({ owner, force }) => {
         const result = await automation.autoFinish.runExclusive(owner, force);
-        return result.ok ? ok(result.value) : { ok: false, error: result.error };
+        return result.ok
+            ? ok(result.value)
+            : { ok: false, error: result.error ?? { code: 'AUTO_FINISH_FAILED', message: 'Auto Finish failed' } };
     });
     server.register('auto-finish.enable', z.object({}).strict(), async () => {
         if (await core.helperModeEnabled()) return { ok: false, error: core.helperModeError };

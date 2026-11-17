@@ -1,7 +1,7 @@
 import { NetworkGraph, type NetworkError } from '../../../domains/network/graph.js';
 import type { NetworkSnapshot } from '../../../domains/network/model.js';
 import type { RoutePlan } from '../../../domains/network/model.js';
-import { decryptFileType, type JobOffer } from '../../../domains/jobs/model.js';
+import { decryptFileType, isGenericEncryptedFileType, type JobOffer } from '../../../domains/jobs/model.js';
 import type { GameError } from '../../../application/game/ports.js';
 import type { LoadoutService } from '../../../application/loadout/service.js';
 import type { NetworkSnapshotService } from '../../../application/network/snapshot-service.js';
@@ -98,7 +98,13 @@ export class JobPreflight {
 
         if (jobRequiresDecrypt(job)) {
             needsMinigame = true;
-            const fileType = decryptFileType(job, job.fileInfo?.name);
+            const resolvedFileType = decryptFileType(job, job.fileInfo?.name);
+            // `.enc`/`.bin` are generic wrappers, not reliable decrypt formats.
+            // Treat them as unknown for the preflight so a wrapper does not
+            // block a job whose real downloaded extension is only known later.
+            const fileType = resolvedFileType && !isGenericEncryptedFileType(resolvedFileType)
+                ? resolvedFileType
+                : null;
             const capability = await this.deps.loadout.canSatisfy({
                 ability: 'DECRYPT',
                 target: fileType ?? '',

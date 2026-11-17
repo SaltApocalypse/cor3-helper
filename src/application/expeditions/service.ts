@@ -52,6 +52,19 @@ function numberFrom(value: unknown, keys: readonly string[]): number | null {
     return null;
 }
 
+/**
+ * Reads the configured expedition total. The game response can contain both a
+ * root `cost` (the initial hire fee) and a nested `totalCost` (the final
+ * expedition cost), so an explicit total must win over `cost`/`price` at any
+ * depth.
+ */
+export function totalCostInfo(value: unknown): { readonly total: number | null; readonly explicit: boolean } {
+    const explicit = numberFrom(value, ['totalCost', 'total_cost', 'totalPrice', 'total_price']);
+    if (explicit !== null) return { total: explicit, explicit: true };
+    const fallback = numberFrom(value, ['cost', 'price']);
+    return { total: fallback, explicit: false };
+}
+
 export class ExpeditionService {
     constructor(
         private readonly expeditions: ExpeditionPort,
@@ -168,7 +181,8 @@ export class ExpeditionService {
         const candidates: MercenaryCandidate[] = [];
         for (const merc of limited) {
             await this.sleep(150);
-            let totalCost = merc.totalCost ?? merc.price;
+            let totalCost = merc.totalCost;
+            let costEstimated = false;
             let riskScore = merc.riskScore ?? 0;
             if (location && zone && goal) {
                 const configured = await this.expeditions.configure({
@@ -180,12 +194,20 @@ export class ExpeditionService {
                     hasInsurance: request.hasInsurance,
                 });
                 if (configured.ok) {
-                    totalCost = numberFrom(configured.value, ['totalCost', 'cost', 'price']) ?? totalCost;
+                    const cost = totalCostInfo(configured.value);
+                    if (cost.total !== null) {
+                        totalCost = cost.total;
+                        costEstimated = !cost.explicit;
+                    }
                     riskScore = numberFrom(configured.value, ['riskScore', 'risk']) ?? riskScore;
                 }
             }
+            if (totalCost === null) {
+                totalCost = merc.price;
+                costEstimated = true;
+            }
             const marketKey: MercMarketKey = request.marketKey === 'usol' && merc.elite ? 'usol-elite' : request.marketKey;
-            candidates.push({ mercenary: merc, marketKey, totalCost, riskScore });
+            candidates.push({ mercenary: merc, marketKey, totalCost, riskScore, costEstimated });
         }
         return ok(candidates);
     }
@@ -213,9 +235,8 @@ export class ExpeditionService {
         return this.expeditions.openContainer(expeditionId);
     }
 
-    async configure(config: ExpeditionLaunchConfig): Promise<Result<void, { readonly code: string; readonly message: string }>> {
-        const result = await this.expeditions.configure(config);
-        return result.ok ? ok(undefined) : result;
+    async configure(config: ExpeditionLaunchConfig): Promise<Result<unknown, { readonly code: string; readonly message: string }>> {
+        return this.expeditions.configure(config);
     }
 
     async launch(config: ExpeditionLaunchConfig): Promise<Result<void, { readonly code: string; readonly message: string }>> {

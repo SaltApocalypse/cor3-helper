@@ -161,7 +161,7 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
         game.jobActions,
         (job) => routing.routeJobToMarket(job, 'complete'),
         async (job, file, requiredPower = 0) => {
-            const target = decryptFileType(job, file.name);
+            const target = decryptFileType(job, file.name, { preferFileName: true });
             if (!target) return ok(undefined);
             // Target is known, so use the same targeted best-power plan as the
             // Loadout page. `fallbackToAnyAbility` is intentionally not used:

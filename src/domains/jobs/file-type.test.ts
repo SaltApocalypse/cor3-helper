@@ -36,6 +36,39 @@ describe('decryptFileType', () => {
         expect(decryptFileType(job({ conditions: [{ type: 'DecryptFile', details: { files: [{ name: 'report', fileExtension: 'csv' }] } }] }))).toBe('.csv');
     });
 
+    it('ignores generic encrypted files from download/upload conditions', () => {
+        expect(decryptFileType(job({
+            conditions: [
+                { type: 'DownloadFile', details: { files: [{ name: 'payload.enc' }] } },
+                { type: 'DecryptFile', details: { files: [{ name: 'report.eb52x' }] } },
+            ],
+        }))).toBe('.eb52x');
+    });
+
+    it('prefers a real format over .enc inside a decrypt condition', () => {
+        expect(decryptFileType(job({
+            conditions: [{ type: 'DecryptFile', details: { fileExtension: '.enc', files: [{ name: 'report.eb52x' }] } }],
+        }))).toBe('.eb52x');
+    });
+
+    it('uses the downloaded file name over a generic decrypt extension', () => {
+        expect(decryptFileType(job({
+            conditions: [{ type: 'DecryptFile', details: { fileExtension: '.enc' } }],
+        }), 'report.eb52x')).toBe('.eb52x');
+    });
+
+    it('prefers the actual downloaded file when its suffix changed', () => {
+        expect(decryptFileType(job({
+            conditions: [{ type: 'DecryptFile', details: { fileExtension: '.dat' } }],
+        }), 'report_8918.eb54x', { preferFileName: true })).toBe('.eb54x');
+    });
+
+    it('keeps .enc when it is the only decrypt extension available', () => {
+        expect(decryptFileType(job({
+            conditions: [{ type: 'DecryptFile', details: { fileExtension: '.enc' } }],
+        }))).toBe('.enc');
+    });
+
     it('falls back to file info or the downloaded file name', () => {
         expect(decryptFileType(job({ fileInfo: { name: 'archive.zip' } }))).toBe('.zip');
         expect(decryptFileType(job({}), 'download.tar')).toBe('.tar');

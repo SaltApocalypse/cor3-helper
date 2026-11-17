@@ -2,6 +2,7 @@ import type { SettingsV1 } from '../../../contracts/storage.js';
 import type { JobMarketDefinition } from '../../../domains/jobs/markets.js';
 import { selectMercenary } from '../../../domains/expeditions/selection.js';
 import { MERC_EXPEDITION_PROFILES, mercProfileKeyForMarket } from '../../../domains/expeditions/profiles.js';
+import { totalCostInfo } from '../../../application/expeditions/service.js';
 import { isExpeditionReady } from '../../../domains/expeditions/model.js';
 import { AUTO_EXPEDITION_RETRY_ALARM } from './alarm-ids.js';
 import { humanDelay, readWithRetry } from './delay.js';
@@ -198,6 +199,34 @@ export async function launchExpedition(ctx: ExpeditionLaunchContext): Promise<vo
         deps.logger.warn('auto-expedition', 'Expedition configure failed', { mercenary: selected.mercenary.name, message: configured.error.message });
         return;
     }
+    const configuredCost = totalCostInfo(configured.value);
+    const verifiedTotalCost = configuredCost.explicit
+        ? configuredCost.total
+        : (selected.costEstimated ? null : selected.totalCost);
+    const finalTotalCost = verifiedTotalCost ?? selected.totalCost;
+    const maxPrice = current.mercMaxPriceEnabled ? current.mercMaxPrice : null;
+    if (maxPrice !== null && (verifiedTotalCost === null || verifiedTotalCost > maxPrice)) {
+        state.last = {
+            at: deps.clock.now(),
+            decisions,
+            launched: false,
+            error: verifiedTotalCost === null
+                ? 'Configured expedition total cost is unavailable'
+                : `Configured expedition total cost ${verifiedTotalCost} exceeds max ${maxPrice}`,
+            paid,
+            selectedMerc: selected.mercenary.name,
+            marketKey: profileKey,
+            message: 'Expedition not launched: configured total cost does not satisfy the price cap',
+        };
+        deps.logger.warn('auto-expedition', 'Expedition launch blocked by configured total cost', {
+            mercenary: selected.mercenary.name,
+            configuredTotalCost: configuredCost.total,
+            configuredTotalExplicit: configuredCost.explicit,
+            selectedTotalCost: selected.totalCost,
+            maxPrice,
+        });
+        return;
+    }
     await humanDelay(500, 900);
     const launched = await deps.service.launch(config);
     if (!launched.ok) {
@@ -232,7 +261,7 @@ export async function launchExpedition(ctx: ExpeditionLaunchContext): Promise<vo
     deps.logger.info('auto-expedition', 'Mercenary expedition launched', {
         mercenary: selected.mercenary.name,
         market: selectedMarket.label,
-        cost: selected.totalCost,
+        cost: finalTotalCost,
         insurance: current.mercInsuranceEnabled,
         decisions,
         paid,
