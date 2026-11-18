@@ -4,6 +4,7 @@ import { JOB_TYPES } from '../kernel/job-types.js';
 export const DECISION_POLICIES = ['off', 'veterans', 'loot', 'risk'] as const;
 export const MERC_SELECTION_MODES = ['market', 'global'] as const;
 export const MERC_MARKET_KEYS = ['core', 'usol', 'usol-elite'] as const;
+export const TOOLBAR_OPEN_MODES = ['sidePanel', 'window', 'popup', 'none'] as const;
 
 /**
  * All persisted 2.0 values are wrapped so migrations can identify their shape.
@@ -40,6 +41,8 @@ export type HelperModeAutomationSnapshot = z.infer<typeof helperModeAutomationSc
 export const settingsV1Schema = z.object({
     uiLanguage: z.enum(['en', 'zh']).default('en'),
     languageInitialized: z.boolean().default(false),
+    /** Toolbar icon click target; 'none' keeps the lightweight launcher. */
+    toolbarOpenMode: z.enum(TOOLBAR_OPEN_MODES).default('none'),
     helperMode: z.boolean().default(true),
     /**
      * Set once the user has typed the acknowledgement phrase to disable Helper

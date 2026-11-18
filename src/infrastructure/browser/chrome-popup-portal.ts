@@ -14,6 +14,7 @@ import type { ExpeditionOverview } from '../../domains/expeditions/model.js';
 import type { DroneState } from '../../domains/drone/model.js';
 import type { JobMarketDefinition } from '../../domains/jobs/markets.js';
 import { jobOfferSchema } from '../../contracts/jobs.js';
+import { openWorkspaceSidePanel, openWorkspaceWindow } from './workspace-opener.js';
 
 const pingSchema = z.object({ version: z.string(), phase: z.string() });
 const updateCheckSchema = z.object({
@@ -719,15 +720,8 @@ export class ChromePopupPortal implements PopupPortal {
         };
     }
 
-    async openSidePanel(): Promise<boolean> {
-        try {
-            const current = await chrome.windows.getCurrent();
-            if (current.id === undefined) return false;
-            await chrome.sidePanel.open({ windowId: current.id });
-            return true;
-        } catch {
-            return this.openWindow();
-        }
+    openSidePanel(): Promise<boolean> {
+        return openWorkspaceSidePanel();
     }
 
     async openInPopup(): Promise<boolean> {
@@ -740,34 +734,8 @@ export class ChromePopupPortal implements PopupPortal {
         }
     }
 
-    async openWindow(): Promise<boolean> {
-        try {
-            const baseUrl = chrome.runtime.getURL('sidepanel.html');
-            const windows = await chrome.windows.getAll({ populate: true });
-            const existing = windows.find((window) => (
-                window.type === 'popup'
-                && typeof window.id === 'number'
-                && window.tabs?.some((tab) => tab.url?.startsWith(baseUrl))
-            ));
-            if (existing && typeof existing.id === 'number') {
-                try {
-                    await chrome.windows.update(existing.id, { focused: true });
-                    return true;
-                } catch {
-                    // The window may have closed between the query and the focus.
-                }
-            }
-            await chrome.windows.create({
-                url: `${baseUrl}?mode=window`,
-                type: 'popup',
-                width: 430,
-                height: 800,
-                focused: true,
-            });
-            return true;
-        } catch {
-            return false;
-        }
+    openWindow(): Promise<boolean> {
+        return openWorkspaceWindow();
     }
 
     ping() {

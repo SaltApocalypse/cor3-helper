@@ -3,7 +3,7 @@ import type { Logger } from '../logging/logger.js';
 import type { StorageArea } from './storage-area.js';
 import { VersionedRepository } from './versioned-repository.js';
 
-const SETTINGS_KEY = 'v2.settings';
+export const SETTINGS_KEY = 'v2.settings';
 const SETTINGS_SCHEMA_VERSION = 1;
 
 /**
