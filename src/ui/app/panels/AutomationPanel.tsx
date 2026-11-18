@@ -97,6 +97,7 @@ export function AutomationPanel({
                 now={now}
                 setMarketKey={jobs.setMarketKey}
                 jobStatusById={jobViews.jobStatusById}
+                jobStatusReasonById={jobViews.jobReasonById}
                 selectedJobs={jobs.selectedJobs}
                 toggleJob={jobs.toggleJob}
                 toggleSelectMarket={jobs.toggleSelectMarket}

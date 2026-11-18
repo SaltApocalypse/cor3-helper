@@ -214,7 +214,7 @@ export class JobPreflight {
         let target = checkJobTarget(snapshot, job);
         if (!target.ok && isMaintenancePreflightError(target.error.code)) {
             const now = this.now();
-            const canRefresh = now - snapshot.capturedAt > 120_000
+            const canRefresh = now - snapshot.capturedAt > 30_000
                 && now - this.lastMapRefreshAt >= 30_000;
             if (canRefresh) {
                 this.lastMapRefreshAt = now;

@@ -25,6 +25,8 @@ export interface AutoFinishState {
     readonly autoCompleteCountdown: number | null;
     /** Markets of the live or last Auto Finish run (`autoRunMarkets`). */
     readonly markets: readonly AutoFinishMarketResult[];
+    /** Job id -> market reset it was completed for (persisted truth). */
+    readonly completedJobs: Readonly<Record<string, string>>;
     /** Run id used by the merged debug log query. */
     readonly logRunId: string | null;
     readonly loadAutoFinish: () => Promise<void>;
@@ -124,6 +126,7 @@ export function useAutoFinish(portal: PopupPortal, deps: AutoFinishDeps): AutoFi
                     progress: null,
                     nextRetryAt: null,
                     retryReason: null,
+                    completedJobs: {},
                 }),
                 enabled: true,
             }));
@@ -171,6 +174,7 @@ export function useAutoFinish(portal: PopupPortal, deps: AutoFinishDeps): AutoFi
         autoFinishCanceling,
         autoCompleteCountdown,
         markets: autoRunMarkets,
+        completedJobs: autoFinish?.completedJobs ?? {},
         logRunId,
         loadAutoFinish,
         runAutoFinishNow,

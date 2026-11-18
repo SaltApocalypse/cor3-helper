@@ -22,12 +22,13 @@ import { JobHistoryStore } from '../../../infrastructure/storage/job-history-sto
 import { NetworkSnapshotStore } from '../../../infrastructure/storage/network-snapshot-store.js';
 import { NetworkOperationQueue } from '../../../application/network/operation-queue.js';
 import type { EventPublisher } from '../../../application/automation/ports.js';
+import { mergeBuildNumber } from '../../../kernel/version.js';
 
 const manifest = chrome.runtime.getManifest();
 export const VERSION = manifest.version_name ?? manifest.version;
 export const PHASE = 'v2';
 const BUILD_NUMBER = typeof __COR3_BUILD_NUMBER__ === 'string' ? __COR3_BUILD_NUMBER__ : null;
-export const DISPLAY_VERSION = BUILD_NUMBER && !VERSION.endsWith(`.${BUILD_NUMBER}`) ? `${VERSION}.${BUILD_NUMBER}` : VERSION;
+export const DISPLAY_VERSION = mergeBuildNumber(VERSION, BUILD_NUMBER);
 
 const SESSION_LOG_KEY = 'v2.sessionLogs';
 const LOG_RETENTION_MS = 24 * 60 * 60 * 1000;

@@ -61,17 +61,21 @@ export class MarketSyncService {
     }
 
     async sync(request: MarketSyncRequest): Promise<Result<MarketSyncResult, MarketSyncError>> {
-        const snapshot = request.snapshot
+        // Reuse the map until its TTL expires. A forced refresh is only done
+        // when routing fails, which keeps market refreshes to one map request
+        // in the common case.
+        let snapshot = request.snapshot
             ? ok(request.snapshot)
-            : await this.snapshots.get(true);
+            : await this.snapshots.get();
         if (!snapshot.ok) return err({ code: 'SNAPSHOT_FAILED', message: snapshot.error.message });
-        const graph = new NetworkGraph(snapshot.value);
-        const route = await this.executor.execute(graph, request.serverId, {
-            owner: request.owner,
-            reason: request.reason,
-            now: this.clock.now(),
-            currentEndpoint: snapshot.value.endpointId ?? snapshot.value.homeId,
-        });
+        let route = await this.executeRoute(snapshot.value, request);
+        if ((!route.ok || !route.route) && request.snapshot === undefined) {
+            const refreshed = await this.snapshots.get(true);
+            if (refreshed.ok) {
+                snapshot = refreshed;
+                route = await this.executeRoute(refreshed.value, request);
+            }
+        }
         if (!route.ok || !route.route) {
             // Keep the route-specific reason in the message. The market panel
             // and debug log otherwise only show "All route attempts failed",
@@ -103,6 +107,16 @@ export class MarketSyncService {
             direct: route.direct === true,
             ...(route.directError ? { directError: route.directError } : {}),
             market: market.value,
+        });
+    }
+
+    private executeRoute(snapshot: NetworkSnapshot, request: MarketSyncRequest) {
+        const graph = new NetworkGraph(snapshot);
+        return this.executor.execute(graph, request.serverId, {
+            owner: request.owner,
+            reason: request.reason,
+            now: this.clock.now(),
+            currentEndpoint: snapshot.endpointId ?? snapshot.homeId,
         });
     }
 }

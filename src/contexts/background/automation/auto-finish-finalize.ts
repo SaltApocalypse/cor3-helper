@@ -42,6 +42,11 @@ export interface FinalizeAutoFinishInput {
     readonly stopped: boolean;
     readonly currentSettings: SettingsV1;
     readonly cancelRequested: () => boolean;
+    /**
+     * Skip the auto-dismiss scan. Used by the "nothing runnable" report pass,
+     * which must not send extra market traffic.
+     */
+    readonly dismiss?: boolean;
 }
 
 export interface FinalizedAutoFinish {
@@ -61,15 +66,17 @@ export async function finalizeAutoFinish(
     const completedMarketResets = { ...input.completedResets };
     const completedJobResets = { ...input.completedJobs };
     for (const market of input.markets) {
-        if (!market.ok || !market.resetAt) continue;
-        const total = market.jobTotal ?? 0;
-        const success = market.success ?? 0;
-        // Do not mark a market complete just because every remaining job was
-        // skipped/expired/retrying: that would hide newly claimable work in
-        // the same market reset until the next reset. A zero-job market is not
-        // complete either; new jobs can appear later in the same reset.
-        if (total > 0 && (market.pending ?? 0) === 0 && (market.failed ?? 0) === 0 && (market.retry ?? 0) === 0 && success === total) {
-            completedMarketResets[market.marketKey] = market.resetAt;
+        if (!market.resetAt) continue;
+        if (market.ok) {
+            const total = market.jobTotal ?? 0;
+            const success = market.success ?? 0;
+            // Do not mark a market complete just because every remaining job was
+            // skipped/expired/retrying: that would hide newly claimable work in
+            // the same market reset until the next reset. A zero-job market is not
+            // complete either; new jobs can appear later in the same reset.
+            if (total > 0 && (market.pending ?? 0) === 0 && (market.failed ?? 0) === 0 && (market.retry ?? 0) === 0 && success === total) {
+                completedMarketResets[market.marketKey] = market.resetAt;
+            }
         }
         for (const job of market.jobs ?? []) {
             if (job.status === 'done') completedJobResets[job.jobId] = market.resetAt;
@@ -96,7 +103,7 @@ export async function finalizeAutoFinish(
     await deps.store.set({ last, completedResets: completedMarketResets, completedJobs: completedJobResets });
     deps.onPersisted?.(last, completedMarketResets, completedJobResets);
     deps.events.publish('auto.jobs.done', last);
-    if (input.currentSettings.autoDismissFailedJobsEnabled && !input.stopped) {
+    if (input.dismiss !== false && input.currentSettings.autoDismissFailedJobsEnabled && !input.stopped) {
         try {
             // Only dismiss jobs the game reports as failed/expired. A job
             // that failed inside the extension (minigame lock, timeout,

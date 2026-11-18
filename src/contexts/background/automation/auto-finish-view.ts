@@ -40,47 +40,64 @@ export function buildLiveMarkets(
     allowedTypes: ReadonlySet<JobOffer['type']>,
     locks: JobLockRegistry,
     now: number,
+    completed?: {
+        readonly completedJobs?: Readonly<Record<string, string>>;
+        readonly resetByMarket?: ReadonlyMap<string, string | null>;
+    },
 ): AutoFinishMarketResult[] {
     const runnableIds = new Set(runnable.map((job) => job.id));
+    const completedJobs = completed?.completedJobs ?? {};
+    const resetByMarket = completed?.resetByMarket;
     return synced.markets.map((market) => {
         const base = autoFinishMarketBase(market);
         if (!market.ok) return { ...base, jobs: [] };
         const jobs = synced.jobs
             .filter((job) => job.marketKey === market.marketKey)
             .map((job): AutoFinishJobResult => {
-                const typeBlocked = !allowedTypes.has(job.type);
-                const needsServer = !isServerlessJob(job.type);
+                const claimOnly = job.alreadyTaken && job.canComplete;
+                const typeBlocked = !claimOnly && !allowedTypes.has(job.type);
+                const needsServer = !claimOnly && !isServerlessJob(job.type);
                 const lockUntil = locks.lockUntil(job.id);
                 const locked = lockUntil !== undefined && lockUntil > now;
                 const exhausted = locks.isRetryExhausted(job.id);
+                const resetAt = resetByMarket?.get(job.marketKey) ?? null;
+                // Jobs completed earlier in this reset stay done instead of
+                // reappearing as "already completed" (and losing their tag).
+                const completedForReset = resetAt !== null && completedJobs[job.id] === resetAt;
                 const blocked = (needsServer && !job.serverId) || typeBlocked || locked || exhausted || !runnableIds.has(job.id);
                 return {
                     jobId: job.id,
                     name: job.name,
                     serverName: job.serverName,
                     marketKey: job.marketKey,
-                    status: exhausted ? 'retry' : blocked ? 'skipped' : 'pending',
+                    status: completedForReset ? 'done' : exhausted ? 'retry' : blocked ? 'skipped' : 'pending',
                     rewardCredits: job.rewardCredits,
                     rewardReputation: job.rewardReputation,
-                    ...(needsServer && !job.serverId
-                        ? { error: 'No target server for this job', code: 'NO_SERVER', stage: 'route' }
-                        : typeBlocked
-                            ? { error: 'Job type disabled for auto completion', code: 'TYPE_DISABLED', stage: 'select' }
-                            : locked
-                                ? { error: 'Minigame is locked', code: 'MINIGAME_FAILED', stage: 'minigame', lockExpiresAt: lockUntil }
-                                : exhausted
-                                    ? { error: 'Retry budget exhausted for this market reset', code: 'RETRY_EXHAUSTED', stage: 'retry', retryExhausted: true }
-                                    : !runnableIds.has(job.id)
-                                        ? { error: 'Already completed for this market reset', code: 'ALREADY_COMPLETED' }
-                                        : {}),
+                    ...(completedForReset
+                        ? {}
+                        : needsServer && !job.serverId
+                            ? { error: 'No target server for this job', code: 'NO_SERVER', stage: 'route' }
+                            : typeBlocked
+                                ? { error: 'Job type disabled for auto completion', code: 'TYPE_DISABLED', stage: 'select' }
+                                : locked
+                                    ? { error: 'Minigame is locked', code: 'MINIGAME_FAILED', stage: 'minigame', lockExpiresAt: lockUntil }
+                                    : exhausted
+                                        ? { error: 'Retry budget exhausted for this market reset', code: 'RETRY_EXHAUSTED', stage: 'retry', retryExhausted: true }
+                                        : !runnableIds.has(job.id)
+                                            ? { error: 'Already completed for this market reset', code: 'ALREADY_COMPLETED' }
+                                            : {}),
                 };
             });
+        const count = (status: AutoFinishJobResult['status']) => jobs.filter((job) => job.status === status).length;
         return {
             ...base,
             jobTotal: jobs.length,
-            success: 0,
-            failed: 0,
-            pending: jobs.filter((job) => job.status === 'pending').length,
+            success: count('done'),
+            retry: count('retry'),
+            skipped: count('skipped'),
+            expired: count('expired'),
+            failed: count('failed'),
+            pending: count('pending') + count('running'),
             jobs,
         };
     });
@@ -97,20 +114,70 @@ export interface FinalMarketInput {
     readonly failedById: ReadonlyMap<string, AutoJobQueueFailure>;
     readonly stopped: boolean;
     readonly now: number;
+    /** Previous report: failed markets keep their job rows and are marked stale. */
+    readonly previousMarkets?: readonly AutoFinishMarketResult[];
+    /** Jobs completed in this run, including cached claim-only jobs. */
+    readonly doneJobs?: readonly JobOffer[];
 }
 
 /** Builds the per-market report shown by Auto Finish after a run. */
 export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketResult[] {
-    const { synced, allowedTypes, doneIds, completedJobs, resetByMarket, locks, outcomes, failedById, stopped, now } = params;
-    return synced.markets.map((market) => {
+    const { synced, allowedTypes, doneIds, completedJobs, resetByMarket, locks, outcomes, failedById, stopped, now, previousMarkets } = params;
+    const markets: AutoFinishMarketResult[] = synced.markets.map((market) => {
         const base = autoFinishMarketBase(market);
-        if (!market.ok) return { ...base, jobs: [] };
+        if (!market.ok) {
+            const previous = previousMarkets?.find((entry) => entry.marketKey === market.marketKey);
+            const doneHere = (params.doneJobs ?? []).filter((job) => job.marketKey === market.marketKey);
+            const previousJobs = (previous?.jobs ?? []).filter((job) => !doneIds.has(job.jobId));
+            const jobs: AutoFinishJobResult[] = [
+                ...previousJobs,
+                ...doneHere.map((job): AutoFinishJobResult => ({
+                    jobId: job.id,
+                    name: job.name,
+                    serverName: job.serverName,
+                    marketKey: job.marketKey,
+                    status: 'done',
+                    rewardCredits: job.rewardCredits,
+                    rewardReputation: job.rewardReputation,
+                })),
+            ];
+            return {
+                ...base,
+                stale: true,
+                resetAt: previous?.resetAt ?? null,
+                jobs,
+                jobTotal: jobs.length,
+                success: jobs.filter((job) => job.status === 'done').length,
+                retry: jobs.filter((job) => job.status === 'retry').length,
+                skipped: jobs.filter((job) => job.status === 'skipped').length,
+                expired: jobs.filter((job) => job.status === 'expired').length,
+                failed: jobs.filter((job) => job.status === 'failed').length,
+                pending: jobs.filter((job) => job.status === 'pending' || job.status === 'running').length,
+                ...(previous?.updatedAt !== undefined ? { updatedAt: previous.updatedAt } : {}),
+            };
+        }
         const marketJobs = synced.jobs.filter((job) => job.marketKey === market.marketKey);
         const jobs: AutoFinishJobResult[] = marketJobs.map((job): AutoFinishJobResult => {
             const failure = failedById.get(job.id);
             const failureError = failure?.error;
             const outcome = outcomes.get(job.id);
-            if (!job.serverId && !isServerlessJob(job.type)) {
+            const resetAt = resetByMarket.get(job.marketKey) ?? null;
+            const completedForReset = resetAt !== null && completedJobs[job.id] === resetAt;
+            // Report a job as done when it completed in this run or earlier in
+            // the same reset. This keeps the Done tag after claim-only passes
+            // and after a market refresh failed in a later cycle.
+            if (doneIds.has(job.id) || completedForReset) {
+                return {
+                    jobId: job.id,
+                    name: job.name,
+                    serverName: job.serverName,
+                    marketKey: job.marketKey,
+                    status: 'done',
+                    rewardCredits: job.rewardCredits,
+                    rewardReputation: job.rewardReputation,
+                };
+            }
+            if (!job.serverId && !isServerlessJob(job.type) && !(job.alreadyTaken && job.canComplete)) {
                 return {
                     jobId: job.id,
                     name: job.name,
@@ -124,7 +191,7 @@ export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketRes
                     stage: 'route',
                 };
             }
-            if (!allowedTypes.has(job.type)) {
+            if (!allowedTypes.has(job.type) && !(job.alreadyTaken && job.canComplete)) {
                 return {
                     jobId: job.id,
                     name: job.name,
@@ -138,18 +205,6 @@ export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketRes
                     stage: 'select',
                 };
             }
-            if (doneIds.has(job.id)) {
-                return {
-                    jobId: job.id,
-                    name: job.name,
-                    serverName: job.serverName,
-                    marketKey: job.marketKey,
-                    status: 'done',
-                    rewardCredits: job.rewardCredits,
-                    rewardReputation: job.rewardReputation,
-                };
-            }
-            const resetAt = resetByMarket.get(job.marketKey) ?? null;
             const lockUntil = locks.lockUntil(job.id);
             if (lockUntil !== undefined && lockUntil > now) {
                 return {
@@ -230,20 +285,6 @@ export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketRes
                     stage: failureError?.stage ?? 'select',
                 };
             }
-            if (resetAt !== null && completedJobs[job.id] === resetAt) {
-                return {
-                    jobId: job.id,
-                    name: job.name,
-                    serverName: job.serverName,
-                    marketKey: job.marketKey,
-                    status: 'skipped',
-                    rewardCredits: job.rewardCredits,
-                    rewardReputation: job.rewardReputation,
-                    error: 'Already completed for this market reset',
-                    code: 'ALREADY_COMPLETED',
-                    stage: 'select',
-                };
-            }
             return {
                 jobId: job.id,
                 name: job.name,
@@ -267,4 +308,12 @@ export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketRes
             jobs,
         };
     });
+    // A per-market refresh only contains the markets that were stale. Keep the
+    // rows of markets that were not refreshed so their statuses do not vanish.
+    if (previousMarkets) {
+        for (const previous of previousMarkets) {
+            if (!synced.markets.some((market) => market.marketKey === previous.marketKey)) markets.push(previous);
+        }
+    }
+    return markets;
 }

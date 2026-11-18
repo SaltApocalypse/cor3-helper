@@ -1,6 +1,7 @@
 import { JOB_MARKETS, type JobMarketDefinition } from '../../../domains/jobs/markets.js';
 import type { JobOffer } from '../../../domains/jobs/model.js';
 import type { MarketView } from '../../../domains/markets/model.js';
+import type { RawMarketSnapshot } from '../../../contracts/market.js';
 import { mapMarketSnapshotJobs, type SkippedJob } from '../../../application/auto-job/market-mapper.js';
 import { mapMarketView } from '../../../application/markets/map.js';
 import type { NetworkSnapshotService } from '../../../application/network/snapshot-service.js';
@@ -24,6 +25,8 @@ export interface JobMarketSyncEntry {
     readonly expired?: number;
     readonly pending?: number;
     readonly jobs?: readonly import('../../../contracts/auto-finish.js').AutoFinishJobResult[];
+    readonly updatedAt?: number;
+    readonly stale?: boolean;
     readonly error?: string;
     readonly errorCode?: string;
 }
@@ -111,31 +114,36 @@ export class JobMarketSync {
             if (selected.indexOf(market) < selected.length - 1) await this.humanDelay(350, 700);
         }
 
-        // Retry a failed market once inside the same queued operation. The
-        // initial pass deliberately keeps going when one market is slow, so a
-        // transient timeout does not leave the UI stuck on "fetch failed".
-        const retryable = failed.filter((market) => isRetryableMarketFailure(marketEntries.get(market.key)));
-        if (retryable.length > 0 && !shouldStop?.()) {
-            this.deps.logger.info('auto-jobs', `Retrying ${retryable.length} market(s) after fetch failure`, {
-                markets: retryable.map((market) => market.key),
+        // Retry failed markets inside the same queued operation. The initial
+        // pass deliberately keeps going when one market is slow, so a transient
+        // timeout does not leave the UI stuck on "fetch failed". Two rounds with
+        // a growing delay cover the common "just changed endpoint" case.
+        let pending = failed.filter((market) => isRetryableMarketFailure(marketEntries.get(market.key)));
+        for (let round = 0; round < 2 && pending.length > 0 && !shouldStop?.(); round++) {
+            this.deps.logger.info('auto-jobs', `Retrying ${pending.length} market(s) after fetch failure`, {
+                markets: pending.map((market) => market.key),
+                attempt: round + 1,
             });
-            await this.humanDelay(1_500, 2_500);
+            await this.humanDelay(round === 0 ? 3_000 : 6_000, round === 0 ? 5_000 : 8_000);
             const refreshed = await this.deps.snapshots.get(true);
             const retrySnapshot = refreshed.ok ? refreshed.value : undefined;
-            for (const market of retryable) {
+            const next: JobMarketDefinition[] = [];
+            for (const market of pending) {
                 if (shouldStop?.()) break;
                 const synced = await this.syncMarketEntry(
                     market,
                     owner,
-                    `${reason}:retry`,
+                    `${reason}:retry${round + 1}`,
                     retrySnapshot,
                     'retry',
                 );
                 jobs.push(...synced.jobs);
                 marketEntries.set(market.key, synced.entry);
+                if (!synced.entry.ok && isRetryableMarketFailure(synced.entry)) next.push(market);
                 publish();
-                if (retryable.indexOf(market) < retryable.length - 1) await this.humanDelay(350, 700);
+                if (pending.indexOf(market) < pending.length - 1) await this.humanDelay(350, 700);
             }
+            pending = next;
         }
 
         return { jobs, markets: [...marketEntries.values()] };
@@ -169,6 +177,7 @@ export class JobMarketSync {
                     label: market.label,
                     ok: false,
                     skipped: 0,
+                    stale: true,
                     error: synced.error.message,
                     errorCode: synced.error.code,
                 },
@@ -206,6 +215,8 @@ export class JobMarketSync {
                 expired: mapped.expired,
                 skippedJobs: mapped.skippedJobs,
                 resetAt: mapped.resetAt ?? null,
+                updatedAt: this.now(),
+                stale: false,
             },
             jobs: mapped.jobs,
         };
@@ -241,6 +252,21 @@ export class JobMarketSync {
                 reputation: view.reputation,
             },
         };
+    }
+
+    /**
+     * Mirrors a game-pushed market snapshot into the persisted market cache so
+     * the Progress page sees the same data as the Auto Jobs job list.
+     */
+    async cacheSnapshotView(marketId: string, snapshot: RawMarketSnapshot): Promise<void> {
+        const view = mapMarketView(snapshot);
+        if (!view) return;
+        await this.deps.marketCache.set(marketId, view);
+        this.deps.events.publish('market.reputation.updated', {
+            marketId,
+            credits: view.credits,
+            reputation: view.reputation,
+        });
     }
 
     async refreshCachedOptions(marketId: string): Promise<void> {

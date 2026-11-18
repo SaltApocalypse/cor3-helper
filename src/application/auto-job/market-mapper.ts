@@ -126,12 +126,29 @@ function conditionsOf(raw: unknown): readonly JobCondition[] | undefined {
 }
 
 function serverIdOf(job: RawJob): string | null {
-    const related = job.relatedServers?.[0];
-    if (related?.id) return related.id;
-    const conditions = job.conditions;
-    if (conditions && typeof conditions === 'object' && !Array.isArray(conditions)) {
-        const id = (conditions as { serverConfigId?: unknown }).serverConfigId;
-        if (typeof id === 'string' && id.length > 0) return id;
+    for (const related of job.relatedServers ?? []) {
+        if (typeof related?.id === 'string' && related.id.length > 0) return related.id;
+    }
+    // Some payloads only expose the target server inside `conditions.items`.
+    // Walk the structure so those jobs are not rejected as `no-server`.
+    const queue: unknown[] = [job.conditions, job.relatedServers];
+    const seen = new Set<unknown>();
+    while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current || typeof current !== 'object' || seen.has(current)) continue;
+        seen.add(current);
+        if (Array.isArray(current)) {
+            queue.push(...current);
+            continue;
+        }
+        const entry = current as Record<string, unknown>;
+        for (const key of ['serverConfigId', 'serverId', 'targetServerId']) {
+            const value = entry[key];
+            if (typeof value === 'string' && value.length > 0) return value;
+        }
+        for (const value of Object.values(entry)) {
+            if (value && typeof value === 'object') queue.push(value);
+        }
     }
     return null;
 }

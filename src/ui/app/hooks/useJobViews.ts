@@ -5,6 +5,7 @@ import type { JobOffer } from '../../../application/popup/catalog.js';
 import type { JobMarketView } from '../../components/JobMarketList.js';
 import {
     buildJobMarketViews,
+    buildJobReasonById,
     buildJobStatusById,
     selectShownJobReport,
     type JobRunStatus,
@@ -19,6 +20,7 @@ import {
 export interface JobViewsInput {
     readonly autoFinishEnabled: boolean;
     readonly autoRunMarkets: readonly AutoFinishMarketResult[];
+    readonly completedJobs: Readonly<Record<string, string>>;
     readonly jobReport: readonly UiJobReport[];
     readonly autoJobsMarkets: readonly AutoJobsMarket[];
     readonly jobRunStatusById: Readonly<Record<string, JobRunStatus>>;
@@ -28,6 +30,7 @@ export interface JobViewsInput {
 
 export interface JobViews {
     readonly jobStatusById: Readonly<Record<string, string>>;
+    readonly jobReasonById: Readonly<Record<string, string>>;
     readonly jobMarketViews: readonly JobMarketView[];
     readonly shownJobReport: readonly UiJobReport[];
 }
@@ -36,6 +39,7 @@ export function useJobViews(input: JobViewsInput): JobViews {
     const {
         autoFinishEnabled,
         autoRunMarkets,
+        completedJobs,
         jobReport,
         autoJobsMarkets,
         jobRunStatusById,
@@ -44,8 +48,17 @@ export function useJobViews(input: JobViewsInput): JobViews {
     } = input;
 
     const jobStatusById = useMemo(
-        () => buildJobStatusById(autoFinishEnabled, autoRunMarkets, jobRunStatusById),
-        [autoFinishEnabled, autoRunMarkets, jobRunStatusById],
+        () => buildJobStatusById(autoFinishEnabled, autoRunMarkets, jobRunStatusById, {
+            completedJobs,
+            resetByMarket: jobResetByMarket,
+            jobsByMarket,
+        }),
+        [autoFinishEnabled, autoRunMarkets, completedJobs, jobRunStatusById, jobResetByMarket, jobsByMarket],
+    );
+
+    const jobReasonById = useMemo(
+        () => buildJobReasonById(autoFinishEnabled, autoRunMarkets),
+        [autoFinishEnabled, autoRunMarkets],
     );
 
     const jobMarketViews = useMemo(
@@ -58,5 +71,5 @@ export function useJobViews(input: JobViewsInput): JobViews {
         [autoFinishEnabled, autoRunMarkets, jobReport, autoJobsMarkets],
     );
 
-    return { jobStatusById, jobMarketViews, shownJobReport };
+    return { jobStatusById, jobReasonById, jobMarketViews, shownJobReport };
 }

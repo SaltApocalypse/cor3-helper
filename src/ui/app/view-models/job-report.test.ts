@@ -193,6 +193,27 @@ describe('buildJobStatusById', () => {
         expect(result).toEqual({ a: 'done', b: 'expired' });
     });
 
+    it('keeps a persisted Done status when a later report says skipped', () => {
+        const result = buildJobStatusById(true, [{
+            marketKey: 'home',
+            label: 'Home',
+            ok: true,
+            skipped: 0,
+            jobs: [{ jobId: 'a', name: 'A', serverName: null, marketKey: 'home', status: 'skipped' }],
+        }], {}, {
+            completedJobs: { a: '2026-11-18T04:00:00.000Z' },
+            jobsByMarket: { home: [offer({ id: 'a', marketKey: 'home' })] },
+        });
+        expect(result.a).toBe('done');
+    });
+
+    it('tags a claimable job that has no run report entry', () => {
+        const result = buildJobStatusById(false, [], {}, {
+            jobsByMarket: { home: [offer({ id: 'a', marketKey: 'home', alreadyTaken: true, canComplete: true })] },
+        });
+        expect(result.a).toBe('ready');
+    });
+
     it('ignores Auto Finish data while it is disabled', () => {
         expect(buildJobStatusById(false, [{
             marketKey: 'home',

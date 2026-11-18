@@ -71,14 +71,41 @@ async function requestMap(): Promise<BridgeResult<RawNetworkMap>> {
     return game.request('game.getMap', {}, rawNetworkMapSchema, 12000);
 }
 
+/**
+ * Options and lots change far less often than jobs. Cache them briefly so a
+ * market refresh only costs one `get.jobs` request in steady state. Jobs are
+ * always fetched live.
+ */
+const MARKET_AUX_TTL_MS = 5 * 60_000;
+const marketAuxCache = new Map<string, { readonly options?: unknown; readonly lots?: unknown; readonly at: number }>();
+
 async function fetchMarket(marketId: string): Promise<BridgeResult<RawMarketSnapshot>> {
-    const options = await game.request('game.requestMarketOptions', { marketId }, z.unknown(), 35_000);
-    if (!options.ok) return options;
-    const lots = await game.request('game.requestMarketLots', { marketId }, z.unknown(), 35_000);
-    if (!lots.ok) return lots;
+    // Jobs are the only mandatory component for automation. Options/lots are
+    // best-effort: a slow or unavailable shop must not hide newly posted jobs.
     const jobs = await game.request('game.requestMarketJobs', { marketId }, z.unknown(), 35_000);
     if (!jobs.ok) return jobs;
-    const parsed = rawMarketSnapshotSchema.safeParse({ options: options.value, lots: lots.value, jobs: jobs.value });
+    let aux = marketAuxCache.get(marketId);
+    if (!aux || Date.now() - aux.at >= MARKET_AUX_TTL_MS) {
+        // Options/lots are optional and independent; fetch them in parallel with
+        // a short timeout so a slow shop cannot delay or block the job refresh.
+        const [options, lots] = await Promise.all([
+            game.request('game.requestMarketOptions', { marketId }, z.unknown(), 10_000),
+            game.request('game.requestMarketLots', { marketId }, z.unknown(), 10_000),
+        ]);
+        if (options.ok || lots.ok) {
+            aux = {
+                ...(options.ok ? { options: options.value } : aux?.options !== undefined ? { options: aux.options } : {}),
+                ...(lots.ok ? { lots: lots.value } : aux?.lots !== undefined ? { lots: aux.lots } : {}),
+                at: Date.now(),
+            };
+            marketAuxCache.set(marketId, aux);
+        }
+    }
+    const parsed = rawMarketSnapshotSchema.safeParse({
+        options: aux?.options ?? {},
+        lots: aux?.lots ?? [],
+        jobs: jobs.value,
+    });
     if (!parsed.success) {
         return { ok: false, error: { code: 'MARKET_INVALID', message: 'Market snapshot failed schema validation' } };
     }

@@ -69,8 +69,8 @@ describe('Auto Finish retry scheduling', () => {
         expect(decision).toEqual({ at: 75_000, reason: 'maintenance' });
     });
 
-    it('falls back to a five minute retry when failures carry no timing', async () => {
+    it('falls back to a ten minute retry when failures carry no timing', async () => {
         const decision = await computeAutoFinishRetry(settings(), snapshots(), 1_000, [failure({})], false);
-        expect(decision).toEqual({ at: 316_000, reason: 'retry' });
+        expect(decision).toEqual({ at: 616_000, reason: 'retry' });
     });
 });

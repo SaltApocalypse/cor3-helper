@@ -156,17 +156,66 @@ export function buildJobStatusById(
     autoFinishEnabled: boolean,
     autoRunMarkets: readonly AutoFinishMarketResult[],
     jobRunStatusById: Readonly<Record<string, JobRunStatus | undefined>>,
+    extras: {
+        readonly completedJobs?: Readonly<Record<string, string>>;
+        readonly resetByMarket?: Readonly<Record<string, string | null>>;
+        readonly jobsByMarket?: Readonly<Record<string, readonly JobOffer[]>>;
+    } = {},
 ): Record<string, string> {
     const result: Record<string, string> = {};
+    const completedJobs = extras.completedJobs ?? {};
+    const jobsByMarket = extras.jobsByMarket ?? {};
+    // A completed job keeps its Done tag even when a later market refresh
+    // failed or the run was skipped. This is the persisted truth, not a report.
+    const completedIds = new Set<string>();
+    for (const [marketKey, jobs] of Object.entries(jobsByMarket)) {
+        const currentReset = extras.resetByMarket?.[marketKey] ?? null;
+        for (const job of jobs) {
+            const completedReset = completedJobs[job.id];
+            if (completedReset === undefined) continue;
+            // A completed entry from a previous market reset must not tag a
+            // newly generated job. When the reset is unknown, keep the tag.
+            if (currentReset !== null && completedReset !== currentReset) continue;
+            result[job.id] = 'done';
+            completedIds.add(job.id);
+        }
+    }
     if (autoFinishEnabled) {
         for (const market of autoRunMarkets) {
+            // Failed markets keep the previous report rows; do not let their
+            // stale `skipped`/`pending` entries overwrite a persisted Done.
+            const staleMarket = market.stale === true || market.ok === false;
             for (const job of market.jobs ?? []) {
+                if (completedIds.has(job.jobId)) continue;
+                if (staleMarket && result[job.jobId] === 'done') continue;
                 result[job.jobId] = job.code === 'EXPIRED' || job.status === 'expired' ? 'expired' : job.status;
             }
         }
     }
     for (const [jobId, status] of Object.entries(jobRunStatusById)) {
         if (status !== undefined) result[jobId] = status;
+    }
+    // Last resort: a claimable row with no report entry still needs a tag.
+    for (const jobs of Object.values(jobsByMarket)) {
+        for (const job of jobs) {
+            if (result[job.id] !== undefined) continue;
+            if (job.alreadyTaken && job.canComplete) result[job.id] = 'ready';
+        }
+    }
+    return result;
+}
+
+/** Per-job skip/retry reason used as a tag tooltip. */
+export function buildJobReasonById(
+    autoFinishEnabled: boolean,
+    autoRunMarkets: readonly AutoFinishMarketResult[],
+): Record<string, string> {
+    const result: Record<string, string> = {};
+    if (!autoFinishEnabled) return result;
+    for (const market of autoRunMarkets) {
+        for (const job of market.jobs ?? []) {
+            if (job.error) result[job.jobId] = job.error;
+        }
     }
     return result;
 }
@@ -191,6 +240,8 @@ export function buildJobMarketViews(input: {
             skippedJobs: snapshotMarket?.skippedJobs ?? [],
             resetAt,
             ok: snapshotMarket?.ok ?? true,
+            ...(snapshotMarket?.updatedAt !== undefined ? { updatedAt: snapshotMarket.updatedAt } : {}),
+            stale: snapshotMarket?.stale === true,
             ...(snapshotMarket?.error ? { error: snapshotMarket.error } : {}),
         };
     });
@@ -203,7 +254,7 @@ export function groupJobsByMarket(jobs: readonly JobOffer[]): Record<string, Job
     return grouped;
 }
 
-/** Reset countdown per healthy market. */
+/** Reset countdown per healthy market (or a failed market with a cached reset). */
 export function resetAtByMarket(
     markets: readonly {
         readonly marketKey: string;
@@ -215,7 +266,7 @@ export function resetAtByMarket(
 ): Record<string, string | null> {
     const resets: Record<string, string | null> = {};
     for (const market of markets) {
-        if (market.ok) resets[market.marketKey] = market.resetAt ?? null;
+        if (market.ok || market.resetAt) resets[market.marketKey] = market.resetAt ?? null;
     }
     return resets;
 }

@@ -14,6 +14,7 @@ import type { ExpeditionOverview } from '../../domains/expeditions/model.js';
 import type { DroneState } from '../../domains/drone/model.js';
 import type { JobMarketDefinition } from '../../domains/jobs/markets.js';
 import { jobOfferSchema } from '../../contracts/jobs.js';
+import { buildNumberFromVersionName } from '../../kernel/version.js';
 
 const pingSchema = z.object({ version: z.string(), phase: z.string() });
 const updateCheckSchema = z.object({
@@ -384,6 +385,12 @@ const autoJobsStatusSchema = z.object({
     nextRefreshAt: z.number().nullable(),
     refreshReason: z.enum(['interval', 'reset', 'fallback']),
     lastRefreshAt: z.number().nullable(),
+    snapshotAt: z.number().nullable().default(null),
+    locks: z.record(z.string(), z.number()).default({}),
+    retryAttempts: z.record(z.string(), z.object({
+        count: z.number().int().nonnegative(),
+        lastAttemptAt: z.number(),
+    }).strict()).default({}),
 }).strict();
 const autoFinishMarketSchema = z.object({
     marketKey: z.string(),
@@ -398,6 +405,8 @@ const autoFinishMarketSchema = z.object({
     failed: z.number().int().nonnegative().optional(),
     pending: z.number().int().nonnegative().optional(),
     jobs: z.array(autoFinishJobSchema).optional(),
+    updatedAt: z.number().int().nonnegative().optional(),
+    stale: z.boolean().optional(),
     error: z.string().optional(),
 }).strict();
 const autoFinishFailureSchema = z.object({
@@ -447,6 +456,7 @@ const autoFinishStatusSchema = z.object({
     progress: autoFinishProgressSchema.nullable(),
     nextRetryAt: z.number().nullable(),
     retryReason: z.string().nullable(),
+    completedJobs: z.record(z.string(), z.string()).default({}),
 }).strict();
 const autoFinishRunSchema = z.object({
     jobs: z.number().int().nonnegative(),
@@ -595,6 +605,8 @@ const jobAllMarketsSchema = z.object({
         expired: z.number().int().nonnegative().default(0),
         skippedJobs: z.array(skippedJobSchema).default([]),
         resetAt: z.string().nullable().optional(),
+        updatedAt: z.number().int().nonnegative().optional(),
+        stale: z.boolean().optional(),
         error: z.string().optional(),
         errorCode: z.string().optional(),
     }).strict()),
@@ -711,11 +723,13 @@ export class ChromePopupPortal implements PopupPortal {
 
     versionInfo(): { readonly name: string; readonly version: string; readonly versionName: string; readonly build: string | null } {
         const manifest = chrome.runtime.getManifest();
+        const versionName = (manifest as { version_name?: string }).version_name ?? manifest.version;
+        const embeddedBuild = buildNumberFromVersionName(versionName);
         return {
             name: manifest.name,
             version: manifest.version,
-            versionName: (manifest as { version_name?: string }).version_name ?? manifest.version,
-            build: typeof __COR3_BUILD_NUMBER__ === 'string' ? __COR3_BUILD_NUMBER__ : null,
+            versionName,
+            build: embeddedBuild ?? (typeof __COR3_BUILD_NUMBER__ === 'string' ? __COR3_BUILD_NUMBER__ : null),
         };
     }
 
@@ -865,6 +879,8 @@ export class ChromePopupPortal implements PopupPortal {
                 expired: market.expired ?? 0,
                 skippedJobs: market.skippedJobs ?? [],
                 resetAt: market.resetAt ?? null,
+                ...(market.updatedAt !== undefined ? { updatedAt: market.updatedAt } : {}),
+                stale: market.stale === true,
             }
             : {
                 marketKey: market.marketKey,
@@ -874,7 +890,9 @@ export class ChromePopupPortal implements PopupPortal {
                 failed: market.failed ?? 0,
                 expired: market.expired ?? 0,
                 skippedJobs: market.skippedJobs ?? [],
-                resetAt: null,
+                resetAt: market.resetAt ?? null,
+                ...(market.updatedAt !== undefined ? { updatedAt: market.updatedAt } : {}),
+                stale: true,
                 error: market.error ?? 'Market sync failed',
                 ...(market.errorCode ? { errorCode: market.errorCode } : {}),
             });

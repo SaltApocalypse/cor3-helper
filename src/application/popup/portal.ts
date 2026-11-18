@@ -333,6 +333,11 @@ export interface AutoJobsStatus {
     readonly nextRefreshAt: number | null;
     readonly refreshReason: 'interval' | 'reset' | 'fallback';
     readonly lastRefreshAt: number | null;
+    readonly snapshotAt: number | null;
+    /** Active minigame locks: job id -> expiry. */
+    readonly locks: Readonly<Record<string, number>>;
+    /** Per-job retry budget for the current reset. */
+    readonly retryAttempts: Readonly<Record<string, { readonly count: number; readonly lastAttemptAt: number }>>;
 }
 
 export interface AutoFinishStatus {
@@ -344,6 +349,8 @@ export interface AutoFinishStatus {
     readonly progress: JobQueueProgress | null;
     readonly nextRetryAt: number | null;
     readonly retryReason: string | null;
+    /** Job id -> market reset it was completed for. */
+    readonly completedJobs: Readonly<Record<string, string>>;
 }
 
 export interface JobQueueState {

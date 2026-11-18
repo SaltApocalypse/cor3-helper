@@ -1,4 +1,5 @@
 import type { JobOffer } from '../../../domains/jobs/model.js';
+import { JOB_MARKETS } from '../../../domains/jobs/markets.js';
 import type { AutoJobQueueFailure, AutoJobQueueResult } from '../../../application/auto-job/queue.js';
 import { classifyJobFailure } from '../../../application/auto-job/outcome.js';
 import type { RunLogSink } from '../../../application/automation/ports.js';
@@ -54,7 +55,12 @@ export async function runDeferredRetryPass(deps: DeferredRetryDeps): Promise<Def
         return { runDone, failedById, deferredExpiredIds };
     }
     try {
-        const retrySynced = await deps.markets.syncAll(deps.owner, 'auto-jobs-retry', undefined, undefined, deps.cancelRequested);
+        // Only refresh the markets that still have retry candidates. Refreshing
+        // all four markets here made every retry pass move the endpoint three
+        // times more than necessary.
+        const retryMarketKeys = new Set(retryCandidates.map((entry) => entry.job.marketKey));
+        const retryTargets = JOB_MARKETS.filter((market) => retryMarketKeys.has(market.key));
+        const retrySynced = await deps.markets.syncAll(deps.owner, 'auto-jobs-retry', retryTargets, undefined, deps.cancelRequested);
         deps.publishSnapshot({ at: deps.now(), jobs: retrySynced.jobs, markets: retrySynced.markets });
         const freshById = new Map(retrySynced.jobs.map((job) => [job.id, job]));
         const syncedMarketKeys = new Set(retrySynced.markets.filter((market) => market.ok).map((market) => market.marketKey));

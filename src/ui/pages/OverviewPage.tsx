@@ -132,6 +132,7 @@ export function OverviewPage({
                                         <span>{tr('{count} jobs', { count: entry.jobs.length })}</span>
                                         <span>{tr('{count} skipped', { count: entry.skipped })}</span>
                                         <span class={failed > 0 ? 'v2-text-error' : ''}>{tr('{count} failed', { count: failed })}</span>
+                                        {entry.stale ? <span class="v2-tag v2-tag-warn">{tr('stale')}</span> : null}
                                     </div>
                                 </article>
                             );

@@ -101,17 +101,12 @@ export function decryptFileType(
         ?? candidates[0]!;
 }
 
-export function isBuggedJob(job: JobOffer): boolean {
-    return job.serverName === 'D4RK RM7CE' && (job.type === 'Log Deletion' || job.type === 'Log Download');
-}
-
 export function selectJobs(offers: readonly JobOffer[], options: JobSelectionOptions): JobOffer[] {
     const completed = options.completedIds ?? new Set<string>();
     const supported = options.supportedTypes;
     return offers
         .filter((job) => !completed.has(job.id))
         .filter((job) => !supported || supported.has(job.type))
-        .filter((job) => !isBuggedJob(job))
         .sort((a, b) => {
             const server = options.serverPriority(a.serverName, a) - options.serverPriority(b.serverName, b);
             if (server !== 0) return server;

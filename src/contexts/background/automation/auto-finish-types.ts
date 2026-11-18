@@ -18,6 +18,8 @@ export interface AutoFinishLiveRun {
 export interface AutoJobsSink {
     publishSnapshot(update: AutoJobsSnapshot): void;
     scheduleNextRefresh(): Promise<void>;
+    /** Last known snapshot; used only for short-lived claim-only fallbacks. */
+    snapshotView(): AutoJobsSnapshot | null;
     dismissFailedJobs(
         owner: string,
         reason: string,
@@ -54,4 +56,6 @@ export interface AutoFinishStatus {
     readonly progress: AutoJobProgress | null;
     readonly nextRetryAt: number | null;
     readonly retryReason: string | null;
+    /** Job id -> market reset it was completed for. */
+    readonly completedJobs: Readonly<Record<string, string>>;
 }

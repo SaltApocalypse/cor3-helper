@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-15 against build `2.0.5-salta.272`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (93 files / 448 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-15 against build `2.0.6-salta.279`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (95 files / 473 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.5-salta.272`)
+## Current completion snapshot (build `2.0.6-salta.279`)
 
 | Metric | Value |
 |---|---|
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 93 files / 448 tests pass
-- `npm run build` — pass, `2.0.5-salta.272`
+- `npm test` — 95 files / 473 tests pass
+- `npm run build` — pass, `2.0.6-salta.279`
 
 ---
 
@@ -736,7 +736,7 @@ Fixes:
 
 - typecheck / lint pass
 - 80 test files / 355 tests
-- build `2.0.5-salta.272`
+- build `2.0.6-salta.279`
 
 ---
 
@@ -1061,3 +1061,47 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 - Release `2.0.5-salta` consolidates the post-2.0.4 loadout and completion fixes: 35 s loadout request window, 60 s optimized-plan cache, take-first decrypt jobs during minigame locks, zero-power decrypt attempts, claim-only completion bypassing stale locks/retry budgets, and expedition/download/bridge hardening.
 - Release identity: `package.json.version = 2.0.5`, `cor3Fork.releaseLabel = salta`, tag `v2.0.5-salta`; the local build counter remains separate.
+
+
+---
+
+# Part 38 — Poll Stale Market Resets Sooner (2.0.5-salta.273)
+
+- Auto Jobs previously waited the configured interval (often 60 minutes) when every cached market reset time was already in the past. The game had not published the next reset yet, so new jobs that appeared after a reset stayed invisible until the interval or a manual/forced run.
+- `scheduleNextRefresh()` now detects an all-stale reset snapshot and polls at `min(configured interval, 10 minutes)` until a future reset or new jobs appear.
+- A regression test covers the stale-reset schedule.
+
+
+---
+
+# Part 39 — Wake at Market Reset Countdown (2.0.5-salta.274)
+
+- Auto Jobs now always considers future market `resetAt` values when scheduling, even when current jobs are still pending. It wakes at the earliest reset + 30 s if that is sooner than the normal polling interval; otherwise it keeps the normal interval.
+- This makes the market refresh countdown trigger an actual refresh instead of waiting up to the full Auto Jobs interval after a reset.
+- Added a regression test for a future reset arriving before the interval while jobs are still pending.
+
+
+---
+
+# Part 40 — Auto Jobs state truth, retry policy and market freshness (2.0.6-salta.279)
+
+- Every Auto Finish cycle now persists and publishes a report, including "nothing runnable" passes. Previously a blocked cycle returned early, so the UI kept the previous run report and could show a claimable job with no tag at all.
+- Job status tags are derived from persisted completion state (`completedJobs`) first, then the latest run report, then the live snapshot (`ready to claim`). A completed job always shows `done` for its market reset.
+- Failed markets keep the previous per-job report rows and are marked `stale`; the market list and Overview show the last refresh age.
+- Claim-only jobs (`alreadyTaken && canComplete`) are selected before target-server, type, lock and retry-budget checks, and completion no longer requires a target server. This fixes claimable decrypt jobs being skipped after manual minigames.
+- Retry budgets ignore network/maintenance/minigame-lock failures, refresh after a 10-minute quiet period, and are reconciled when the market reset changes. Minigame locks are reconciled with the reset and cleared by a force run.
+- Removed the hardcoded D4RK RM7CE bug filter; the affected job types are attempted normally again.
+- Market sync fetches `get.jobs` first and treats options/lots as optional parallel requests, so a slow shop does not hide jobs. A fresh, fully healthy snapshot suppresses repeated ready-driven full refreshes. The market retry delay is longer, and game-pushed snapshots also update the persisted market cache.
+- Added version label normalization: a display version keeps only the newest build counter (`2.0.5-salta.272` instead of `2.0.5-salta.272.270`).
+
+
+---
+
+# Part 41 — Per-market refresh and push-first cache (2.0.6-salta.279)
+
+- Auto Jobs no longer refresh all four markets on every trigger. `ensureInfo` selects only markets whose `updatedAt` is older than their TTL: 60 seconds in steady state, 15 seconds within two minutes of a known reset. A recent game push therefore makes a ready/scheduled pass a no-op.
+- A trigger that arrives while a cycle is running is coalesced and re-checked after the cycle instead of being dropped.
+- The deferred retry pass and the Auto Finish retry alarm refresh only the markets that still have retryable work.
+- Options/lots are cached in the content script for five minutes; market refreshes only fetch `get.jobs` in steady state.
+- The network map TTL is 60 seconds. Single-market syncs reuse the cached map and force a refresh only when routing fails; the job preflight refreshes a maintenance-blocked map after 30 seconds instead of 120.
+- Market reports preserve rows for markets that were not refreshed, so per-market passes do not blank statuses for the other markets.

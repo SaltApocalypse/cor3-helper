@@ -11,6 +11,17 @@ describe('mapMarketJobs', () => {
         ], { marketId: 'm', marketKey: 'home', recent: false });
         expect(result.jobs.map((job) => job.type)).toEqual(['File Decryption', 'IP Cleanup']);
     });
+    it('resolves a target server id from nested conditions', () => {
+        const result = mapMarketJobs([
+            {
+                id: 'nested', name: 'IP Injection', jobType: 'IP_INJECTION', rewardCredits: 1, rewardReputation: 1, deposit: 0,
+                relatedServers: [{ serverName: 'Server' }],
+                conditions: { items: [{ type: 'InjectIps', serverConfigId: 'nested-server' }] },
+            },
+        ], { marketId: 'm', marketKey: 'home', recent: false });
+        expect(result.jobs[0]?.serverId).toBe('nested-server');
+    });
+
     it('maps open and recently taken jobs', () => {
         const result = mapMarketJobs([
             {

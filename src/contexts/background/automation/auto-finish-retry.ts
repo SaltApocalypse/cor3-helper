@@ -40,7 +40,9 @@ export async function computeAutoFinishRetry(
         }
     }
     if (!Number.isFinite(earliest) && failures.length > 0) {
-        return { at: now + 5 * 60_000 + 15_000, reason: 'retry' };
+        // Transient failures without a game-provided timing get a slow retry;
+        // this is also the cooldown used before a job retry budget refreshes.
+        return { at: now + 10 * 60_000 + 15_000, reason: 'retry' };
     }
     if (!Number.isFinite(earliest)) return null;
     return { at: earliest + 15_000, reason };

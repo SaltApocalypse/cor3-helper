@@ -12,6 +12,8 @@ export interface JobMarketView {
     readonly skippedJobs: readonly AutoJobsSkippedJob[];
     readonly resetAt: string | null;
     readonly ok: boolean;
+    readonly updatedAt?: number;
+    readonly stale?: boolean;
     readonly error?: string;
 }
 
@@ -21,6 +23,7 @@ export interface JobMarketListProps {
     readonly now: number;
     readonly onSelect: (key: string) => void;
     readonly statusById?: Readonly<Record<string, string | undefined>>;
+    readonly statusReasonById?: Readonly<Record<string, string | undefined>>;
     readonly selectedIds?: ReadonlySet<string>;
     readonly onToggleJob?: (id: string) => void;
     readonly onToggleMarket?: (jobs: readonly JobOffer[]) => void;
@@ -50,19 +53,28 @@ function formatRemaining(timestamp: string | null, now: number): string {
 function statusRank(status: string | undefined): number {
     if (status === 'running') return 0;
     if (status === 'pending') return 1;
-    if (status === 'retry') return 2;
-    if (status === 'failed') return 3;
-    if (status === 'expired') return 4;
-    if (status === 'done') return 5;
-    if (status === 'skipped') return 6;
+    if (status === 'ready') return 2;
+    if (status === 'retry') return 3;
+    if (status === 'failed') return 4;
+    if (status === 'expired') return 5;
+    if (status === 'done') return 6;
+    if (status === 'skipped') return 7;
     return 1;
 }
 
 function statusClass(status: string | undefined): string {
     if (status === 'failed') return 'v2-tag-error';
     if (status === 'done') return 'v2-tag-ok';
-    if (status === 'running' || status === 'pending' || status === 'retry' || status === 'expired') return 'v2-tag-warn';
+    if (status === 'ready' || status === 'running' || status === 'pending' || status === 'retry' || status === 'expired') return 'v2-tag-warn';
     return '';
+}
+
+function formatAge(updatedAt: number | undefined, now: number): string {
+    if (updatedAt === undefined || !Number.isFinite(updatedAt)) return '';
+    const seconds = Math.max(0, Math.round((now - updatedAt) / 1000));
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.round(seconds / 60);
+    return `${minutes}m`;
 }
 
 function MarketTab({ market }: { readonly market: JobMarketDefinition }) {
@@ -86,6 +98,7 @@ export function JobMarketList({
     now,
     onSelect,
     statusById,
+    statusReasonById,
     selectedIds,
     onToggleJob,
     onToggleMarket,
@@ -127,6 +140,8 @@ export function JobMarketList({
                     {retryCount > 0 ? ` · ${tr('{count} retry', { count: retryCount })}` : ''}
                     {expiredCount > 0 ? ` · ${tr('{count} expired', { count: expiredCount })}` : ''}
                     {resetLabel ? ` · ${tr('reset {time}', { time: resetLabel })}` : ` · ${tr('reset unknown')}`}
+                    {active.updatedAt !== undefined ? ` · ${tr('updated {time} ago', { time: formatAge(active.updatedAt, now) })}` : ''}
+                    {active.stale ? <span class="v2-tag v2-tag-warn">{tr('stale')}</span> : null}
                     {!active.ok && active.error ? ` · ${active.error}` : ''}
                 </p>
             </div>
@@ -157,7 +172,14 @@ export function JobMarketList({
                                         {content}
                                     </label>
                                 ) : content}
-                                {status ? <span class={`v2-tag ${statusClass(status)}`}>{tr(status)}</span> : null}
+                                {status ? (
+                                    <span
+                                        class={`v2-tag ${statusClass(status)}`}
+                                        title={statusReasonById?.[job.id]}
+                                    >
+                                        {tr(status)}
+                                    </span>
+                                ) : null}
                             </li>
                         );
                     })}

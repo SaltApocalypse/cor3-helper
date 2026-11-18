@@ -1,8 +1,8 @@
-import type { AutoJobsSnapshot } from '../../../contracts/auto-jobs.js';
+import type { AutoJobsMarket, AutoJobsSnapshot } from '../../../contracts/auto-jobs.js';
 import type { AutoFinishLastRun, AutoFinishRunResult } from '../../../contracts/auto-finish.js';
 import type { SettingsV1 } from '../../../contracts/storage.js';
 import type { RawMarketSnapshot } from '../../../contracts/market.js';
-import { JOB_MARKETS } from '../../../domains/jobs/markets.js';
+import { JOB_MARKETS, type JobMarketDefinition } from '../../../domains/jobs/markets.js';
 import { mapMarketSnapshotJobs } from '../../../application/auto-job/market-mapper.js';
 import { syncAllJobMarkets, syncJobMarket, type JobSnapshotSyncDeps } from './auto-jobs-sync.js';
 import { mergeAutoJobsSnapshot } from '../../../application/auto-job/snapshot.js';
@@ -59,11 +59,29 @@ export interface AutoJobsStatus {
     readonly nextRefreshAt: number | null;
     readonly refreshReason: AutoJobsRefreshReason;
     readonly lastRefreshAt: number | null;
+    readonly snapshotAt: number | null;
+    /** Active minigame locks: job id -> expiry. */
+    readonly locks: Readonly<Record<string, number>>;
+    /** Per-job retry budget for the current reset. */
+    readonly retryAttempts: Readonly<Record<string, { readonly count: number; readonly lastAttemptAt: number }>>;
 }
 
 const AUTO_JOBS_MIN_INTERVAL_MS = 15_000;
+/** Idle per-market freshness window; a recent game push or refresh is reused. */
+const AUTO_JOBS_MARKET_TTL_MS = 60_000;
+/** Around a market reset, refresh more often so new claimable jobs appear fast. */
+const AUTO_JOBS_RESET_WINDOW_MS = 2 * 60_000;
+const AUTO_JOBS_RESET_TTL_MS = 15_000;
 const AUTO_JOBS_RESET_GRACE_MS = 30_000;
 const AUTO_JOBS_FALLBACK_REFRESH_MS = 2 * 60 * 60 * 1000;
+/** When every known reset time is already past, poll sooner than the full interval. */
+const AUTO_JOBS_STALE_RESET_MAX_WAIT_MS = 10 * 60_000;
+
+function marketTtlMs(market: AutoJobsMarket, now: number): number {
+    const reset = market.resetAt ? Date.parse(market.resetAt) : Number.NaN;
+    if (Number.isFinite(reset) && Math.abs(reset - now) <= AUTO_JOBS_RESET_WINDOW_MS) return AUTO_JOBS_RESET_TTL_MS;
+    return AUTO_JOBS_MARKET_TTL_MS;
+}
 
 export class AutoJobsCoordinator {
     private snapshot: AutoJobsSnapshot | null = null;
@@ -76,6 +94,7 @@ export class AutoJobsCoordinator {
     private lastSkipReason: string | null = null;
     private bootstrapAt = 0;
     private lastAttemptAt = 0;
+    private pendingEnsure: { readonly reason: string; readonly tabIdHint?: number } | null = null;
     private autoFinish: AutoFinishPort | null = null;
     private dismisser: FailedJobDismisser | null = null;
 
@@ -139,6 +158,14 @@ export class AutoJobsCoordinator {
             nextRefreshAt: this.nextRefreshAt,
             refreshReason: this.refreshReason,
             lastRefreshAt: this.snapshot?.at ?? null,
+            snapshotAt: this.snapshot?.at ?? null,
+            locks: this.deps.locks.locksSnapshot(),
+            retryAttempts: Object.fromEntries(
+                Object.entries(this.deps.locks.attemptsSnapshot()).map(([jobId, entry]) => [
+                    jobId,
+                    { count: entry.count, lastAttemptAt: entry.lastAttemptAt },
+                ]),
+            ),
         };
     }
 
@@ -202,6 +229,9 @@ export class AutoJobsCoordinator {
         if (!market) return;
         const mapped = mapMarketSnapshotJobs(snapshot, marketId, market.key, market.completionServerId ?? market.routeServerId);
         const previous = this.snapshot;
+        // Keep the persisted market cache in sync with game-pushed refreshes so
+        // the Progress page does not depend on a second network round trip.
+        void this.deps.markets.cacheSnapshotView(marketId, snapshot).catch(() => undefined);
         this.publishSnapshot({
             at: this.deps.clock.now(),
             jobs: [
@@ -219,12 +249,20 @@ export class AutoJobsCoordinator {
                     expired: mapped.expired,
                     skippedJobs: mapped.skippedJobs,
                     resetAt: mapped.resetAt ?? null,
+                    updatedAt: this.deps.clock.now(),
+                    stale: false,
                 },
             ],
         });
     }
 
-    async runCycle(owner: string, reason: string, priority: number, tabId?: number): Promise<AutoJobsCycleResult> {
+    async runCycle(
+        owner: string,
+        reason: string,
+        priority: number,
+        tabId?: number,
+        targets?: readonly JobMarketDefinition[],
+    ): Promise<AutoJobsCycleResult> {
         const current = await this.deps.settings.get();
         // Helper Mode and a disabled Auto Jobs switch must not trigger market
         // traffic. Market data is only refreshed for an active Auto Jobs run;
@@ -248,9 +286,10 @@ export class AutoJobsCoordinator {
             }, async () => {
                 this.stage = 'fetching-markets';
                 this.deps.events.publish('auto.jobs.cycle', { running: true, owner, reason, stage: this.stage });
-                const synced = await this.deps.markets.syncAll(owner, reason, undefined, (partial) => {
+                const expectedMarkets = targets?.length ?? JOB_MARKETS.length;
+                const synced = await this.deps.markets.syncAll(owner, reason, targets, (partial) => {
                     this.publishSnapshot({ at: this.deps.clock.now(), jobs: partial.jobs, markets: partial.markets });
-                    this.stage = `market:${partial.markets.length}/${JOB_MARKETS.length}`;
+                    this.stage = `market:${partial.markets.length}/${expectedMarkets}`;
                     this.deps.events.publish('auto.jobs.cycle', { running: true, owner, reason, stage: this.stage });
                 }, () => this.cancelRequested);
                 this.publishSnapshot({ at: this.deps.clock.now(), jobs: synced.jobs, markets: synced.markets });
@@ -310,40 +349,83 @@ export class AutoJobsCoordinator {
             return;
         }
         if (this.cycleRunning) {
+            // Do not lose a trigger that arrives while a cycle is running.
+            // Coalesce it and re-check freshness afterwards.
+            this.pendingEnsure = { reason, ...(tabIdHint !== undefined ? { tabIdHint } : {}) };
             this.lastSkipReason = 'cycle-running';
             return;
         }
         if (this.deps.isAutoRefreshRunning()) {
             this.lastSkipReason = 'data-refresh-running';
+            if (reason === 'scheduled') await this.scheduleNextRefresh();
             return;
         }
-        if (!force && this.snapshot) {
+        if (!force && this.snapshot && reason === 'popup-open') {
             this.lastSkipReason = 'snapshot-present';
             return;
         }
         const now = this.deps.clock.now();
         const manual = reason === 'manual-enable';
+        // Manual enable is a user request and always refreshes every market.
+        // Everything else only refreshes markets whose data is older than
+        // their TTL; a recent game push therefore makes the pass a no-op.
+        const targets = manual ? undefined : this.marketsToRefresh(now);
+        if (!manual && targets !== undefined && targets.length === 0) {
+            this.lastSkipReason = 'snapshot-fresh';
+            // A one-shot reset alarm must still schedule the next wake-up even
+            // when a recent push already made the snapshot fresh.
+            if (reason === 'scheduled') await this.scheduleNextRefresh();
+            return;
+        }
         if (!manual && this.snapshot && now - this.lastAttemptAt < AUTO_JOBS_MIN_INTERVAL_MS) {
             this.lastSkipReason = 'recently-refreshed';
+            if (reason === 'scheduled') await this.scheduleNextRefresh();
             return;
         }
         const tabId = tabIdHint ?? await this.deps.tabs.findCor3Tab();
         if (tabId === null) {
             this.lastSkipReason = 'no-tab';
+            if (reason === 'scheduled') await this.scheduleNextRefresh();
             return;
         }
         this.lastAttemptAt = now;
         this.bootstrapAt = now;
         this.lastSkipReason = null;
-        const result = await this.runCycle(
-            `auto-jobs-${reason}:${tabId}`,
-            reason,
-            current.autoFinishEnabled || force ? 50 : 35,
-            tabId,
-        );
-        this.lastAttemptAt = this.deps.clock.now();
-        this.lastError = result.ok ? null : `${result.error.code}: ${result.error.message}`;
-        await this.scheduleNextRefresh();
+        try {
+            const result = await this.runCycle(
+                `auto-jobs-${reason}:${tabId}`,
+                reason,
+                current.autoFinishEnabled || force ? 50 : 35,
+                tabId,
+                targets,
+            );
+            this.lastAttemptAt = this.deps.clock.now();
+            this.lastError = result.ok ? null : `${result.error.code}: ${result.error.message}`;
+            await this.scheduleNextRefresh();
+        } finally {
+            const pending = this.pendingEnsure;
+            this.pendingEnsure = null;
+            if (pending) {
+                // Re-enter once; the freshness check makes this a no-op when
+                // the cycle that just finished already refreshed the market.
+                void this.ensureInfo(pending.reason, true, pending.tabIdHint);
+            }
+        }
+    }
+
+    /**
+     * Markets that need a network refresh. A market is fresh when it synced
+     * successfully within its TTL. The TTL shrinks near a known reset so new
+     * claimable jobs appear quickly.
+     */
+    private marketsToRefresh(now: number): readonly JobMarketDefinition[] {
+        const snapshot = this.snapshot;
+        if (!snapshot) return [...JOB_MARKETS];
+        return JOB_MARKETS.filter((market) => {
+            const entry = snapshot.markets.find((candidate) => candidate.marketKey === market.key);
+            if (!entry || !entry.ok || entry.updatedAt === undefined) return true;
+            return now - entry.updatedAt >= marketTtlMs(entry, now);
+        });
     }
 
     async scheduleNextRefresh(): Promise<void> {
@@ -356,11 +438,11 @@ export class AutoJobsCoordinator {
             this.deps.events.publish('auto.jobs.schedule', { nextRefreshAt: null, reason: this.refreshReason });
             return;
         }
+        const resetTimes = (this.snapshot?.markets ?? [])
+            .filter((market) => market.ok && market.resetAt)
+            .map((market) => new Date(market.resetAt!).getTime())
+            .filter((value) => Number.isFinite(value) && value > now);
         if (current.autoFinishEnabled && this.allMarketsCompletedForCurrentReset()) {
-            const resetTimes = (this.snapshot?.markets ?? [])
-                .filter((market) => market.ok && market.resetAt)
-                .map((market) => new Date(market.resetAt!).getTime())
-                .filter((value) => Number.isFinite(value) && value > now);
             if (resetTimes.length > 0) {
                 this.refreshReason = 'reset';
                 this.nextRefreshAt = Math.min(...resetTimes) + AUTO_JOBS_RESET_GRACE_MS;
@@ -370,6 +452,41 @@ export class AutoJobsCoordinator {
                 this.nextRefreshAt = now + AUTO_JOBS_FALLBACK_REFRESH_MS;
                 this.deps.scheduler.create(AUTO_JOBS_INFO_ALARM, { when: this.nextRefreshAt });
             }
+            this.deps.events.publish('auto.jobs.schedule', { nextRefreshAt: this.nextRefreshAt, reason: this.refreshReason });
+            return;
+        }
+        if (resetTimes.length > 0) {
+            // Wake when the earliest market reset countdown reaches zero, but
+            // never later than the normal polling interval.
+            const intervalAt = now + current.autoJobsIntervalMinutes * 60_000;
+            const resetAt = Math.min(...resetTimes) + AUTO_JOBS_RESET_GRACE_MS;
+            this.refreshReason = resetAt <= intervalAt ? 'reset' : 'interval';
+            this.nextRefreshAt = Math.min(resetAt, intervalAt);
+            if (this.refreshReason === 'interval') {
+                this.deps.scheduler.create(AUTO_JOBS_INFO_ALARM, {
+                    delayInMinutes: current.autoJobsIntervalMinutes,
+                    periodInMinutes: current.autoJobsIntervalMinutes,
+                });
+            } else {
+                this.deps.scheduler.create(AUTO_JOBS_INFO_ALARM, { when: this.nextRefreshAt });
+            }
+            this.deps.events.publish('auto.jobs.schedule', { nextRefreshAt: this.nextRefreshAt, reason: this.refreshReason });
+            return;
+        }
+        const resetMarkets = (this.snapshot?.markets ?? []).filter((market) => market.ok && market.resetAt);
+        const staleResets = resetMarkets.length > 0 && resetMarkets.every((market) => {
+            const at = Date.parse(market.resetAt!);
+            return Number.isFinite(at) && at <= now;
+        });
+        if (staleResets) {
+            // The game has not published the next reset time yet. Waiting the
+            // full (often 60-minute) interval leaves new jobs invisible after a
+            // reset; poll at a bounded short interval until a future reset or
+            // new job appears.
+            const waitMs = Math.min(current.autoJobsIntervalMinutes * 60_000, AUTO_JOBS_STALE_RESET_MAX_WAIT_MS);
+            this.refreshReason = 'fallback';
+            this.nextRefreshAt = now + waitMs;
+            this.deps.scheduler.create(AUTO_JOBS_INFO_ALARM, { when: this.nextRefreshAt });
             this.deps.events.publish('auto.jobs.schedule', { nextRefreshAt: this.nextRefreshAt, reason: this.refreshReason });
             return;
         }

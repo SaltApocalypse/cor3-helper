@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isBuggedJob, selectJobs, type JobOffer } from './model.js';
+import { selectJobs, type JobOffer } from './model.js';
 
 function job(id: string, serverName: string, type: JobOffer['type'] = 'IP Injection'): JobOffer {
     return {
@@ -15,7 +15,7 @@ describe('Job selection', () => {
         expect(result.map((entry) => entry.id)).toEqual(['2', '3', '1']);
     });
 
-    it('filters completed, unsupported, and bugged jobs', () => {
+    it('filters completed and unsupported jobs', () => {
         const jobs = [
             job('1', 'A', 'IP Injection'),
             job('2', 'A', 'Log Deletion'),
@@ -26,7 +26,6 @@ describe('Job selection', () => {
             supportedTypes: new Set(['IP Injection', 'Log Deletion']),
             serverPriority: () => 0,
         });
-        expect(result.map((entry) => entry.id)).toEqual(['2']);
-        expect(isBuggedJob(jobs[2]!)).toBe(true);
+        expect(result.map((entry) => entry.id)).toEqual(['2', '3']);
     });
 });

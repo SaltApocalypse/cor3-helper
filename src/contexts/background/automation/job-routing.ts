@@ -80,7 +80,7 @@ export class JobRouting {
             now: Date.now(),
             currentEndpoint: snapshot.value.endpointId,
         });
-        if (!route.ok && route.error?.code === 'NO_ROUTE') {
+        if (!route.ok && (route.error?.code === 'NO_ROUTE' || route.error?.code === 'ROUTE_FAILED')) {
             const refreshed = await this.deps.snapshots.get(true);
             if (refreshed.ok) {
                 snapshot = refreshed;

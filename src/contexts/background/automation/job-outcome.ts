@@ -69,6 +69,13 @@ export function outcomeReasonText(outcome: JobOutcome): string {
     }
 }
 
+/** Infrastructure and game-lock failures retry on a timer, not a job budget. */
+export function countsAgainstRetryBudget(outcome: JobOutcome): boolean {
+    return outcome.reason !== 'network'
+        && outcome.reason !== 'maintenance'
+        && outcome.reason !== 'minigame-lock';
+}
+
 export function codeForOutcome(outcome: JobOutcome, fallback: string): string {
     switch (outcome.reason) {
         case 'capability': return 'PREFLIGHT_FAILED';

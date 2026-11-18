@@ -37,6 +37,9 @@ export const ZH_MESSAGES: Readonly<Record<string, string>> = {
     'expired': '已过期',
     'done': '完成',
     'skipped': '已跳过',
+    'ready': '可领取',
+    'updated {time} ago': '{time}前更新',
+    'Locks: {locks} · retry budgets: {retry} · completed: {completed}': '锁定 {locks} · 重试预算 {retry} · 已完成 {completed}',
 
     // Job market list
     '{count} job(s)': '{count} 个任务',

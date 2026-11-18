@@ -117,6 +117,7 @@ export function SidePanelApp({ portal, windowMode = false }: SidePanelAppProps) 
     const jobViews = useJobViews({
         autoFinishEnabled: autoFinish.autoFinish?.enabled ?? false,
         autoRunMarkets: autoFinish.markets,
+        completedJobs: autoFinish.completedJobs,
         jobReport: jobs.jobReport,
         autoJobsMarkets: jobs.autoJobsMarkets,
         jobRunStatusById: jobs.jobRunStatusById,

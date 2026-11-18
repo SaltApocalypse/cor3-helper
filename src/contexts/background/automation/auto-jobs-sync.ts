@@ -1,4 +1,4 @@
-import { jobMarketByKey } from '../../../domains/jobs/markets.js';
+import { jobMarketByKey, type JobMarketDefinition } from '../../../domains/jobs/markets.js';
 import { mapMarketSnapshotJobs } from '../../../application/auto-job/market-mapper.js';
 import type { AutoJobsSnapshot } from '../../../contracts/auto-jobs.js';
 import type { JobOffer } from '../../../domains/jobs/model.js';
@@ -15,8 +15,9 @@ export async function syncAllJobMarkets(
     deps: JobSnapshotSyncDeps,
     owner: string,
     reason: string,
+    targets?: readonly JobMarketDefinition[],
 ): Promise<{ readonly jobs: readonly JobOffer[]; readonly markets: readonly JobMarketSyncEntry[] }> {
-    const synced = await deps.markets.syncAll(owner, reason);
+    const synced = await deps.markets.syncAll(owner, reason, targets);
     deps.publishSnapshot({ at: deps.now(), jobs: synced.jobs, markets: synced.markets });
     return synced;
 }
@@ -54,6 +55,8 @@ export async function syncJobMarket(
                 expired: mapped.expired,
                 skippedJobs: mapped.skippedJobs,
                 resetAt: mapped.resetAt ?? null,
+                updatedAt: deps.now(),
+                stale: false,
             },
         ],
     });

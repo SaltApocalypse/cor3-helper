@@ -66,7 +66,7 @@ describe('Auto Finish job-level completion', () => {
         isRetryExhausted: () => false,
     } as unknown as JobLockRegistry;
 
-    it('skips only jobs completed for the current reset, not new jobs in the same market', () => {
+    it('reports jobs completed for the current reset as done, not skipped', () => {
         const markets = buildFinalMarkets({
             synced: {
                 jobs: [job('old-job'), job('new-job')],
@@ -82,8 +82,88 @@ describe('Auto Finish job-level completion', () => {
             stopped: false,
             now: 1,
         });
-        expect(markets[0]?.jobs?.find((entry) => entry.jobId === 'old-job')?.status).toBe('skipped');
-        expect(markets[0]?.jobs?.find((entry) => entry.jobId === 'old-job')?.code).toBe('ALREADY_COMPLETED');
+        expect(markets[0]?.jobs?.find((entry) => entry.jobId === 'old-job')?.status).toBe('done');
         expect(markets[0]?.jobs?.find((entry) => entry.jobId === 'new-job')?.status).toBe('pending');
+    });
+
+    it('keeps previous job rows for a failed market and marks it stale', () => {
+        const previous = {
+            marketKey: 'usol',
+            label: 'USOL',
+            ok: true,
+            skipped: 0,
+            resetAt,
+            jobTotal: 1,
+            success: 0,
+            jobs: [{ jobId: 'a', name: 'A', serverName: null, marketKey: 'usol', status: 'done' as const }],
+        };
+        const markets = buildFinalMarkets({
+            synced: { jobs: [], markets: [failedMarket] },
+            allowedTypes: new Set(['Data Upload']),
+            doneIds: new Set(),
+            completedJobs: {},
+            resetByMarket: new Map(),
+            locks,
+            outcomes: new Map(),
+            failedById: new Map(),
+            stopped: false,
+            now: 1,
+            previousMarkets: [previous],
+        });
+        expect(markets[0]?.stale).toBe(true);
+        expect(markets[0]?.jobs?.map((entry) => entry.jobId)).toEqual(['a']);
+    });
+
+    it('keeps the rows of markets that were not refreshed', () => {
+        const previous = {
+            marketKey: 'dark',
+            label: 'DARK',
+            ok: true,
+            skipped: 0,
+            jobs: [{ jobId: 'dark-1', name: 'D', serverName: null, marketKey: 'dark', status: 'pending' as const }],
+        };
+        const markets = buildFinalMarkets({
+            synced: {
+                jobs: [job('home-1')],
+                markets: [{ marketKey: 'home', label: 'HOME', ok: true, skipped: 0, resetAt }],
+            },
+            allowedTypes: new Set(['Data Upload']),
+            doneIds: new Set(),
+            completedJobs: {},
+            resetByMarket: new Map([['home', resetAt]]),
+            locks,
+            outcomes: new Map(),
+            failedById: new Map(),
+            stopped: false,
+            now: 1,
+            previousMarkets: [previous],
+        });
+        expect(markets.map((market) => market.marketKey)).toEqual(['home', 'dark']);
+        expect(markets[1]?.jobs?.[0]?.jobId).toBe('dark-1');
+    });
+
+    it('adds cached claim-only completions to a failed market report', () => {
+        const runJob: JobOffer = {
+            ...job('claimed'),
+            type: 'File Decryption',
+            marketKey: 'usol',
+            alreadyTaken: true,
+            canComplete: true,
+        };
+        const markets = buildFinalMarkets({
+            synced: { jobs: [], markets: [failedMarket] },
+            allowedTypes: new Set(['File Decryption']),
+            doneIds: new Set(['claimed']),
+            completedJobs: {},
+            resetByMarket: new Map(),
+            locks,
+            outcomes: new Map(),
+            failedById: new Map(),
+            stopped: false,
+            now: 1,
+            doneJobs: [runJob],
+        });
+        expect(markets[0]?.jobs?.find((entry) => entry.jobId === 'claimed')?.status).toBe('done');
+        expect(markets[0]?.success).toBe(1);
     });
 });

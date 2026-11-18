@@ -56,20 +56,24 @@ function retryMetadata(source: { readonly message: string; readonly retryAt?: nu
         return { retryAt: Date.now() + 60_000 };
     }
     if (/lock/i.test(source.message)) {
-        const minutes = /(\d+)\s*m(?:in)?/i.exec(source.message);
-        if (minutes?.[1]) {
-            const at = Date.now() + Number(minutes[1]) * 60_000;
-            return { retryAt: at, lockExpiresAt: at };
+        // Only minigame/decrypt/hack lock text may block the job for a long
+        // window. A generic "locked" server/file message gets a short retry so
+        // it cannot strand a claimable job until the next market reset.
+        const lockContext = /minigame|decrypt|ice[\s-]?wall|hack/i.test(source.message);
+        if (lockContext) {
+            const minutes = /(\d+)\s*m(?:in)?/i.exec(source.message);
+            if (minutes?.[1]) {
+                const at = Date.now() + Number(minutes[1]) * 60_000;
+                return { retryAt: at, lockExpiresAt: at };
+            }
+            const seconds = /(\d+)\s*s(?:ec)?/i.exec(source.message);
+            if (seconds?.[1]) {
+                const at = Date.now() + Number(seconds[1]) * 1000;
+                return { retryAt: at, lockExpiresAt: at };
+            }
+            return { retryAt: Date.now() + 20 * 60_000, lockExpiresAt: Date.now() + 20 * 60_000 };
         }
-        const seconds = /(\d+)\s*s(?:ec)?/i.exec(source.message);
-        if (seconds?.[1]) {
-            const at = Date.now() + Number(seconds[1]) * 1000;
-            return { retryAt: at, lockExpiresAt: at };
-        }
-        if (/minigame[-\s]?lock|locked/i.test(source.message)) {
-            const at = Date.now() + 20 * 60_000;
-            return { retryAt: at, lockExpiresAt: at };
-        }
+        return { retryAt: Date.now() + 60_000 };
     }
     return {};
 }
@@ -116,10 +120,12 @@ export class JobExecutionService implements JobExecutionPort {
 
     async executeDetailed(job: JobOffer): Promise<Result<JobReward, JobExecutionError>> {
         if (this.shouldStop?.()) return err({ code: 'JOB_CANCELLED', message: 'Job run cancelled', retryable: false, stage: 'cancelled' });
+        // Completion is the only remaining step for a claimable job. It must
+        // not be rejected for a missing target server or a disabled type.
+        if (job.alreadyTaken && job.canComplete) return this.complete(job);
         if (!job.serverId && !isServerlessJob(job.type)) {
             return err({ code: 'NO_SERVER', message: 'Job has no server id' });
         }
-        if (job.alreadyTaken && job.canComplete) return this.complete(job);
         let current = job;
         if (!current.alreadyTaken) {
             // Serverless jobs still need a preflight (decrypt software and
@@ -250,7 +256,13 @@ export class JobExecutionService implements JobExecutionPort {
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
         if (requiresDecrypt(job)) {
             const download = await this.findDownloadedFile(job, target.name);
-            if (!download.ok) return download;
+            if (!download.ok) {
+                // The game can lag behind the decrypted file (or remove it after
+                // processing) while the job is already claimable. Try completion
+                // before reporting a missing file.
+                if (job.alreadyTaken) return this.complete(job);
+                return download;
+            }
             return this.decryptAndComplete(job, download.value);
         }
         return this.complete(job);
@@ -258,7 +270,10 @@ export class JobExecutionService implements JobExecutionPort {
 
     private async fileDecryption(job: JobOffer): Promise<Result<JobReward, JobExecutionError>> {
         const download = await this.findDownloadedFile(job);
-        if (!download.ok) return download;
+        if (!download.ok) {
+            if (job.alreadyTaken) return this.complete(job);
+            return download;
+        }
         return this.decryptAndComplete(job, download.value);
     }
 
@@ -271,7 +286,10 @@ export class JobExecutionService implements JobExecutionPort {
             if (!downloaded.ok) return err({ code: 'ACTION_FAILED', message: downloaded.error.message });
         }
         const download = await this.findDownloadedFile(job, target?.name);
-        if (!download.ok) return download;
+        if (!download.ok) {
+            if (job.alreadyTaken) return this.complete(job);
+            return download;
+        }
         return this.decryptAndComplete(job, download.value);
     }
 

@@ -38,7 +38,7 @@ export class AutoJobRunner {
     ) {}
 
     async run(job: JobOffer): Promise<Result<AutoJobRunResult, AutoJobRunError>> {
-        if (!job.serverId && !isServerlessJob(job.type)) {
+        if (!(job.alreadyTaken && job.canComplete) && !job.serverId && !isServerlessJob(job.type)) {
             return { ok: false, error: { code: 'NO_SERVER', message: 'Job has no target server' } };
         }
         const result = await this.jobs.execute(job);

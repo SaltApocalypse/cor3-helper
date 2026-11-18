@@ -42,6 +42,10 @@ export const autoFinishMarketSchema = z.object({
     failed: z.number().int().nonnegative().optional(),
     pending: z.number().int().nonnegative().optional(),
     jobs: z.array(autoFinishJobSchema).optional(),
+    /** Last successful refresh for this market (ms). */
+    updatedAt: z.number().int().nonnegative().optional(),
+    /** True when the market could not be refreshed and the row is carried over. */
+    stale: z.boolean().optional(),
     error: z.string().optional(),
 }).strict();
 

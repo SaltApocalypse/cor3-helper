@@ -93,8 +93,21 @@ describe('mergeAutoJobsSnapshot', () => {
         expect(result.markets.map((market) => market.marketKey).sort()).toEqual(['dark', 'home']);
     });
 
-    it('uses the update as-is without a previous snapshot', () => {
+    it('normalizes freshness metadata without a previous snapshot', () => {
         const update = snapshot(2, ['home'], [job('home-1', 'home')]);
-        expect(mergeAutoJobsSnapshot(null, update)).toEqual(update);
+        const result = mergeAutoJobsSnapshot(null, update);
+        expect(result.jobs).toEqual(update.jobs);
+        expect(result.markets[0]).toMatchObject({ updatedAt: 2, stale: false });
+    });
+
+    it('marks a failed market stale while keeping its last refresh time', () => {
+        const previous = snapshot(10, ['home'], [job('home-1', 'home')]);
+        const update: AutoJobsSnapshot = {
+            at: 20,
+            jobs: [],
+            markets: [{ marketKey: 'home', label: 'HOME', ok: false, skipped: 0, error: 'timeout', errorCode: 'MARKET_FETCH_FAILED' }],
+        };
+        const result = mergeAutoJobsSnapshot(previous, update);
+        expect(result.markets[0]).toMatchObject({ stale: true, updatedAt: 10, error: 'timeout' });
     });
 });

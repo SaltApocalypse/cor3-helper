@@ -60,6 +60,7 @@ export interface AutoJobsCardProps {
     readonly now: number;
     readonly setMarketKey: (key: string) => void;
     readonly jobStatusById: Readonly<Record<string, string | undefined>>;
+    readonly jobStatusReasonById: Readonly<Record<string, string | undefined>>;
     readonly selectedJobs: ReadonlySet<string>;
     readonly toggleJob: (id: string) => void;
     readonly toggleSelectMarket: (jobs: readonly JobOffer[]) => void;
@@ -104,6 +105,7 @@ export function AutoJobsCard(props: AutoJobsCardProps) {
     now,
     setMarketKey,
     jobStatusById,
+    jobStatusReasonById,
     selectedJobs,
     toggleJob,
     toggleSelectMarket,
@@ -226,6 +228,7 @@ export function AutoJobsCard(props: AutoJobsCardProps) {
                         now={now}
                         onSelect={setMarketKey}
                         statusById={jobStatusById}
+                        statusReasonById={jobStatusReasonById}
                         selectable={!autoFinish?.enabled}
                         selectionDisabled={jobRunId !== null}
                         selectedIds={selectedJobs}
@@ -284,6 +287,15 @@ export function AutoJobsCard(props: AutoJobsCardProps) {
                     </summary>
                     <div class="v2-status-body">
                     <p class={`v2-muted ${jobStatusTone(jobStatus)}`}>{tr(jobStatus)}</p>
+                    {autoJobs && (Object.keys(autoJobs.locks).length > 0 || Object.keys(autoJobs.retryAttempts).length > 0 || Object.keys(autoFinish?.completedJobs ?? {}).length > 0) ? (
+                        <p class="v2-muted">
+                            {tr('Locks: {locks} · retry budgets: {retry} · completed: {completed}', {
+                                locks: Object.keys(autoJobs.locks).length,
+                                retry: Object.keys(autoJobs.retryAttempts).length,
+                                completed: Object.keys(autoFinish?.completedJobs ?? {}).length,
+                            })}
+                        </p>
+                    ) : null}
                     {jobProgress ? (
                         <p class="v2-muted v2-job-current">
                             {tr('Current: {job}{server} ({index}/{total})', {

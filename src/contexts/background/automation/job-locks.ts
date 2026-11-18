@@ -1,10 +1,22 @@
 import type { AutomationStateStore } from '../../../infrastructure/storage/automation-state-store.js';
 
 export const MAX_RETRY_ATTEMPTS = 3;
+/**
+ * A job keeps its retry budget for one market reset, but transient game issues
+ * must not strand it forever. After this window the budget is refreshed.
+ */
+export const RETRY_BUDGET_COOLDOWN_MS = 10 * 60_000;
 
 export interface RetryAttempt {
     readonly count: number;
     readonly marketKey: string;
+    readonly resetAt: string | null;
+    readonly lastAttemptAt: number;
+}
+
+interface LockEntry {
+    readonly until: number;
+    readonly marketKey: string | null;
     readonly resetAt: string | null;
 }
 
@@ -14,7 +26,7 @@ export interface RetryAttempt {
  * maps.
  */
 export class JobLockRegistry {
-    private readonly locks = new Map<string, number>();
+    private readonly locks = new Map<string, LockEntry>();
     private readonly attempts = new Map<string, RetryAttempt>();
 
     constructor(
@@ -23,11 +35,11 @@ export class JobLockRegistry {
     ) {}
 
     lockUntil(jobId: string): number | undefined {
-        return this.locks.get(jobId);
+        return this.locks.get(jobId)?.until;
     }
 
-    setLock(jobId: string, until: number): void {
-        this.locks.set(jobId, until);
+    setLock(jobId: string, until: number, marketKey: string | null = null, resetAt: string | null = null): void {
+        this.locks.set(jobId, { until, marketKey, resetAt });
     }
 
     deleteLock(jobId: string): void {
@@ -39,19 +51,37 @@ export class JobLockRegistry {
     }
 
     isLocked(jobId: string): boolean {
-        const until = this.locks.get(jobId);
-        return until !== undefined && until > this.now();
+        const entry = this.locks.get(jobId);
+        return entry !== undefined && entry.until > this.now();
     }
 
     pruneExpiredLocks(): void {
-        for (const [jobId, until] of this.locks) {
-            if (until <= this.now()) this.locks.delete(jobId);
+        for (const [jobId, entry] of this.locks) {
+            if (entry.until <= this.now()) this.locks.delete(jobId);
         }
+    }
+
+    locksSnapshot(): Record<string, number> {
+        const snapshot: Record<string, number> = {};
+        const now = this.now();
+        for (const [jobId, entry] of this.locks) {
+            if (entry.until > now) snapshot[jobId] = entry.until;
+        }
+        return snapshot;
+    }
+
+    attemptsSnapshot(): Record<string, RetryAttempt> {
+        const snapshot: Record<string, RetryAttempt> = {};
+        for (const [jobId, entry] of this.attempts) snapshot[jobId] = entry;
+        return snapshot;
     }
 
     isRetryExhausted(jobId: string): boolean {
         const entry = this.attempts.get(jobId);
-        return entry !== undefined && entry.count >= MAX_RETRY_ATTEMPTS;
+        if (entry === undefined || entry.count < MAX_RETRY_ATTEMPTS) return false;
+        // Budgets expire after a quiet period so a batch of transient failures
+        // does not hide a job until the next market reset.
+        return this.now() - entry.lastAttemptAt < RETRY_BUDGET_COOLDOWN_MS;
     }
 
     retryAttempt(jobId: string): RetryAttempt | undefined {
@@ -67,9 +97,17 @@ export class JobLockRegistry {
     }
 
     recordRetry(jobId: string, marketKey: string, resetAt: string | null): void {
+        const now = this.now();
         const current = this.attempts.get(jobId);
-        const count = current && current.resetAt === resetAt ? current.count : 0;
-        this.attempts.set(jobId, { count: count + 1, marketKey, resetAt });
+        const continuing = current !== undefined
+            && current.resetAt === resetAt
+            && now - current.lastAttemptAt <= RETRY_BUDGET_COOLDOWN_MS;
+        this.attempts.set(jobId, {
+            count: continuing ? current.count + 1 : 1,
+            marketKey,
+            resetAt,
+            lastAttemptAt: now,
+        });
     }
 
     clearAttempts(): void {
@@ -82,11 +120,18 @@ export class JobLockRegistry {
             const resetAt = resetByMarket.get(entry.marketKey) ?? null;
             if (resetAt !== entry.resetAt) this.attempts.delete(jobId);
         }
+        for (const [jobId, entry] of this.locks) {
+            if (entry.marketKey === null) continue;
+            const resetAt = resetByMarket.get(entry.marketKey) ?? null;
+            if (entry.resetAt !== resetAt) this.locks.delete(jobId);
+        }
     }
 
     async persist(phase: 'idle' | 'running' | 'waiting' = 'idle'): Promise<void> {
-        const locks: Record<string, number> = {};
-        for (const [jobId, until] of this.locks) if (until > this.now()) locks[jobId] = until;
+        const locks: Record<string, { until: number; marketKey: string | null; resetAt: string | null }> = {};
+        for (const [jobId, entry] of this.locks) {
+            if (entry.until > this.now()) locks[jobId] = entry;
+        }
         const attempts: Record<string, RetryAttempt> = {};
         for (const [jobId, entry] of this.attempts) attempts[jobId] = entry;
         await this.state.set('auto-jobs', {
@@ -99,20 +144,32 @@ export class JobLockRegistry {
     restore(payload: Readonly<Record<string, unknown>>): void {
         const storedLocks = payload.locks;
         if (storedLocks && typeof storedLocks === 'object' && !Array.isArray(storedLocks)) {
-            for (const [jobId, until] of Object.entries(storedLocks)) {
-                if (typeof until === 'number' && until > this.now()) this.locks.set(jobId, until);
+            for (const [jobId, raw] of Object.entries(storedLocks)) {
+                if (typeof raw === 'number') {
+                    if (raw > this.now()) this.locks.set(jobId, { until: raw, marketKey: null, resetAt: null });
+                    continue;
+                }
+                if (!raw || typeof raw !== 'object') continue;
+                const entry = raw as { until?: unknown; marketKey?: unknown; resetAt?: unknown };
+                if (typeof entry.until !== 'number' || entry.until <= this.now()) continue;
+                this.locks.set(jobId, {
+                    until: entry.until,
+                    marketKey: typeof entry.marketKey === 'string' ? entry.marketKey : null,
+                    resetAt: typeof entry.resetAt === 'string' ? entry.resetAt : null,
+                });
             }
         }
         const storedAttempts = payload.retryAttempts;
         if (storedAttempts && typeof storedAttempts === 'object' && !Array.isArray(storedAttempts)) {
             for (const [jobId, raw] of Object.entries(storedAttempts)) {
                 if (!raw || typeof raw !== 'object') continue;
-                const entry = raw as { count?: unknown; marketKey?: unknown; resetAt?: unknown };
+                const entry = raw as { count?: unknown; marketKey?: unknown; resetAt?: unknown; lastAttemptAt?: unknown };
                 if (typeof entry.count === 'number' && typeof entry.marketKey === 'string') {
                     this.attempts.set(jobId, {
                         count: entry.count,
                         marketKey: entry.marketKey,
                         resetAt: typeof entry.resetAt === 'string' ? entry.resetAt : null,
+                        lastAttemptAt: typeof entry.lastAttemptAt === 'number' ? entry.lastAttemptAt : 0,
                     });
                 }
             }

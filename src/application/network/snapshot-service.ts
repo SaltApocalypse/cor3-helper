@@ -20,7 +20,7 @@ export interface NetworkSnapshotServiceOptions {
     readonly onUpdate?: (snapshot: NetworkSnapshot) => void | Promise<void>;
 }
 
-const DEFAULT_TTL_MS = 15_000;
+const DEFAULT_TTL_MS = 60_000;
 const DEFAULT_FALLBACK_MAX_AGE_MS = 30 * 60_000;
 
 export class NetworkSnapshotService {

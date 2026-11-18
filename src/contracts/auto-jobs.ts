@@ -23,6 +23,10 @@ export const autoJobsMarketSchema = z.object({
     expired: z.number().int().nonnegative().default(0),
     skippedJobs: z.array(autoJobsSkippedJobSchema).default([]),
     resetAt: z.string().nullable().optional(),
+    /** Last successful refresh for this market (ms). Preserved while offline. */
+    updatedAt: z.number().int().nonnegative().optional(),
+    /** True when the market could not be refreshed and the row is carried over. */
+    stale: z.boolean().optional(),
     error: z.string().optional(),
     errorCode: z.string().optional(),
 }).strict();
@@ -54,6 +58,8 @@ export interface AutoJobsMarket {
     readonly expired?: number;
     readonly skippedJobs?: readonly AutoJobsSkippedJob[];
     readonly resetAt?: string | null;
+    readonly updatedAt?: number;
+    readonly stale?: boolean;
     readonly error?: string;
     readonly errorCode?: string;
 }

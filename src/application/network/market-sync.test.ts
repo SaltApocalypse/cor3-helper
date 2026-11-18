@@ -72,6 +72,31 @@ describe('MarketSyncService', () => {
         expect(calls).toBe(2);
     });
 
+    it('refreshes the network map once when routing fails', async () => {
+        const clock = new FakeClock(0);
+        let forced = 0;
+        const executor = new RouteExecutor({
+            setEndpoint: async () => ({ ok: false, error: { code: 'NO_ROUTE', message: 'no' } }),
+        }, {
+            ensureAccess: async () => ({ ok: true, value: undefined }),
+        }, new InMemoryEndpointLeaseService(clock), clock);
+        let fetched = false;
+        const service = new MarketSyncService(
+            {
+                get: async (force = false) => {
+                    if (force) forced += 1;
+                    return { ok: true, value: snapshot };
+                },
+            },
+            executor,
+            { fetchMarket: async () => { fetched = true; return { ok: true, value: { options: {}, lots: [], jobs: [] } }; } },
+            clock,
+        );
+        expect((await service.sync({ marketId: 'm1', serverId: market, owner: 'market', reason: 'test' })).ok).toBe(false);
+        expect(forced).toBe(1);
+        expect(fetched).toBe(false);
+    });
+
     it('does not fetch market data when routing fails', async () => {
         const clock = new FakeClock(0);
         let fetched = false;
