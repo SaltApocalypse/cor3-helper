@@ -79,6 +79,8 @@ export const settingsV1Schema = z.object({
     mercMinCredits: z.number().int().min(0).max(350000).default(50000),
     mercMarketOrder: z.array(z.enum(MERC_MARKET_KEYS)).default(['core', 'usol', 'usol-elite']),
     mercInsuranceEnabled: z.boolean().default(false),
+    mercInsuranceMinPriceEnabled: z.boolean().default(false),
+    mercInsuranceMinPrice: z.number().int().nonnegative().default(10000),
     mercDecisionPolicy: z.enum(DECISION_POLICIES).default('off'),
     mercAutoPayEnabled: z.boolean().default(true),
     mercLocationId: z.string().nullable().default(null),

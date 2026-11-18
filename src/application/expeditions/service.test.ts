@@ -15,11 +15,11 @@ const locations: ExpeditionLocation[] = [{
     }],
 }];
 
-function port(configure: ReturnType<typeof vi.fn>): ExpeditionPort {
+function port(configure: ReturnType<typeof vi.fn>, price = 100): ExpeditionPort {
     return {
         getActive: async () => ({ ok: true, value: [] }),
         getArchived: async () => ({ ok: true, value: [] }),
-        getMercenaries: async () => ({ ok: true, value: { mercenaries: [{ id: 'merc-1', name: 'Merc', price: 100 }] } }),
+        getMercenaries: async () => ({ ok: true, value: { mercenaries: [{ id: 'merc-1', name: 'Merc', price }] } }),
         getConfig: async () => ({ ok: true, value: {} }),
         respond: async () => ({ ok: true, value: undefined }),
         configure,
@@ -75,5 +75,48 @@ describe('ExpeditionService candidates', () => {
         });
         expect(result.ok).toBe(true);
         if (result.ok) expect(result.value[0]).toMatchObject({ totalCost: 5179, costEstimated: false });
+    });
+
+    it('keeps plain insurance behavior when the price condition is off', async () => {
+        const configure = vi.fn().mockResolvedValue({ ok: true, value: { totalCost: 250 } });
+        const service = new ExpeditionService(port(configure), async () => undefined);
+        const result = await service.candidates({
+            marketId: 'home',
+            marketKey: 'core',
+            hasInsurance: true,
+            locations,
+        });
+        expect(configure).toHaveBeenCalledWith(expect.objectContaining({ hasInsurance: true }));
+        if (result.ok) expect(result.value[0]?.insurance).toBe(true);
+    });
+
+    it('disables insurance at or below the configured hire price threshold', async () => {
+        const configure = vi.fn().mockResolvedValue({ ok: true, value: { totalCost: 250 } });
+        const service = new ExpeditionService(port(configure, 10000), async () => undefined);
+        const result = await service.candidates({
+            marketId: 'home',
+            marketKey: 'core',
+            hasInsurance: true,
+            insuranceMinPriceEnabled: true,
+            insuranceMinPrice: 10000,
+            locations,
+        });
+        expect(configure).toHaveBeenCalledWith(expect.objectContaining({ hasInsurance: false }));
+        if (result.ok) expect(result.value[0]?.insurance).toBe(false);
+    });
+
+    it('enables insurance above the configured hire price threshold', async () => {
+        const configure = vi.fn().mockResolvedValue({ ok: true, value: { totalCost: 250 } });
+        const service = new ExpeditionService(port(configure, 12000), async () => undefined);
+        const result = await service.candidates({
+            marketId: 'home',
+            marketKey: 'core',
+            hasInsurance: true,
+            insuranceMinPriceEnabled: true,
+            insuranceMinPrice: 10000,
+            locations,
+        });
+        expect(configure).toHaveBeenCalledWith(expect.objectContaining({ hasInsurance: true }));
+        if (result.ok) expect(result.value[0]?.insurance).toBe(true);
     });
 });

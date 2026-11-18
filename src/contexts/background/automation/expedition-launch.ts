@@ -60,7 +60,7 @@ export async function launchExpedition(ctx: ExpeditionLaunchContext): Promise<vo
         locationConfigId: profile.locationConfigId,
         zoneConfigId: profile.zoneConfigId,
         goalId: profile.goalId,
-        hasInsurance: current.mercInsuranceEnabled,
+        hasInsurance: selected.insurance,
     };
     const preparation: ExpeditionPreparation = {
         id: `expedition-prep-${deps.clock.now()}`,
@@ -71,7 +71,7 @@ export async function launchExpedition(ctx: ExpeditionLaunchContext): Promise<vo
         marketLabel: profile.marketLabel,
         totalCost: selected.totalCost,
         riskScore: selected.riskScore,
-        insurance: current.mercInsuranceEnabled,
+        insurance: selected.insurance,
         locationName: profile.locationName,
     };
     state.preparation = preparation;
@@ -262,7 +262,7 @@ export async function launchExpedition(ctx: ExpeditionLaunchContext): Promise<vo
         mercenary: selected.mercenary.name,
         market: selectedMarket.label,
         cost: finalTotalCost,
-        insurance: current.mercInsuranceEnabled,
+        insurance: selected.insurance,
         decisions,
         paid,
     });

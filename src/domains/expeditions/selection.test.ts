@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ExpeditionDecisionOption, ExpeditionMercenary } from './model.js';
 import { chooseDecisionOption } from './model.js';
-import { selectMercenary, type MercenaryCandidate } from './selection.js';
+import { selectMercenary, shouldInsureMerc, type MercenaryCandidate } from './selection.js';
 
 function merc(id: string, overrides: Partial<ExpeditionMercenary> = {}): ExpeditionMercenary {
     return {
@@ -19,12 +19,19 @@ function merc(id: string, overrides: Partial<ExpeditionMercenary> = {}): Expedit
     };
 }
 
-function candidate(id: string, marketKey: MercenaryCandidate['marketKey'], totalCost: number, overrides: Partial<ExpeditionMercenary> = {}): MercenaryCandidate {
+function candidate(
+    id: string,
+    marketKey: MercenaryCandidate['marketKey'],
+    totalCost: number,
+    overrides: Partial<ExpeditionMercenary> & { readonly insurance?: boolean } = {},
+): MercenaryCandidate {
+    const { insurance, ...mercOverrides } = overrides;
     return {
-        mercenary: merc(id, { totalCost, ...overrides }),
+        mercenary: merc(id, { totalCost, ...mercOverrides }),
         marketKey,
         totalCost,
-        riskScore: overrides.riskScore ?? 10,
+        riskScore: mercOverrides.riskScore ?? 10,
+        insurance: insurance ?? false,
     };
 }
 
@@ -49,6 +56,23 @@ describe('chooseDecisionOption', () => {
 
     it('prefers the lowest risk then the highest loot', () => {
         expect(chooseDecisionOption(options, 'risk')?.id).toBe('safe');
+    });
+});
+
+describe('shouldInsureMerc', () => {
+    it('never insures when the main insurance switch is off', () => {
+        expect(shouldInsureMerc(20000, { enabled: false, minPriceEnabled: true, minPrice: 10000 })).toBe(false);
+    });
+
+    it('insures every mercenary when the price condition is off', () => {
+        expect(shouldInsureMerc(100, { enabled: true, minPriceEnabled: false, minPrice: 10000 })).toBe(true);
+    });
+
+    it('insures only strictly above the threshold', () => {
+        const policy = { enabled: true, minPriceEnabled: true, minPrice: 10000 };
+        expect(shouldInsureMerc(10001, policy)).toBe(true);
+        expect(shouldInsureMerc(10000, policy)).toBe(false);
+        expect(shouldInsureMerc(9999, policy)).toBe(false);
     });
 });
 

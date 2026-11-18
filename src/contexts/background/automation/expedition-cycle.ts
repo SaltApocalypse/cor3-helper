@@ -297,6 +297,8 @@ export class ExpeditionCycle {
                     marketId: market.marketId,
                     marketKey: market.key === 'usol' ? 'usol' : 'core',
                     hasInsurance: current.mercInsuranceEnabled,
+                    insuranceMinPriceEnabled: current.mercInsuranceMinPriceEnabled,
+                    insuranceMinPrice: current.mercInsuranceMinPrice,
                     locations: marketLocations,
                     locationConfigId: profile.locationConfigId,
                     zoneConfigId: profile.zoneConfigId,

@@ -8,6 +8,8 @@ export interface MercenaryCandidate {
     readonly marketKey: MercMarketKey;
     readonly totalCost: number;
     readonly riskScore: number;
+    /** Insurance decision used when this candidate was priced and launched. */
+    readonly insurance: boolean;
     /** True when totalCost fell back to the initial price and was not configured. */
     readonly costEstimated?: boolean;
 }
@@ -16,6 +18,17 @@ export interface MercenarySelectionOptions {
     readonly mode: MercSelectionMode;
     readonly marketOrder: readonly MercMarketKey[];
     readonly maxPrice: number | null;
+}
+
+export interface MercInsurancePolicy {
+    readonly enabled: boolean;
+    readonly minPriceEnabled: boolean;
+    readonly minPrice: number;
+}
+
+export function shouldInsureMerc(price: number, policy: MercInsurancePolicy): boolean {
+    if (!policy.enabled) return false;
+    return !policy.minPriceEnabled || price > policy.minPrice;
 }
 
 function sortByCost(left: MercenaryCandidate, right: MercenaryCandidate): number {

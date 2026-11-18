@@ -455,6 +455,42 @@ export function AutoExpeditionCard({
                                     onClick={() => void updateSettings({ mercInsuranceEnabled: !settings?.mercInsuranceEnabled })}
                                 />
                             </div>
+
+                            <div class={`v2-expedition-subsettings${settings?.mercInsuranceEnabled ? '' : ' v2-expedition-disabled'}`}>
+                                <div class="v2-expedition-setting-row">
+                                    <div>
+                                        <strong>{tr('Only insure above price')}</strong>
+                                        <p class="v2-muted">{tr('Insure a mercenary only when its hire price is higher than this value.')}</p>
+                                    </div>
+                                    <Switch
+                                        checked={settings?.mercInsuranceMinPriceEnabled ?? false}
+                                        disabled={!settings?.mercInsuranceEnabled}
+                                        label={tr('Only insure above price')}
+                                        onClick={() => void updateSettings({ mercInsuranceMinPriceEnabled: !settings?.mercInsuranceMinPriceEnabled })}
+                                    />
+                                </div>
+                                <div class="v2-expedition-setting-row">
+                                    <div>
+                                        <strong>{tr('Insurance price threshold')}</strong>
+                                        <p class="v2-muted">{tr('Minimum hire price that requires insurance.')}</p>
+                                    </div>
+                                    <div class="v2-expedition-inline">
+                                        <input
+                                            type="number"
+                                            min={0}
+                                            placeholder="10000"
+                                            value={settings?.mercInsuranceMinPrice ?? 10000}
+                                            disabled={!settings?.mercInsuranceEnabled || !settings?.mercInsuranceMinPriceEnabled}
+                                            onInput={(event) => {
+                                                const value = (event.currentTarget as HTMLInputElement).value.trim();
+                                                void updateSettings({
+                                                    mercInsuranceMinPrice: value === '' ? 10000 : Math.max(0, Math.floor(Number(value) || 0)),
+                                                });
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="v2-expedition-setting-row">

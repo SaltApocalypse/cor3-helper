@@ -11,7 +11,7 @@ import {
     type ActiveExpedition,
     type DecisionPolicy,
 } from '../../domains/expeditions/model.js';
-import type { MercenaryCandidate, MercMarketKey } from '../../domains/expeditions/selection.js';
+import { shouldInsureMerc, type MercenaryCandidate, type MercMarketKey } from '../../domains/expeditions/selection.js';
 
 export interface ExpeditionPort {
     getActive(): Promise<Result<unknown, { readonly code: string; readonly message: string }>>;
@@ -160,6 +160,8 @@ export class ExpeditionService {
         readonly marketId: string;
         readonly marketKey: 'core' | 'usol';
         readonly hasInsurance: boolean;
+        readonly insuranceMinPriceEnabled?: boolean;
+        readonly insuranceMinPrice?: number;
         readonly maxCandidates?: number;
         readonly locations?: readonly ExpeditionLocation[];
         readonly locationConfigId?: string;
@@ -181,6 +183,11 @@ export class ExpeditionService {
         const candidates: MercenaryCandidate[] = [];
         for (const merc of limited) {
             await this.sleep(150);
+            const insurance = shouldInsureMerc(merc.price, {
+                enabled: request.hasInsurance,
+                minPriceEnabled: request.insuranceMinPriceEnabled ?? false,
+                minPrice: request.insuranceMinPrice ?? 10000,
+            });
             let totalCost = merc.totalCost;
             let costEstimated = false;
             let riskScore = merc.riskScore ?? 0;
@@ -191,7 +198,7 @@ export class ExpeditionService {
                     locationConfigId: location.id,
                     zoneConfigId: zone.id,
                     goalId: goal.id,
-                    hasInsurance: request.hasInsurance,
+                    hasInsurance: insurance,
                 });
                 if (configured.ok) {
                     const cost = totalCostInfo(configured.value);
@@ -207,7 +214,7 @@ export class ExpeditionService {
                 costEstimated = true;
             }
             const marketKey: MercMarketKey = request.marketKey === 'usol' && merc.elite ? 'usol-elite' : request.marketKey;
-            candidates.push({ mercenary: merc, marketKey, totalCost, riskScore, costEstimated });
+            candidates.push({ mercenary: merc, marketKey, totalCost, riskScore, insurance, costEstimated });
         }
         return ok(candidates);
     }
