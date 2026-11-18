@@ -118,11 +118,44 @@ describe('toolbar open mode router', () => {
             area: string,
         ) => void;
         onStorageChanged({
-            'v2.settings': { newValue: { ...settingsV1Schema.parse({}), toolbarOpenMode: 'popup' } },
+            'v2.settings': {
+                newValue: {
+                    schemaVersion: 1,
+                    writtenAt: Date.now(),
+                    data: { ...settingsV1Schema.parse({}), toolbarOpenMode: 'popup' },
+                },
+            },
         }, 'local');
 
         expect(chromeApi.setPopup).toHaveBeenCalledWith({ popup: 'sidepanel.html?mode=popup' });
         expect(chromeApi.update).toHaveBeenCalledWith(toolbarOpenModeMenuItemId('popup'), { checked: true });
+    });
+
+    it('does not reset the selection when the storage change carries the settings payload', async () => {
+        const chromeApi = stubChrome();
+        registerToolbarOpenMode({ settings: fakeSettings() });
+        await vi.waitFor(() => expect(chromeApi.create).toHaveBeenCalled());
+
+        const onMenuClick = chromeApi.listeners.menuClick.mock.calls[0]?.[0] as (info: { menuItemId: string }) => void;
+        onMenuClick({ menuItemId: toolbarOpenModeMenuItemId('sidePanel') });
+
+        const onStorageChanged = chromeApi.listeners.storageChanged.mock.calls[0]?.[0] as (
+            changes: Record<string, { newValue?: unknown }>,
+            area: string,
+        ) => void;
+        chromeApi.setPopup.mockClear();
+        onStorageChanged({
+            'v2.settings': {
+                newValue: {
+                    schemaVersion: 1,
+                    writtenAt: Date.now(),
+                    data: { ...settingsV1Schema.parse({}), toolbarOpenMode: 'sidePanel' },
+                },
+            },
+        }, 'local');
+
+        expect(chromeApi.setPopup).toHaveBeenCalledWith({ popup: '' });
+        expect(chromeApi.setPopup).not.toHaveBeenCalledWith({ popup: 'popup.html' });
     });
 
     it('rebuilds the menu when the browser starts', async () => {

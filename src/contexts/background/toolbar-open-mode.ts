@@ -5,7 +5,7 @@ import {
     toolbarOpenModePopup,
     type ToolbarOpenMode,
 } from '../../application/settings/toolbar-open-mode.js';
-import { settingsV1Schema, TOOLBAR_OPEN_MODES, type SettingsPatch, type SettingsV1 } from '../../contracts/storage.js';
+import { settingsV1Schema, storageEnvelopeSchema, TOOLBAR_OPEN_MODES, type SettingsPatch, type SettingsV1 } from '../../contracts/storage.js';
 import { openWorkspaceSidePanel, openWorkspaceWindow } from '../../infrastructure/browser/workspace-opener.js';
 import { SETTINGS_KEY } from '../../infrastructure/storage/settings-repository.js';
 
@@ -90,9 +90,9 @@ export function registerToolbarOpenMode({ settings }: ToolbarOpenModeDeps): void
         if (areaName !== 'local') return;
         const change = changes[SETTINGS_KEY];
         if (!change?.newValue) return;
-        const parsed = settingsV1Schema.safeParse(change.newValue);
+        const parsed = storageEnvelopeSchema(settingsV1Schema).safeParse(change.newValue);
         if (!parsed.success) return;
-        currentMode = parsed.data.toolbarOpenMode;
+        currentMode = parsed.data.data.toolbarOpenMode;
         void applyPopup(currentMode);
         syncMenuChecked(currentMode);
     });
