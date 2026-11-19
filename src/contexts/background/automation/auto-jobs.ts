@@ -360,7 +360,7 @@ export class AutoJobsCoordinator {
             if (reason === 'scheduled') await this.scheduleNextRefresh();
             return;
         }
-        if (!force && this.snapshot && reason === 'popup-open') {
+        if (!force && this.snapshot && (reason === 'popup-open' || reason === 'startup')) {
             this.lastSkipReason = 'snapshot-present';
             return;
         }

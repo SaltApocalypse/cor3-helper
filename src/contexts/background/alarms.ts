@@ -49,9 +49,15 @@ export function alarmRoutes(automation: AutomationRuntime, logger: AutomationLog
             run: async () => {
                 try {
                     const result = await automation.autoFinish.runExclusive('auto-finish-retry', false);
-                    if (!result.ok) logger.warn('auto-finish', 'Auto Finish retry did not run', { code: result.error.code, message: result.error.message });
+                    if (!result.ok) logger.warn('auto-finish', 'Auto Finish retry did not run', {
+                        code: result.error?.code ?? 'AUTO_FINISH_FAILED',
+                        message: result.error?.message ?? 'Auto Finish retry failed',
+                    });
                 } catch (error) {
-                    logger.error('auto-finish', 'Auto Finish retry failed', { message: errorText(error) });
+                    logger.error('auto-finish', 'Auto Finish retry failed', {
+                        message: errorText(error),
+                        ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
+                    });
                 }
             },
         },

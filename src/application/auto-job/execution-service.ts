@@ -12,6 +12,7 @@ export type JobExecutionErrorCode =
     | 'UNSUPPORTED_JOB_TYPE'
     | 'MINIGAME_REQUIRED'
     | 'MINIGAME_FAILED'
+    | 'MINIGAME_DISABLED'
     | 'DECRYPT_POWER_INSUFFICIENT'
     | 'FILE_NOT_FOUND'
     | 'ACTION_FAILED'
@@ -33,7 +34,7 @@ function stageForJobError(code: JobExecutionErrorCode): string {
     if (code === 'TAKE_FAILED') return 'take';
     if (code === 'PREFLIGHT_FAILED') return 'preflight';
     if (code === 'JOB_CANCELLED') return 'cancelled';
-    if (code === 'MINIGAME_REQUIRED' || code === 'MINIGAME_FAILED' || code === 'DECRYPT_POWER_INSUFFICIENT') return 'minigame';
+    if (code === 'MINIGAME_REQUIRED' || code === 'MINIGAME_FAILED' || code === 'MINIGAME_DISABLED' || code === 'DECRYPT_POWER_INSUFFICIENT') return 'minigame';
     if (code === 'COMPLETE_FAILED') return 'complete';
     return 'action';
 }
@@ -125,6 +126,13 @@ export class JobExecutionService implements JobExecutionPort {
         if (job.alreadyTaken && job.canComplete) return this.complete(job);
         if (!job.serverId && !isServerlessJob(job.type)) {
             return err({ code: 'NO_SERVER', message: 'Job has no server id' });
+        }
+        // Do not take (or re-take) a decrypt job while the game still reports a
+        // global minigame lock. Previously each job was taken and then failed
+        // with the lock, leaving every home decrypt job accepted but stuck.
+        if (requiresDecrypt(job)) {
+            const lock = await this.activeMinigameLock();
+            if (lock !== null) return this.lockedError(lock);
         }
         let current = job;
         if (!current.alreadyTaken) {
@@ -256,13 +264,7 @@ export class JobExecutionService implements JobExecutionPort {
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
         if (requiresDecrypt(job)) {
             const download = await this.findDownloadedFile(job, target.name);
-            if (!download.ok) {
-                // The game can lag behind the decrypted file (or remove it after
-                // processing) while the job is already claimable. Try completion
-                // before reporting a missing file.
-                if (job.alreadyTaken) return this.complete(job);
-                return download;
-            }
+            if (!download.ok) return download;
             return this.decryptAndComplete(job, download.value);
         }
         return this.complete(job);
@@ -270,10 +272,7 @@ export class JobExecutionService implements JobExecutionPort {
 
     private async fileDecryption(job: JobOffer): Promise<Result<JobReward, JobExecutionError>> {
         const download = await this.findDownloadedFile(job);
-        if (!download.ok) {
-            if (job.alreadyTaken) return this.complete(job);
-            return download;
-        }
+        if (!download.ok) return download;
         return this.decryptAndComplete(job, download.value);
     }
 
@@ -286,10 +285,7 @@ export class JobExecutionService implements JobExecutionPort {
             if (!downloaded.ok) return err({ code: 'ACTION_FAILED', message: downloaded.error.message });
         }
         const download = await this.findDownloadedFile(job, target?.name);
-        if (!download.ok) {
-            if (job.alreadyTaken) return this.complete(job);
-            return download;
-        }
+        if (!download.ok) return download;
         return this.decryptAndComplete(job, download.value);
     }
 
@@ -303,17 +299,23 @@ export class JobExecutionService implements JobExecutionPort {
         const expectedType = decryptFileType(job, preferredName)?.toLowerCase() ?? null;
         const matchesExpectedType = (file: DownloadFile): boolean =>
             expectedType === null || file.name.toLowerCase().endsWith(expectedType);
+        // The job condition names the *decrypted* file (for example
+        // `export_9724.txt`) while the downloaded file is still encrypted and
+        // has a different suffix (`export_9724.ab52p`). Match on the base name
+        // from every available reference and prefer the encrypted file.
+        const baseCandidates = new Set<string>();
+        for (const name of [job.fileInfo?.name, preferredName, ...refs.map((ref) => ref.name)]) {
+            if (typeof name === 'string' && name.length > 0) baseCandidates.add(baseName(name));
+        }
+        const matchesBaseName = (file: DownloadFile): boolean => baseCandidates.has(baseName(file.name));
         const target =
             files.find((file) => job.fileInfo?.id === file.id && matchesExpectedType(file))
             ?? files.find((file) => refs.some((ref) => ref.fileId === file.id) && matchesExpectedType(file))
             ?? files.find((file) => job.fileInfo?.name !== undefined && job.fileInfo.name === file.name && matchesExpectedType(file))
             ?? files.find((file) => refs.some((ref) => ref.name !== undefined && ref.name === file.name) && matchesExpectedType(file))
-            ?? (preferredName ? files.find((file) => baseName(file.name) === baseName(preferredName) && matchesExpectedType(file)) : undefined)
-            // Data Download server files often use the original extension
-            // (`.dat`) while the encrypted download gets a different suffix
-            // (`.eb54x`). Match the base name when the suffix changed.
-            ?? (preferredName ? files.find((file) => baseName(file.name) === baseName(preferredName) && file.isEncrypted === true) : undefined)
-            ?? (preferredName ? files.find((file) => baseName(file.name) === baseName(preferredName)) : undefined)
+            ?? files.find((file) => matchesBaseName(file) && file.isEncrypted === true)
+            ?? files.find((file) => matchesBaseName(file) && matchesExpectedType(file))
+            ?? files.find((file) => matchesBaseName(file))
             ?? files.find((file) => file.isEncrypted && matchesExpectedType(file))
             ?? files.find((file) => file.isNew && matchesExpectedType(file))
             ?? (expectedType === null ? files.at(-1) : undefined);
@@ -324,6 +326,7 @@ export class JobExecutionService implements JobExecutionPort {
                 preferredName: preferredName ?? null,
                 fileInfo: job.fileInfo ?? null,
                 refs,
+                baseCandidates: [...baseCandidates],
                 available: files.map((file) => file.name),
             });
             return err({
@@ -471,6 +474,15 @@ export class JobExecutionService implements JobExecutionPort {
             }
         }
         const result = await solving;
+        this.trace?.(
+            `Minigame result: ${result.ok ? `${result.value.kind} solved=${result.value.solved}${result.value.message ? ` (${result.value.message})` : ''}` : `error ${result.error.message}`}`,
+            {
+                jobId: job.id,
+                kind: result.ok ? result.value.kind : null,
+                solved: result.ok ? result.value.solved : null,
+                message: result.ok ? result.value.message ?? null : result.error.message,
+            },
+        );
         if (openTimedOut) {
             const lock = await this.activeMinigameLock();
             if (lock !== null) return this.lockedError(lock);
@@ -490,6 +502,19 @@ export class JobExecutionService implements JobExecutionPort {
             return err({ code: 'MINIGAME_FAILED', message: result.error.message, ...retryMetadata(result.error) });
         }
         if (!result.value.solved) {
+            if (/solver disabled/i.test(result.value.message ?? '')) {
+                // Do not open the same minigame again immediately; a settings
+                // change or force run clears this cooldown.
+                const until = Date.now() + 10 * 60_000;
+                return err({
+                    code: 'MINIGAME_DISABLED',
+                    message: result.value.message ?? 'Minigame solver is disabled',
+                    retryable: false,
+                    retryAt: until,
+                    lockExpiresAt: until,
+                    stage: 'minigame',
+                });
+            }
             const lock = await this.activeMinigameLock();
             if (lock !== null) return this.lockedError(lock);
             // kind === 'none' means either no minigame appeared within the

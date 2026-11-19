@@ -142,6 +142,31 @@ describe('Auto Finish job-level completion', () => {
         expect(markets[1]?.jobs?.[0]?.jobId).toBe('dark-1');
     });
 
+    it('marks decrypt jobs retryable while the game minigame lock is active', () => {
+        const lockedJob: JobOffer = { ...job('locked'), type: 'File Decryption' };
+        const markets = buildFinalMarkets({
+            synced: {
+                jobs: [lockedJob],
+                markets: [{ marketKey: 'home', label: 'HOME', ok: true, skipped: 0, resetAt }],
+            },
+            allowedTypes: new Set(['Data Upload']),
+            doneIds: new Set(),
+            completedJobs: {},
+            resetByMarket: new Map([['home', resetAt]]),
+            locks,
+            outcomes: new Map(),
+            failedById: new Map(),
+            stopped: false,
+            now: 1,
+            globalLock: 5_000,
+        });
+        expect(markets[0]?.jobs?.[0]).toMatchObject({
+            status: 'retry',
+            code: 'MINIGAME_FAILED',
+            lockExpiresAt: 5_000,
+        });
+    });
+
     it('adds cached claim-only completions to a failed market report', () => {
         const runJob: JobOffer = {
             ...job('claimed'),

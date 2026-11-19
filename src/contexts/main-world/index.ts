@@ -211,7 +211,9 @@ server.register('game.valuableAction', z.object({
     return result.ok ? ok(result.value) : err(result.error);
 });
 server.register('game.solveMinigame', z.object({ timeoutMs: z.number().int().positive().optional() }).strict(), async ({ timeoutMs }) => {
-    return ok(await solveMinigame(timeoutMs));
+    // Job execution must respect the same auto-solver switches as the
+    // background tick, otherwise a disabled ICE Wall solver runs anyway.
+    return ok(await solveMinigame(timeoutMs, autoSolverKinds()));
 });
 server.register('game.cancelMinigame', z.object({}).strict(), async () => {
     cancelMinigame();

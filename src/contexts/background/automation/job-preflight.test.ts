@@ -69,6 +69,7 @@ function preflight(
     snap: NetworkSnapshot,
     canSatisfy: JobPreflightDeps['loadout']['canSatisfy'],
     minigameLock: number | null = null,
+    minigameSolversEnabled?: () => Promise<boolean>,
 ): JobPreflight {
     const logger = {
         debug: () => undefined,
@@ -80,12 +81,48 @@ function preflight(
         snapshots: { get: async () => ok(snap) },
         loadout: { canSatisfy },
         jobActions: { getMinigameLock: async () => minigameLock },
+        ...(minigameSolversEnabled ? { minigameSolversEnabled } : {}),
         logger,
         now: () => 1,
     });
 }
 
 describe('JobPreflight', () => {
+    it('skips a decrypt job when every minigame solver is disabled', async () => {
+        const snap = snapshot([server(home), server(target)], [['home', 'target']]);
+        const result = await preflight(
+            snap,
+            async () => ok({ feasible: true, reason: null }),
+            null,
+            async () => false,
+        ).preflight(job({
+            id: 'decrypt',
+            name: 'File Decryption',
+            type: 'File Decryption',
+            serverId: null,
+            serverName: null,
+        }));
+        expect(result.ok).toBe(false);
+        if (!result.ok) expect(result.error.message).toContain('Minigame solver is disabled');
+    });
+
+    it('keeps decrypt jobs blocked while the game minigame lock is active', async () => {
+        const snap = snapshot([server(home), server(target)], [['home', 'target']]);
+        const result = await preflight(
+            snap,
+            async () => ok({ feasible: true, reason: null }),
+            60_000,
+        ).preflight(job({
+            id: 'decrypt',
+            name: 'File Decryption',
+            type: 'File Decryption',
+            serverId: null,
+            serverName: null,
+        }));
+        expect(result.ok).toBe(false);
+        if (!result.ok) expect(result.error.message).toContain('Minigame locked');
+    });
+
     it('allows a target reachable from the current endpoint when the home route is blocked', async () => {
         const snap = snapshot(
             [
@@ -136,7 +173,7 @@ describe('JobPreflight', () => {
         expect(result.ok).toBe(true);
     });
 
-    it('lets a decrypt job be taken while the minigame is locked', async () => {
+    it('does not take a decrypt job while the minigame is locked', async () => {
         const snap = snapshot([server(home, 'Home', { access: true })], []);
         const result = await preflight(
             snap,
@@ -149,7 +186,8 @@ describe('JobPreflight', () => {
             serverId: null,
             serverName: null,
         }));
-        expect(result.ok).toBe(true);
+        expect(result.ok).toBe(false);
+        if (!result.ok) expect(result.error.message).toContain('Minigame locked');
     });
 
     it('treats a generic .enc extension as unknown during decrypt preflight', async () => {

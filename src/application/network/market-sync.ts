@@ -36,6 +36,8 @@ export interface MarketSyncResult {
 
 export interface MarketSyncOptions {
     readonly retryDelayMs?: number;
+    /** Time to let the game settle after changing the endpoint. */
+    readonly routeSettleMs?: number;
     readonly sleep?: (ms: number) => Promise<void>;
 }
 
@@ -47,6 +49,7 @@ function isTransientMarketFetchError(error: GameError): boolean {
 
 export class MarketSyncService {
     private readonly retryDelayMs: number;
+    private readonly routeSettleMs: number;
     private readonly sleep: (ms: number) => Promise<void>;
 
     constructor(
@@ -57,6 +60,7 @@ export class MarketSyncService {
         options: MarketSyncOptions = {},
     ) {
         this.retryDelayMs = options.retryDelayMs ?? 500;
+        this.routeSettleMs = options.routeSettleMs ?? 400;
         this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     }
 
@@ -95,9 +99,13 @@ export class MarketSyncService {
                 message: `${route.error?.message ?? 'No usable route'}${details ? ` — ${details}` : ''}`,
             });
         }
+        // Let the game settle after the endpoint change before asking for the
+        // market. Without this, the first `get.jobs` after a route switch often
+        // returned `market-not-reachable` and needed a full retry round.
+        if (this.routeSettleMs > 0) await this.sleep(this.routeSettleMs);
         let market = await this.markets.fetchMarket(request.marketId);
-        for (let attempt = 0; attempt < 2 && !market.ok && isTransientMarketFetchError(market.error); attempt++) {
-            await this.sleep(this.retryDelayMs);
+        for (let attempt = 0; attempt < 3 && !market.ok && isTransientMarketFetchError(market.error); attempt++) {
+            await this.sleep(this.retryDelayMs * (attempt + 1));
             market = await this.markets.fetchMarket(request.marketId);
         }
         if (!market.ok) return err({ code: 'MARKET_FETCH_FAILED', message: market.error.message });

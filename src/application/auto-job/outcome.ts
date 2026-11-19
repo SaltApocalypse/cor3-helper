@@ -15,6 +15,7 @@ export type JobOutcomeReason =
     | 'network'
     | 'minigame'
     | 'minigame-lock'
+    | 'minigame-disabled'
     | 'maintenance'
     | 'capability'
     | 'type-disabled'
@@ -86,6 +87,9 @@ export function classifyJobFailure(input: JobOutcomeInput, _now = Date.now()): J
     }
     if (code === 'UNSUPPORTED_JOB_TYPE' || code === 'MINIGAME_REQUIRED') {
         return skippedOutcome('unsupported');
+    }
+    if (code === 'MINIGAME_DISABLED') {
+        return skippedOutcome('minigame-disabled');
     }
     if (code === 'DECRYPT_POWER_INSUFFICIENT') {
         return skippedOutcome('capability');

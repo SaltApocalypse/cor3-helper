@@ -13,6 +13,8 @@ export interface JobPreflightDeps {
     readonly snapshots: Pick<NetworkSnapshotService, 'get'>;
     readonly loadout: Pick<LoadoutService, 'canSatisfy'>;
     readonly jobActions: { getMinigameLock?(): Promise<number | null> };
+    /** True when at least one decrypt minigame solver is enabled. */
+    readonly minigameSolversEnabled?: () => Promise<boolean>;
     readonly logger: AutomationLogger;
     readonly now?: () => number;
 }
@@ -98,6 +100,14 @@ export class JobPreflight {
 
         if (jobRequiresDecrypt(job)) {
             needsMinigame = true;
+            if (this.deps.minigameSolversEnabled && !(await this.deps.minigameSolversEnabled())) {
+                // Taking a decrypt job with no solver enabled only opens the
+                // minigame, fails, and can trigger a long game lock.
+                return err({
+                    code: 'PREFLIGHT_FAILED',
+                    message: 'Minigame solver is disabled: enable Auto Decrypt, ICE Wall or Simple Decrypt before taking decrypt jobs',
+                });
+            }
             const resolvedFileType = decryptFileType(job, job.fileInfo?.name);
             // `.enc`/`.bin` are generic wrappers, not reliable decrypt formats.
             // Treat them as unknown for the preflight so a wrapper does not
@@ -109,10 +119,12 @@ export class JobPreflight {
                 ability: 'DECRYPT',
                 target: fileType ?? '',
                 requiredPower: 0,
-                // File Decryption rows often only expose the extension after the
-                // file is downloaded. Fall back to "owns any DECRYPT module" so a
-                // completely un-equipped account still does not take the job.
-                ...(fileType ? {} : { fallbackToAnyAbility: true }),
+                // The job condition names the decrypted file, but the actual
+                // decrypt target is the downloaded encrypted file, whose
+                // suffix may be completely different (`.txt` vs `.ab52p`).
+                // Require any DECRYPT module here; the strict targeted loadout
+                // runs after the real file is known.
+                fallbackToAnyAbility: true,
             });
             if (!capability.ok) {
                 this.deps.logger.warn('auto-job', `Decrypt capability check unavailable for ${job.name}`, { message: capability.error.message });
@@ -184,10 +196,9 @@ export class JobPreflight {
             });
         }
 
-        // Decrypt jobs are taken first and re-check the minigame lock in the
-        // execution service. Blocking them here made the UI look like the job
-        // was skipped without ever being accepted.
-        if (needsMinigame && !jobRequiresDecrypt(job) && this.deps.jobActions.getMinigameLock) {
+        // Block before take. Accepting a decrypt job while the game reports a
+        // minigame lock left every home decrypt job taken but uncompletable.
+        if (needsMinigame && this.deps.jobActions.getMinigameLock) {
             const lock = await this.deps.jobActions.getMinigameLock();
             if (lock !== null && lock > this.now()) {
                 return err({ code: 'PREFLIGHT_FAILED', message: lockMessage(lock, this.now()) });

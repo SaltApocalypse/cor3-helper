@@ -117,6 +117,54 @@ describe('JobExecutionService', () => {
         expect(fake.calls).toEqual(['take', 'download-file', 'decrypt-file', 'complete']);
     });
 
+    it('matches an encrypted download when only the decrypted condition name is known', async () => {
+        const fake = actions();
+        fake.port.getServerFiles = async () => ({ ok: true, value: [] });
+        fake.port.openFolder = async () => ({
+            ok: true,
+            value: [{ id: 'encrypted', name: 'export_9724.ab52p', isEncrypted: true }],
+        });
+        const service = new JobExecutionService(
+            fake.port,
+            undefined,
+            undefined,
+            {
+                solve: async () => ({ ok: true as const, value: { kind: 'config-hack' as const, solved: true } }),
+                cancel: async () => ({ ok: true as const, value: undefined }),
+            },
+        );
+        const result = await service.executeDetailed(job('Decrypt & Extract', {
+            alreadyTaken: true,
+            conditions: [{ type: 'DecryptDownloadedFile', details: { files: [{ name: 'export_9724.txt' }] } }],
+        }));
+        expect(result.ok).toBe(true);
+        expect(fake.calls).toEqual(['decrypt-file', 'complete']);
+    });
+
+    it('does not complete or retry when the minigame solver is disabled', async () => {
+        const fake = actions();
+        fake.port.openFolder = async () => ({
+            ok: true,
+            value: [{ id: 'encrypted', name: 'job-file.dat', isEncrypted: true }],
+        });
+        const service = new JobExecutionService(
+            fake.port,
+            undefined,
+            undefined,
+            {
+                solve: async () => ({ ok: true as const, value: { kind: 'ice-wall' as const, solved: false, message: 'solver disabled for ice-wall' } }),
+                cancel: async () => ({ ok: true as const, value: undefined }),
+            },
+        );
+        const result = await service.executeDetailed(job('File Decryption'));
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+            expect(result.error.code).toBe('MINIGAME_DISABLED');
+            expect(result.error.retryable).toBe(false);
+            expect(result.error.lockExpiresAt).toBeTypeOf('number');
+        }
+    });
+
     it('decrypts a downloaded file and completes', async () => {
         const fake = actions();
         const minigameCalls: string[] = [];

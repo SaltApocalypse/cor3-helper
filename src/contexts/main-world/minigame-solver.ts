@@ -303,6 +303,13 @@ export async function solveMinigame(
         const started = Date.now();
         while (Date.now() - started < timeoutMs) {
             if (session.abort) return { kind: 'none', solved: false, message: 'aborted' };
+            const detected = detectMinigameKind();
+            if (detected !== null && !allowed.has(detected)) {
+                // Stop immediately instead of waiting for the timeout. The
+                // caller can report a capability/configuration problem rather
+                // than treating it as a failed or locked minigame.
+                return { kind: detected, solved: false, message: `solver disabled for ${detected}` };
+            }
             if (simpleDecryptApp() && allowed.has('simple-decrypt')) return await solveSimpleDecrypt(session);
             if (configHackApp() && allowed.has('config-hack')) {
                 if (configHackReady()) return await solveConfigHack(session);

@@ -64,6 +64,7 @@ export function outcomeReasonText(outcome: JobOutcome): string {
         case 'expired': return 'Job expired before completion';
         case 'unsupported': return 'Job type is not supported yet';
         case 'minigame-lock': return 'Minigame is locked';
+        case 'minigame-disabled': return 'Minigame solver is disabled';
         case 'maintenance': return 'Target route is unavailable';
         default: return 'Job was not accepted';
     }
@@ -84,6 +85,7 @@ export function codeForOutcome(outcome: JobOutcome, fallback: string): string {
         case 'type-disabled': return 'TYPE_DISABLED';
         case 'expired': return 'EXPIRED';
         case 'unsupported': return 'UNSUPPORTED_JOB_TYPE';
+        case 'minigame-disabled': return 'MINIGAME_DISABLED';
         default: return fallback;
     }
 }

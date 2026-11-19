@@ -44,6 +44,8 @@ export interface AutoFinishDeps {
     readonly markets: JobMarketSync;
     readonly snapshots: Pick<NetworkSnapshotService, 'get'>;
     readonly networkOps: Pick<import('../../../application/network/operation-queue.js').NetworkOperationQueue, 'enqueue'>;
+    /** Global game minigame lock, if one is active. */
+    readonly minigameLock?: () => Promise<number | null>;
     readonly humanDelay?: (minMs?: number, maxMs?: number) => Promise<void>;
 }
 

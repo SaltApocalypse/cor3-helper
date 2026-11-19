@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-15 against build `2.0.6-salta.279`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (95 files / 473 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-15 against build `2.0.6-salta.281`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (95 files / 478 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.6-salta.279`)
+## Current completion snapshot (build `2.0.6-salta.281`)
 
 | Metric | Value |
 |---|---|
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 95 files / 473 tests pass
-- `npm run build` — pass, `2.0.6-salta.279`
+- `npm test` — 95 files / 478 tests pass
+- `npm run build` — pass, `2.0.6-salta.281`
 
 ---
 
@@ -736,7 +736,7 @@ Fixes:
 
 - typecheck / lint pass
 - 80 test files / 355 tests
-- build `2.0.6-salta.279`
+- build `2.0.6-salta.281`
 
 ---
 
@@ -1083,7 +1083,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 40 — Auto Jobs state truth, retry policy and market freshness (2.0.6-salta.279)
+# Part 40 — Auto Jobs state truth, retry policy and market freshness (2.0.6-salta.281)
 
 - Every Auto Finish cycle now persists and publishes a report, including "nothing runnable" passes. Previously a blocked cycle returned early, so the UI kept the previous run report and could show a claimable job with no tag at all.
 - Job status tags are derived from persisted completion state (`completedJobs`) first, then the latest run report, then the live snapshot (`ready to claim`). A completed job always shows `done` for its market reset.
@@ -1097,7 +1097,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 41 — Per-market refresh and push-first cache (2.0.6-salta.279)
+# Part 41 — Per-market refresh and push-first cache (2.0.6-salta.281)
 
 - Auto Jobs no longer refresh all four markets on every trigger. `ensureInfo` selects only markets whose `updatedAt` is older than their TTL: 60 seconds in steady state, 15 seconds within two minutes of a known reset. A recent game push therefore makes a ready/scheduled pass a no-op.
 - A trigger that arrives while a cycle is running is coalesced and re-checked after the cycle instead of being dropped.
@@ -1105,3 +1105,16 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 - Options/lots are cached in the content script for five minutes; market refreshes only fetch `get.jobs` in steady state.
 - The network map TTL is 60 seconds. Single-market syncs reuse the cached map and force a refresh only when routing fails; the job preflight refreshes a maintenance-blocked map after 30 seconds instead of 120.
 - Market reports preserve rows for markets that were not refreshed, so per-market passes do not blank statuses for the other markets.
+
+
+---
+
+# Part 42 — Decrypt file matching, minigame locks and worker log noise (2.0.6-salta.281)
+
+- A downloaded encrypted file is now matched to a job by the base name from its decrypt conditions as well as the file id/name. Previously `Decrypt & Extract` tried to match `export_9724.txt` against `export_9724.ab52p`, found nothing, and then attempted completion, producing `job-conditions-not-met`.
+- The `alreadyTaken` completion fallback for a missing decrypt file was removed. It masked the real file-matching failure and consumed retry budgets.
+- Decrypt jobs are no longer taken while the game reports a global minigame lock. The Auto Finish selection reads the lock once, skips decrypt jobs with a lock reason, and schedules the retry at lock expiry. The execution service and preflight also refuse to take a decrypt job while locked.
+- The minigame solve path now uses the same auto-solver switches as the background tick. A disabled solver returns immediately (`solver disabled for <kind>`) instead of waiting 30 seconds; the job is skipped as a capability gap and gets a 10-minute cooldown, and the detected kind/result is logged.
+- When every decrypt minigame solver is disabled, the decrypt preflight skips the job before take.
+- Startup no longer runs a full market refresh on every service-worker restart when a persisted snapshot exists. A `system` initialization line is logged once per browser session; later worker starts log at debug level.
+- Network market sync waits briefly after an endpoint change and retries transient `market-not-reachable` responses three times with increasing delays.
