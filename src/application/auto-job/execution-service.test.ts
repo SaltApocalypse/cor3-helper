@@ -571,3 +571,139 @@ describe('JobExecutionService', () => {
         expect(fake.calls).toEqual(['take', 'decrypt-file', 'complete']);
     });
 });
+
+function lifecycleRecorder() {
+    const transitions: import('../../contracts/job-state.js').JobLifecycleStatus[] = [];
+    const recorder: import('./job-state-recorder.js').JobStateRecorderPort = {
+        start: async (offer) => ({
+            key: { marketKey: offer.marketKey, jobId: offer.id, resetAt: 'reset-a' },
+            transition: async (status) => { transitions.push(status); },
+        }),
+    };
+    return { transitions, recorder };
+}
+
+function serviceWithRecorder(port: JobActionPort, recorder: import('./job-state-recorder.js').JobStateRecorderPort): JobExecutionService {
+    return new JobExecutionService(
+        port,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        recorder,
+    );
+}
+
+describe('JobExecutionService lifecycle records', () => {
+    it('persists taking before take, and completed only after an explicit complete success', async () => {
+        const fake = actions();
+        const lifecycle = lifecycleRecorder();
+        fake.port.take = async () => {
+            expect(lifecycle.transitions.at(-1)).toBe('taking');
+            fake.calls.push('take');
+            return { ok: true as const, value: undefined };
+        };
+        fake.port.complete = async () => {
+            expect(lifecycle.transitions.at(-1)).toBe('claiming');
+            fake.calls.push('complete');
+            return { ok: true as const, value: { credits: 100, reputation: 10, renown: 1 } };
+        };
+        const service = serviceWithRecorder(fake.port, lifecycle.recorder);
+
+        const result = await service.executeDetailed(job('IP Injection', {
+            conditions: [{ details: { ips: ['1.1.1.1'] } }],
+        }));
+
+        expect(result.ok).toBe(true);
+        expect(lifecycle.transitions).toEqual([
+            'available', 'taking', 'taken', 'executing', 'ready-to-claim', 'claiming', 'completed',
+        ]);
+    });
+
+    it('records a claim-only job as ready-to-claim and never sends take', async () => {
+        const fake = actions();
+        const lifecycle = lifecycleRecorder();
+        fake.port.take = async () => {
+            throw new Error('take must not be called for a claim-only job');
+        };
+        const service = serviceWithRecorder(fake.port, lifecycle.recorder);
+
+        const result = await service.executeDetailed(job('File Decryption', {
+            alreadyTaken: true,
+            canComplete: true,
+        }));
+
+        expect(result.ok).toBe(true);
+        expect(lifecycle.transitions).toEqual(['ready-to-claim', 'claiming', 'completed']);
+        expect(fake.calls).toEqual(['complete']);
+    });
+
+    it('does not record taken when the take request fails', async () => {
+        const fake = actions();
+        const lifecycle = lifecycleRecorder();
+        fake.port.take = async () => ({ ok: false as const, error: { code: 'GAME_ERROR', message: 'take rejected' } });
+        const service = serviceWithRecorder(fake.port, lifecycle.recorder);
+
+        const result = await service.executeDetailed(job('IP Injection'));
+
+        expect(result.ok).toBe(false);
+        expect(lifecycle.transitions).toContain('taking');
+        expect(lifecycle.transitions).not.toContain('taken');
+        expect(lifecycle.transitions.at(-1)).toBe('failed');
+    });
+
+    it('records an unconfirmed complete as unknown, never completed', async () => {
+        const fake = actions();
+        const lifecycle = lifecycleRecorder();
+        fake.port.complete = async () => ({
+            ok: false as const,
+            error: { code: 'GAME_TIMEOUT', message: 'Timed out waiting for desktop:complete' },
+        });
+        const service = serviceWithRecorder(fake.port, lifecycle.recorder);
+
+        const result = await service.executeDetailed(job('IP Injection', {
+            conditions: [{ details: { ips: ['1.1.1.1'] } }],
+        }));
+
+        expect(result.ok).toBe(false);
+        expect(lifecycle.transitions).toContain('claiming');
+        expect(lifecycle.transitions).not.toContain('completed');
+        expect(lifecycle.transitions.at(-1)).toBe('unknown');
+    });
+
+    it('records a preflight minigame lock as waiting-minigame without taking', async () => {
+        const fake = actions();
+        const lifecycle = lifecycleRecorder();
+        fake.port.take = async () => {
+            throw new Error('take must not be called while the job is locked');
+        };
+        const service = new JobExecutionService(
+            fake.port,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            async () => ({ ok: false as const, error: { code: 'PREFLIGHT_FAILED', message: 'Minigame locked (~5m remaining)' } }),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            lifecycle.recorder,
+        );
+
+        const result = await service.executeDetailed(job('File Decryption'));
+
+        expect(result.ok).toBe(false);
+        expect(lifecycle.transitions).toEqual(['available', 'waiting-minigame']);
+        expect(fake.calls).toEqual([]);
+    });
+});

@@ -4,6 +4,8 @@ import { err, ok, type Result } from '../../kernel/result.js';
 import type { JobExecutionPort, JobReward } from './runner.js';
 import { conditionsOf, fileReferencesFromConditions, ipsFromConditions, type DownloadFile, type FileAnalysis, type JobActionPort } from './job-actions.js';
 import type { MinigamePort } from './minigame-port.js';
+import type { JobStateRecorderPort, JobStateSession } from './job-state-recorder.js';
+import { lifecycleStatusForFailure } from './lifecycle.js';
 import { sleep as defaultSleep } from '../../kernel/sleep.js';
 
 export type JobExecutionErrorCode =
@@ -102,6 +104,7 @@ export class JobExecutionService implements JobExecutionPort {
         private readonly pace?: () => Promise<void>,
         private readonly trace?: (message: string, data?: unknown) => void,
         private readonly sleep: (ms: number) => Promise<void> = defaultSleep,
+        private readonly stateRecorder?: JobStateRecorderPort,
     ) {}
 
     async execute(job: JobOffer): Promise<Result<JobReward, GameError>> {
@@ -120,17 +123,45 @@ export class JobExecutionService implements JobExecutionPort {
     }
 
     async executeDetailed(job: JobOffer): Promise<Result<JobReward, JobExecutionError>> {
+        const state = await this.startJobState(job);
+        const result = await this.executeJob(job, state);
+        if (!result.ok) {
+            await state?.transition(lifecycleStatusForFailure(result.error), {
+                errorCode: result.error.code,
+                message: result.error.message,
+                ...(result.error.stage !== undefined ? { stage: result.error.stage } : {}),
+            });
+        }
+        return result;
+    }
+
+    private async startJobState(job: JobOffer): Promise<JobStateSession | null> {
+        if (!this.stateRecorder) return null;
+        try {
+            return await this.stateRecorder.start(job);
+        } catch (error) {
+            // Recording is observational; a recorder bug must not stop the job.
+            this.trace?.('Failed to start job lifecycle record', {
+                jobId: job.id,
+                message: error instanceof Error ? error.message : String(error),
+            });
+            return null;
+        }
+    }
+
+    private async executeJob(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
         if (this.shouldStop?.()) return err({ code: 'JOB_CANCELLED', message: 'Job run cancelled', retryable: false, stage: 'cancelled' });
         // Completion is the only remaining step for a claimable job. It must
         // not be rejected for a missing target server or a disabled type.
         if (job.alreadyTaken && job.canComplete) {
-            return this.complete(job);
+            return this.complete(job, state);
         }
         if (!job.serverId && !isServerlessJob(job.type)) {
             return err({ code: 'NO_SERVER', message: 'Job has no server id' });
         }
         let current = job;
         if (!current.alreadyTaken) {
+            await state?.transition('available');
             // Serverless jobs still need a preflight (decrypt software and
             // minigame lock); target routing is simply skipped inside it.
             if (this.beforeExecute) {
@@ -148,15 +179,18 @@ export class JobExecutionService implements JobExecutionPort {
                 const market = await this.beforeTake(current);
                 if (!market.ok) return err({ code: 'TAKE_FAILED', message: market.error.message, retryable: true, stage: 'take' });
             }
+            // The take request may mutate remote state; record the intent first.
+            await state?.transition('taking');
             const take = await this.actions.take(current);
             if (!take.ok) return err({ code: 'TAKE_FAILED', message: take.error.message, retryable: true, stage: 'take' });
+            await state?.transition('taken');
             await this.pace?.();
             if (this.afterTake) {
                 const refreshed = await this.afterTake(current);
                 if (refreshed.ok) current = refreshed.value;
             }
             if (current.alreadyTaken && current.canComplete) {
-                return this.complete(current);
+                return this.complete(current, state);
             }
         }
 
@@ -166,31 +200,32 @@ export class JobExecutionService implements JobExecutionPort {
             if (!target.ok) return err({ code: 'ACTION_FAILED', message: target.error.message, retryable: true, stage: 'route' });
         }
 
+        await state?.transition('executing');
         switch (current.type) {
             case 'IP Injection':
-                return this.injectIps(current);
+                return this.injectIps(current, state);
             case 'IP Cleanup':
-                return this.cleanupIps(current);
+                return this.cleanupIps(current, state);
             case 'File Elimination':
-                return this.eliminateFile(current);
+                return this.eliminateFile(current, state);
             case 'Log Deletion':
-                return this.deleteLog(current);
+                return this.deleteLog(current, state);
             case 'Log Download':
-                return this.downloadLog(current);
+                return this.downloadLog(current, state);
             case 'Data Upload':
-                return this.uploadFile(current);
+                return this.uploadFile(current, state);
             case 'Data Download':
-                return this.downloadFile(current);
+                return this.downloadFile(current, state);
             case 'File Decryption':
-                return this.fileDecryption(current);
+                return this.fileDecryption(current, state);
             case 'Decrypt & Extract':
-                return this.decryptAndExtract(current);
+                return this.decryptAndExtract(current, state);
             default:
                 return err({ code: 'UNSUPPORTED_JOB_TYPE', message: `Unsupported job type: ${current.type}` });
         }
     }
 
-    private async injectIps(job: JobOffer): Promise<Result<JobReward, JobExecutionError>> {
+    private async injectIps(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
         const ips = ipsFromConditions(job);
         if (ips.length === 0) return err({ code: 'ACTION_FAILED', message: 'No IPs found in job conditions' });
         for (const ip of ips) {
@@ -198,10 +233,10 @@ export class JobExecutionService implements JobExecutionPort {
             if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
             await this.pace?.();
         }
-        return this.complete(job);
+        return this.complete(job, state);
     }
 
-    private async cleanupIps(job: JobOffer): Promise<Result<JobReward, JobExecutionError>> {
+    private async cleanupIps(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
         let ips = ipsFromConditions(job, 'DeleteIps');
         if (ips.length === 0) {
             const transit = await this.actions.getTransit(job.serverId!);
@@ -215,10 +250,10 @@ export class JobExecutionService implements JobExecutionPort {
             if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
             await this.pace?.();
         }
-        return this.complete(job);
+        return this.complete(job, state);
     }
 
-    private async eliminateFile(job: JobOffer): Promise<Result<JobReward, JobExecutionError>> {
+    private async eliminateFile(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
         const files = await this.actions.getServerFiles(job.serverId!);
         if (!files.ok) return err({ code: 'ACTION_FAILED', message: files.error.message });
         const refs = fileReferencesFromConditions(job);
@@ -226,54 +261,54 @@ export class JobExecutionService implements JobExecutionPort {
             file.jobId === job.id
             || refs.some((ref) => ref.fileId === file.fileId || (ref.name !== undefined && ref.name === file.name)),
         ) ?? files.value.find((file) => file.source === 'job');
-        if (!target) return this.complete(job);
+        if (!target) return this.complete(job, state);
         const result = await this.actions.deleteFile(job.serverId!, target.fileId);
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
-        return this.complete(job);
+        return this.complete(job, state);
     }
 
-    private async deleteLog(job: JobOffer): Promise<Result<JobReward, JobExecutionError>> {
+    private async deleteLog(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
         const logs = await this.actions.getServerLogs(job.serverId!);
         if (!logs.ok) return err({ code: 'ACTION_FAILED', message: logs.error.message });
         const target = logs.value.find((log) => log.jobId === job.id);
-        if (!target) return this.complete(job);
+        if (!target) return this.complete(job, state);
         const result = await this.actions.deleteLog(job.serverId!, target.seq);
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
-        return this.complete(job);
+        return this.complete(job, state);
     }
 
-    private async downloadLog(job: JobOffer): Promise<Result<JobReward, JobExecutionError>> {
+    private async downloadLog(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
         const logs = await this.actions.getServerLogs(job.serverId!);
         if (!logs.ok) return err({ code: 'ACTION_FAILED', message: logs.error.message });
         const target = logs.value.find((log) => log.jobId === job.id);
-        if (!target) return this.complete(job);
+        if (!target) return this.complete(job, state);
         const result = await this.actions.downloadLog(job.serverId!, target.seq);
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
-        return this.complete(job);
+        return this.complete(job, state);
     }
 
-    private async downloadFile(job: JobOffer): Promise<Result<JobReward, JobExecutionError>> {
+    private async downloadFile(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
         const files = await this.actions.getServerFiles(job.serverId!);
         if (!files.ok) return err({ code: 'ACTION_FAILED', message: files.error.message });
         const target = files.value.find((file) => file.jobId === job.id);
-        if (!target) return this.complete(job);
+        if (!target) return this.complete(job, state);
         const result = await this.actions.downloadFile(job.serverId!, target.fileId);
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
         if (requiresDecrypt(job)) {
             const download = await this.findDownloadedFile(job, target.name);
             if (!download.ok) return download;
-            return this.decryptAndComplete(job, download.value);
+            return this.decryptAndComplete(job, download.value, state);
         }
-        return this.complete(job);
+        return this.complete(job, state);
     }
 
-    private async fileDecryption(job: JobOffer): Promise<Result<JobReward, JobExecutionError>> {
+    private async fileDecryption(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
         const download = await this.findDownloadedFile(job);
         if (!download.ok) return download;
-        return this.decryptAndComplete(job, download.value);
+        return this.decryptAndComplete(job, download.value, state);
     }
 
-    private async decryptAndExtract(job: JobOffer): Promise<Result<JobReward, JobExecutionError>> {
+    private async decryptAndExtract(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
         const files = await this.actions.getServerFiles(job.serverId!);
         if (!files.ok) return err({ code: 'ACTION_FAILED', message: files.error.message });
         const target = files.value.find((file) => file.jobId === job.id);
@@ -283,7 +318,7 @@ export class JobExecutionService implements JobExecutionPort {
         }
         const download = await this.findDownloadedFile(job, target?.name);
         if (!download.ok) return download;
-        return this.decryptAndComplete(job, download.value);
+        return this.decryptAndComplete(job, download.value, state);
     }
 
     private async findDownloadedFile(job: JobOffer, preferredName?: string): Promise<Result<DownloadFile, JobExecutionError>> {
@@ -350,12 +385,12 @@ export class JobExecutionService implements JobExecutionPort {
         return analysis;
     }
 
-    private async decryptAndComplete(job: JobOffer, file: DownloadFile): Promise<Result<JobReward, JobExecutionError>> {
+    private async decryptAndComplete(job: JobOffer, file: DownloadFile, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
         // A decoded file can be picked up again when the user solved it manually
         // or when a previous run already decrypted it. Completing directly avoids
         // re-opening the minigame and avoids reporting "insufficient power (0)".
         this.trace?.(`Decrypt target file selected: ${file.name} (${file.id})`, { jobId: job.id, fileId: file.id, fileName: file.name, expectedType: decryptFileType(job, file.name), encrypted: file.isEncrypted });
-        if (file.isEncrypted === false) return this.completeAfterDecrypt(job, file.id);
+        if (file.isEncrypted === false) return this.completeAfterDecrypt(job, file.id, state);
         let analysis = await this.actions.getFileAnalysis(file.id);
         this.trace?.(
             `Decrypt file analysis: canDecrypt=${analysis.ok ? analysis.value.canDecrypt : 'error'}, power=${analysis.ok ? analysis.value.decryptPower : '?'}`,
@@ -443,7 +478,7 @@ export class JobExecutionService implements JobExecutionPort {
                 if (message.includes('file-already-decrypted') || message.includes('cannot-read-sai-file')) {
                     // Conditions update shortly after decryption; use the retrying
                     // completion path instead of a single, easily-stale attempt.
-                    return this.completeAfterDecrypt(job, file.id);
+                    return this.completeAfterDecrypt(job, file.id, state);
                 }
                 return err({ code: 'ACTION_FAILED', message, ...retryMetadata(opened.error) });
             }
@@ -501,12 +536,12 @@ export class JobExecutionService implements JobExecutionPort {
         // v1 waited here and retried completion; doing the same avoids marking the
         // first successful decryption as failed while it is still "ready to claim".
         await this.sleep(1500);
-        return this.completeAfterDecrypt(job, file.id);
+        return this.completeAfterDecrypt(job, file.id, state);
     }
 
-    private async completeAfterDecrypt(job: JobOffer, fileId: string): Promise<Result<JobReward, JobExecutionError>> {
+    private async completeAfterDecrypt(job: JobOffer, fileId: string, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
         let current = job;
-        let last = await this.complete(current);
+        let last = await this.complete(current, state);
         // Completion can fail because the game has not refreshed conditions yet,
         // the market endpoint was briefly unreachable, or the WS was reconnecting.
         // Refresh the job row before each retry: the deferred run-level pass proved
@@ -521,7 +556,7 @@ export class JobExecutionService implements JobExecutionPort {
             }
             current = await this.refreshForCompletion(current);
             await this.sleep(3000);
-            last = await this.complete(current);
+            last = await this.complete(current, state);
         }
         return last;
     }
@@ -558,7 +593,7 @@ export class JobExecutionService implements JobExecutionPort {
         await solving;
     }
 
-    private async uploadFile(job: JobOffer): Promise<Result<JobReward, JobExecutionError>> {
+    private async uploadFile(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
         if (!job.serverId) return err({ code: 'NO_SERVER', message: 'Job has no target server for upload' });
         let fileName = job.fileInfo?.name ?? null;
         if (!fileName) {
@@ -572,18 +607,21 @@ export class JobExecutionService implements JobExecutionPort {
         if (!fileName) return err({ code: 'ACTION_FAILED', message: 'No upload file found' });
         const result = await this.actions.uploadFile(job.serverId, fileName);
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
-        return this.complete(job);
+        return this.complete(job, state);
     }
 
-    private async complete(job: JobOffer): Promise<Result<JobReward, JobExecutionError>> {
+    private async complete(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
         await this.pace?.();
+        await state?.transition('ready-to-claim');
         // The complete request may mutate remote state; record the intent first.
+        await state?.transition('claiming');
         if (this.beforeComplete) {
             const hook = await this.beforeComplete(job);
             if (!hook.ok) return err({ code: 'COMPLETE_FAILED', message: hook.error.message, ...retryMetadata(hook.error) });
         }
         const result = await this.actions.complete(job);
         if (!result.ok) return err({ code: 'COMPLETE_FAILED', message: result.error.message, ...retryMetadata(result.error) });
+        await state?.transition('completed');
         return ok(result.value);
     }
 }

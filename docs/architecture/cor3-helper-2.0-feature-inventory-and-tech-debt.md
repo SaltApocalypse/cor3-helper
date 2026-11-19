@@ -5,15 +5,15 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-15 against build `2.0.6-salta.285`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (98 files / 509 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-15 against build `2.0.6-salta.286`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (101 files / 530 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.6-salta.285`)
+## Current completion snapshot (build `2.0.6-salta.286`)
 
 | Metric | Value |
 |---|---|
-| TypeScript/TSX source files | 390 (including 80 test files) |
-| Files under `src/` | 399 (vendored JavaScript is limited to `src/libs/`) |
+| TypeScript/TSX source files | 427 (including 101 test files) |
+| Files under `src/` | 436 (vendored JavaScript is limited to `src/libs/`) |
 | v1 parity rows with a status | 147 |
 | Implemented / improved | 89 |
 | Partial | 37 |
@@ -358,7 +358,7 @@ Reading the numbers:
 | H7 | Job schema assumption | `application/auto-job/market-mapper.ts` validates `raw.name` against `JOB_TYPES` and sets `type: raw.name`; ignores `raw.jobType`. | Localization/rename silently marks every job unsupported. | Map from machine `jobType`; keep display names separate; fixtures for localized rows. |
 | H8 | Background god module | `contexts/background/index.ts` ~4,575 lines, ~98 handlers plus alarms/routing/business logic. `SidePanelApp.tsx` ~1,860 lines. | High merge/regression risk; hard to test. | Split into context composition + per-automation application services; small handler modules. |
 | H9 | Persistence/versioning | Unversioned stores: `daily-ops-cache-store`, `drone-data-cache-store`, `expedition-config-cache-store`, `feature-availability-store`, `automation-state-store`. `versioned-repository` discards incompatible data with no migration. `contracts/storage.ts` makes settings enums depend on `JOB_TYPES`. | Caches/settings silently reset; removing a job type invalidates all settings. | Version every persisted value; idempotent migrations; decouple settings from domain enums. |
-| H10 | Untested critical paths | 80 test files vs 390 TypeScript/TSX source files (399 files under `src/`). The dev.230 pass added a decrypt-pipeline integration test, store-migration tests and an architecture-boundary test, but background/content/portal orchestration and UI rendering still lack integration tests. Vitest uses node env; no coverage thresholds/fake timers. | Orchestration/races/migrations regress invisibly; UI mostly untestable. | Integration tests with fake tab transport/clock; migration/redaction tests; jsdom component tests. |
+| H10 | Untested critical paths | 101 test files vs 427 TypeScript/TSX source files (436 files under `src/`). The dev.230 pass added a decrypt-pipeline integration test, store-migration tests and an architecture-boundary test, but background/content/portal orchestration and UI rendering still lack integration tests. Vitest uses node env; no coverage thresholds/fake timers. | Orchestration/races/migrations regress invisibly; UI mostly untestable. | Integration tests with fake tab transport/clock; migration/redaction tests; jsdom component tests. |
 
 ## Medium severity
 
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 98 files / 509 tests pass
-- `npm run build` — pass, `2.0.6-salta.285`
+- `npm test` — 101 files / 530 tests pass
+- `npm run build` — pass, `2.0.6-salta.286`
 
 ---
 
@@ -736,7 +736,7 @@ Fixes:
 
 - typecheck / lint pass
 - 80 test files / 355 tests
-- build `2.0.6-salta.285`
+- build `2.0.6-salta.286`
 
 ---
 
@@ -1083,7 +1083,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 40 — Auto Jobs state truth, retry policy and market freshness (2.0.6-salta.285)
+# Part 40 — Auto Jobs state truth, retry policy and market freshness (2.0.6-salta.286)
 
 - Every Auto Finish cycle now persists and publishes a report, including "nothing runnable" passes. Previously a blocked cycle returned early, so the UI kept the previous run report and could show a claimable job with no tag at all.
 - Job status tags are derived from persisted completion state (`completedJobs`) first, then the latest run report, then the live snapshot (`ready to claim`). A completed job always shows `done` for its market reset.
@@ -1097,7 +1097,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 41 — Per-market refresh and push-first cache (2.0.6-salta.285)
+# Part 41 — Per-market refresh and push-first cache (2.0.6-salta.286)
 
 - Auto Jobs no longer refresh all four markets on every trigger. `ensureInfo` selects only markets whose `updatedAt` is older than their TTL: 60 seconds in steady state, 15 seconds within two minutes of a known reset. A recent game push therefore makes a ready/scheduled pass a no-op.
 - A trigger that arrives while a cycle is running is coalesced and re-checked after the cycle instead of being dropped.
@@ -1109,7 +1109,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 42 — Decrypt file matching, minigame locks and worker log noise (2.0.6-salta.285)
+# Part 42 — Decrypt file matching, minigame locks and worker log noise (2.0.6-salta.286)
 
 - A downloaded encrypted file is now matched to a job by the base name from its decrypt conditions as well as the file id/name. Previously `Decrypt & Extract` tried to match `export_9724.txt` against `export_9724.ab52p`, found nothing, and then attempted completion, producing `job-conditions-not-met`.
 - The `alreadyTaken` completion fallback for a missing decrypt file was removed. It masked the real file-matching failure and consumed retry budgets.
@@ -1122,7 +1122,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 43 — Phase 1: file-scoped minigame locks and market-task solver behavior (2.0.6-salta.285)
+# Part 43 — Phase 1: file-scoped minigame locks and market-task solver behavior (2.0.6-salta.286)
 
 - Removed the global minigame-lock gate from Auto Finish, job preflight and the execution pre-take path. A lock now only blocks the job that owns it (`JobLockRegistry`); the game protocol exposes a single lock timestamp without a file/job id, so it is never interpreted as a lock for every decrypt job.
 - Market-task automation always calls the minigame solver. The auto-solver switches (`autoDecryptEnabled`, `autoIceWallEnabled`, `autoSimpleDecryptEnabled`) only control the background tick that reacts to minigames opened outside a market task; `JobPreflight` and the market-task execution path no longer read them.
@@ -1133,7 +1133,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 44 — Phase 2A: run semantics, reset reconciliation and unknown reset (2.0.6-salta.285)
+# Part 44 — Phase 2A: run semantics, reset reconciliation and unknown reset (2.0.6-salta.286)
 
 - `AutoFinishRunOptions` separates `forceRefresh`, `retryFailed`/`resetRetryBudget` and `clearLocalState`. A force refresh reloads market data but preserves `completedResets`/`completedJobs`; only `clearLocalState` clears completion records. `retryFailed`/`resetRetryBudget` clear retry attempts and locks without touching completions.
 - The bridge `auto-finish.run` keeps its `force` boolean and maps it to `forceRefresh` only.
@@ -1144,10 +1144,23 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 45 — Phase 2B: continuous Endpoint snapshot propagation (2.0.6-salta.285)
+# Part 45 — Phase 2B: continuous Endpoint snapshot propagation (2.0.6-salta.286)
 
 - `RouteExecutor` reports `finalEndpoint`: the target on success, and the last intermediate or starting endpoint actually confirmed on failure. An unconfirmed target is never reported.
 - `MarketSyncService` forwards the confirmed endpoint on success and on `MARKET_FETCH_FAILED`/`ROUTE_FAILED`, so a market request failure does not discard the position reached by routing.
 - `JobMarketSync.syncAll` now keeps a single evolving `currentSnapshot` across markets. Each market starts from the endpoint confirmed by the previous market instead of the initial map snapshot. The retry pass starts from the refreshed map when available and otherwise from the last confirmed endpoint.
 - The failed-job dismisser follows the same rule: scan and refresh calls for later markets start from the endpoint confirmed by earlier calls, including confirmed positions from failed routes.
 - Added tests for A→B→C→D propagation, market-request failure, route failure with and without a known position, cross-market isolation, retry-pass snapshot source, and dismisser propagation.
+
+
+---
+
+# Part 46 — Phase 3A: Job State Store and lifecycle records (2.0.6-salta.286)
+
+- Added a durable local `JobStateStore` for per-job lifecycle records. It does not replace Auto Jobs snapshots, `completedJobs`/`completedResets`, `JobLockRegistry`, game `recentJobs` or `canComplete`; it exists to give Phase 3B a local history for reconciliation.
+- Identity is `{ marketKey, jobId, resetAt }`. Records are isolated by market and reset; `null` and Phase 2A's `'unknown'` reset both normalize to an unknown key and never match a known ISO reset.
+- Records are split across eight versioned storage shards (`v2.job.state.0` … `v2.job.state.7`) with a serialized read-modify-write queue per shard, so unrelated jobs do not clobber each other and no single unbounded map is rewritten on every transition.
+- Startup pruning removes terminal/observational records older than seven days. `taking`, `taken`, `executing`, `waiting-minigame`, `ready-to-claim` and `claiming` are never pruned because they may still be needed for recovery.
+- `JobStateRecorder` records `available` before preflight, `taking` immediately before the take request, `taken` only after take succeeds, `executing` before job actions, `ready-to-claim`/`claiming` before complete, and `completed` only after complete succeeds. Complete timeouts/lost replies are recorded as `unknown`; preflight/no-server/unsupported/route blockers as `blocked`; per-job minigame failures as `waiting-minigame`.
+- Recording is observational: a storage read/write failure is logged and never blocks take, complete or the existing recovery paths.
+- Added tests for identity isolation across market/reset/unknown, persistence across a new store instance, concurrent writes, pruning that preserves in-flight records, take/complete boundary ordering, timeout handling, write-failure logging, and token redaction.

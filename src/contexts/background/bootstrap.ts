@@ -20,6 +20,7 @@ export async function restorePersistedState(core: CoreRuntime, automation: Autom
     await Promise.all([
         automation.autoFinish.restore(),
         automation.autoJobs.restore(),
+        automation.jobStates.prune(),
     ]);
 }
 

@@ -19,6 +19,7 @@ import { ExpeditionConfigCacheStore } from '../../../infrastructure/storage/expe
 import { DroneDataCacheStore } from '../../../infrastructure/storage/drone-data-cache-store.js';
 import { AutomationStateStore } from '../../../infrastructure/storage/automation-state-store.js';
 import { JobHistoryStore } from '../../../infrastructure/storage/job-history-store.js';
+import { JobStateStore } from '../../../infrastructure/storage/job-state-store.js';
 import { NetworkSnapshotStore } from '../../../infrastructure/storage/network-snapshot-store.js';
 import { NetworkOperationQueue } from '../../../application/network/operation-queue.js';
 import type { EventPublisher } from '../../../application/automation/ports.js';
@@ -79,6 +80,7 @@ export interface CoreRuntime {
         readonly automationState: AutomationStateStore;
         readonly dailyOpsCache: DailyOpsCacheStore;
         readonly jobHistory: JobHistoryStore;
+        readonly jobState: JobStateStore;
         readonly networkSnapshot: NetworkSnapshotStore;
     };
     readonly helperModeEnabled: () => Promise<boolean>;
@@ -197,6 +199,7 @@ export function createCoreRuntime(): CoreRuntime {
         automationState: new AutomationStateStore(storageArea),
         dailyOpsCache: new DailyOpsCacheStore(storageArea),
         jobHistory: new JobHistoryStore(storageArea, undefined, logger),
+        jobState: new JobStateStore(storageArea, undefined, logger),
         networkSnapshot: new NetworkSnapshotStore(storageArea, undefined, logger),
     } as const;
 

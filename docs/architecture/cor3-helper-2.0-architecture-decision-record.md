@@ -1,9 +1,9 @@
 # cor3-helper 2.0 — Architecture Decision Record
 
-- **Status:** Accepted; implementation ongoing on `v2` (build `2.0.6-salta.285`)
+- **Status:** Accepted; implementation ongoing on `v2` (build `2.0.6-salta.286`)
 - **Date:** 2026-11-08
 - **Last status update:** 2026-11-15
-- **Current verification:** typecheck, lint, Vitest (98 files / 509 tests) and build pass at this build.
+- **Current verification:** typecheck, lint, Vitest (101 files / 530 tests) and build pass at this build.
 - **Baseline:** `experimental` at `c7b69c7` (`v1.8.6-salta-exp.2`)
 - **Related audit:** [`cor3-helper-2.0-architecture-audit.md`](./cor3-helper-2.0-architecture-audit.md)
 - **Scope:** architecture, technology selection, security, repository strategy, UI, loadout data, release identity
@@ -650,13 +650,14 @@ Status: **2.0 rewrite implemented on `v2`; H9 is complete and H10 is partially a
 
 - Source was promoted from the transitional `v2/` workspace to the repository root `src/`.
 - v1 source was removed from the working tree; it remains in git history as the behavior reference.
-- Build output is `dist/`; current build is `2.0.6-salta.285`.
+- Build output is `dist/`; current build is `2.0.6-salta.286`.
 - Background split (H8): 54-line composition root, 103 bridge commands across 17 handler modules, and port-driven automation coordinators.
 - Side panel split: per-domain hooks, pure view models and page panels.
 - H1 release workflow fixed: typecheck/lint/test/build, zip `dist/`, generated release notes.
 - H2/H3/H5/H6/H7 complete; H9 store migrations complete; H4 partial because the static catalog artifact is still absent (the loader now merges when it appears).
 - H10 integration/UI tests are partially addressed (decrypt pipeline, storage migrations and architecture boundaries) but background/content/portal orchestration and UI rendering remain deferred.
 - **Loadout/auto-decryption:** the Loadout page and automatic File Decryption share `LoadoutService.ensure()` + `optimizeLoadout()`. File Decryption takes the job first, routes/accesses the target, then uses exact-target planning and an adaptive hardware order before decrypting, and reports plan/step diagnostics.
+- **Job lifecycle state (Phase 3A):** a sharded, versioned `JobStateStore` records local lifecycle transitions for later reconciliation. It is observational only: game `recentJobs`/`canComplete`, `completedJobs`, retry budgets, locks and endpoint state remain authoritative for automation decisions.
 - **Network routing (dev.236):** `RouteExecutor` tries the direct target endpoint before path-through. Path-through starts from the current endpoint/last reached node and falls back to home; HACK loadout is equipped lazily only after a retryable hack error.
 - **Release pipeline:** tag-driven. A tag must equal `package.json.version + cor3Fork.releaseLabel`; the workflow builds `COR3 Helper v<version>-salta.zip` and publishes a GitHub Release.
 - **Verification:** typecheck, lint, 81 test files / 363 tests and build pass.

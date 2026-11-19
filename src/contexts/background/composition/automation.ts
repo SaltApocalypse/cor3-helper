@@ -8,6 +8,7 @@ import type { GameRuntime } from './game.js';
 import { ChromeScheduler } from './chrome-scheduler.js';
 import { JobLockRegistry } from '../automation/job-locks.js';
 import { JobHistoryRecorder } from '../automation/job-outcome.js';
+import { JobStateRecorder } from '../../../application/auto-job/job-state-recorder.js';
 import { JobRouting } from '../automation/job-routing.js';
 import { JobPreflight } from '../automation/job-preflight.js';
 import { JobMarketSync } from '../automation/job-market-sync.js';
@@ -30,6 +31,7 @@ export interface AutomationRuntime {
     readonly scheduler: ChromeScheduler;
     readonly locks: JobLockRegistry;
     readonly history: JobHistoryRecorder;
+    readonly jobStates: JobStateRecorder;
     readonly routing: JobRouting;
     readonly preflight: JobPreflight;
     readonly markets: JobMarketSync;
@@ -157,6 +159,18 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
 
     let autoFinishRef: AutoFinishCoordinator | null = null;
     let queueRef: JobQueueCoordinator | null = null;
+    let autoJobsRef: AutoJobsCoordinator | null = null;
+    const jobStates = new JobStateRecorder({
+        store: stores.jobState,
+        logger,
+        now: () => clock.now(),
+        resetAtForMarket: (marketKey) => {
+            const market = autoJobsRef?.snapshotView()?.markets.find((entry) => entry.marketKey === marketKey);
+            return market?.ok && market.stale !== true && typeof market.resetAt === 'string' && market.resetAt.length > 0
+                ? market.resetAt
+                : null;
+        },
+    });
     const jobExecution = new JobExecutionService(
         game.jobActions,
         (job) => routing.routeJobToMarket(job, 'complete'),
@@ -210,6 +224,8 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
         () => autoFinishRef?.isCancelRequested() === true || queueRef?.hasPendingCancellation() === true,
         () => humanDelay(),
         (message, data) => logger.info('auto-job', message, data),
+        undefined,
+        jobStates,
     );
     const autoJobsRunner = new AutoJobRunner(jobExecution);
     const autoJobsQueue = new AutoJobQueueService(autoJobsRunner);
@@ -261,6 +277,7 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
     });
     autoJobs.attachAutoFinish(autoFinish);
     autoFinish.attachAutoJobs(autoJobs);
+    autoJobsRef = autoJobs;
 
     const dismisser = new FailedJobDismisser({
         snapshots: game.snapshots,
@@ -288,6 +305,7 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
         scheduler,
         locks,
         history,
+        jobStates,
         routing,
         preflight,
         markets,
