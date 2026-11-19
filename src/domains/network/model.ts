@@ -43,6 +43,15 @@ export interface NetworkSnapshot {
     readonly maintenanceFingerprint: string;
 }
 
+/**
+ * Returns a snapshot view with a new current endpoint. The topology maps are
+ * intentionally shared; only the endpoint field changes.
+ */
+export function withSnapshotEndpoint(snapshot: NetworkSnapshot, endpointId: ServerId): NetworkSnapshot {
+    if (snapshot.endpointId === endpointId) return snapshot;
+    return { ...snapshot, endpointId };
+}
+
 export interface RouteNode {
     readonly id: ServerId;
     readonly name: string;

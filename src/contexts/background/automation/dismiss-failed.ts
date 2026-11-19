@@ -5,6 +5,7 @@ import type { MarketSyncService } from '../../../application/network/market-sync
 import type { NetworkSnapshotService } from '../../../application/network/snapshot-service.js';
 import type { AutoJobsSnapshot } from '../../../contracts/auto-jobs.js';
 import type { RunLogSink } from '../../../application/automation/ports.js';
+import { withSnapshotEndpoint, type NetworkSnapshot } from '../../../domains/network/model.js';
 import { asServerId } from '../../../kernel/ids.js';
 
 export interface DismissFailedJobsSummary {
@@ -43,6 +44,7 @@ export class FailedJobDismisser {
             ? JOB_MARKETS.filter((market) => marketKeys.includes(market.key))
             : JOB_MARKETS;
         const networkSnapshot = await this.deps.snapshots.get();
+        let currentSnapshot: NetworkSnapshot | undefined = networkSnapshot.ok ? networkSnapshot.value : undefined;
         let dismissed = 0;
         let failed = 0;
         const markets: string[] = [];
@@ -55,9 +57,14 @@ export class FailedJobDismisser {
                 serverId: asServerId(serverId),
                 owner,
                 reason: `${reason}:${market.key}:scan`,
-                ...(networkSnapshot.ok ? { snapshot: networkSnapshot.value } : {}),
+                ...(currentSnapshot ? { snapshot: currentSnapshot } : {}),
             });
             if (!synced.ok) {
+                // A failed route still reports the last confirmed endpoint, so
+                // the next market starts from where this one actually stopped.
+                if (synced.error.finalEndpoint && currentSnapshot) {
+                    currentSnapshot = withSnapshotEndpoint(currentSnapshot, synced.error.finalEndpoint);
+                }
                 errors.push(`${market.label}: ${synced.error.message}`);
                 this.deps.publishSnapshot({
                     at: this.now(),
@@ -75,6 +82,9 @@ export class FailedJobDismisser {
                 });
                 continue;
             }
+            currentSnapshot = synced.value.finalEndpoint
+                ? withSnapshotEndpoint(synced.value.snapshot, synced.value.finalEndpoint)
+                : synced.value.snapshot;
             const mapped = mapMarketSnapshotJobs(synced.value.market, market.marketId, market.key, serverId);
             this.deps.publishSnapshot({
                 at: this.now(),
@@ -115,9 +125,12 @@ export class FailedJobDismisser {
                 serverId: asServerId(serverId),
                 owner,
                 reason: `${reason}:${market.key}:refresh`,
-                ...(networkSnapshot.ok ? { snapshot: networkSnapshot.value } : {}),
+                ...(currentSnapshot ? { snapshot: currentSnapshot } : {}),
             });
             if (refreshed.ok) {
+                currentSnapshot = refreshed.value.finalEndpoint
+                    ? withSnapshotEndpoint(refreshed.value.snapshot, refreshed.value.finalEndpoint)
+                    : refreshed.value.snapshot;
                 const after = mapMarketSnapshotJobs(refreshed.value.market, market.marketId, market.key, serverId);
                 this.deps.publishSnapshot({
                     at: this.now(),
@@ -133,6 +146,9 @@ export class FailedJobDismisser {
                     }],
                 });
             } else {
+                if (refreshed.error.finalEndpoint && currentSnapshot) {
+                    currentSnapshot = withSnapshotEndpoint(currentSnapshot, refreshed.error.finalEndpoint);
+                }
                 errors.push(`${market.label} refresh: ${refreshed.error.message}`);
             }
         }

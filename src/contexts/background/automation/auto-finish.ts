@@ -1,7 +1,7 @@
 import type { AutoFinishFailure, AutoFinishJobResult, AutoFinishLastRun, AutoFinishMarketResult, AutoFinishRunResult } from '../../../contracts/auto-finish.js';
 import type { AutoJobsSnapshot } from '../../../contracts/auto-jobs.js';
 import type { SettingsV1 } from '../../../contracts/storage.js';
-import { isServerlessJob, jobNeedsDecrypt, type JobOffer } from '../../../domains/jobs/model.js';
+import { isServerlessJob, type JobOffer } from '../../../domains/jobs/model.js';
 import { JOB_MARKETS, type JobMarketDefinition } from '../../../domains/jobs/markets.js';
 import { classifyJobFailure, type JobOutcome } from '../../../application/auto-job/outcome.js';
 import type { AutoJobProgress } from '../../../application/auto-job/queue.js';
@@ -12,6 +12,8 @@ import { logAutoFinishJobs } from './auto-finish-log.js';
 import { finalizeAutoFinish } from './auto-finish-finalize.js';
 import { humanDelay as defaultHumanDelay } from './delay.js';
 import { failureOf, jobLocation, outcomeInputOf, countsAgainstRetryBudget } from './job-outcome.js';
+import { resolveAutoFinishRunState, shouldUsePrefetched, type AutoFinishRunOptions } from './auto-finish-options.js';
+import { isCompletedForReset } from '../../../application/auto-job/completion.js';
 import type { JobMarketSyncEntry } from './job-market-sync.js';
 import { buildServerPriority } from './server-priority.js';
 import type { AutoFinishDeps, AutoFinishLiveRun, AutoFinishStatus, AutoJobsSink } from './auto-finish-types.js';
@@ -109,11 +111,11 @@ export class AutoFinishCoordinator {
         this.requestCancel();
     }
 
-    async runExclusive(owner: string, force = false): Promise<{ readonly ok: true; readonly value: AutoFinishRunResult } | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }> {
+    async runExclusive(owner: string, options: AutoFinishRunOptions = {}): Promise<{ readonly ok: true; readonly value: AutoFinishRunResult } | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }> {
         const helperMode = (await this.deps.settings.get()).helperMode;
         if (helperMode) return { ok: false, error: { code: 'HELPER_MODE', message: 'Disable Helper Mode in Settings before starting automation' } };
-        const result = await this.deps.networkOps.enqueue({ owner, reason: 'auto-jobs', priority: force ? 80 : 50 }, async () => {
-            const finished = await this.run(owner, force);
+        const result = await this.deps.networkOps.enqueue({ owner, reason: 'auto-jobs', priority: options.forceRefresh ? 80 : 50 }, async () => {
+            const finished = await this.run(owner, options);
             if ('busy' in finished) {
                 return { ok: false as const, error: { code: 'AUTO_FINISH_BUSY', message: 'Auto Finish is already running' } };
             }
@@ -129,18 +131,24 @@ export class AutoFinishCoordinator {
 
     async run(
         owner: string,
-        force = false,
+        options: AutoFinishRunOptions = {},
         prefetched?: { readonly jobs: readonly JobOffer[]; readonly markets: readonly JobMarketSyncEntry[] },
     ): Promise<AutoFinishRunResult | { readonly busy: true }> {
         if (this.running) return { busy: true };
-        if (prefetched && !force) {
+        if (prefetched && shouldUsePrefetched(options, prefetched)) {
             const preSettings = await this.deps.settings.get();
             const preStored = await this.deps.store.get();
+            const preState = resolveAutoFinishRunState(options, preStored);
             const preAllowed = new Set(preSettings.autoCompleteJobTypes);
-            const preResets = new Map(prefetched.markets.filter((market) => market.ok).map((market) => [market.marketKey, market.resetAt ?? null]));
+            const preResets = new Map<string, string>();
+            for (const market of prefetched.markets) {
+                if (market.ok && typeof market.resetAt === 'string' && market.resetAt.length > 0) {
+                    preResets.set(market.marketKey, market.resetAt);
+                }
+            }
+            if (preState.clearAttempts) this.deps.locks.clearAttempts();
+            if (preState.clearLocks) this.deps.locks.clearLocks();
             const preJobs = this.withCachedClaimOnly(prefetched).jobs;
-            const preGlobalLock = await this.readGlobalLock();
-            const preNow = this.now();
             const preRunnable = preJobs.filter((job) => {
                 // A taken job that is already claimable only needs
                 // `job.complete`; it does not need a target server or an
@@ -152,11 +160,10 @@ export class AutoFinishCoordinator {
                 }
                 if (job.serverId === null && !isServerlessJob(job.type)) return false;
                 if (!preAllowed.has(job.type)) return false;
-                if (preGlobalLock !== null && preGlobalLock > preNow && jobNeedsDecrypt(job)) return false;
                 if (this.deps.locks.isRetryExhausted(job.id)) return false;
                 if (this.deps.locks.isLocked(job.id)) return false;
                 const resetAt = preResets.get(job.marketKey) ?? null;
-                return !(resetAt !== null && preStored.completedJobs[job.id] === resetAt);
+                return !isCompletedForReset(job.id, preState.completedJobs, resetAt);
             });
             if (preRunnable.length === 0) {
                 const preRunnableIds = new Set(preRunnable.map((job) => job.id));
@@ -171,15 +178,6 @@ export class AutoFinishCoordinator {
                     } else if (!preAllowed.has(job.type)) {
                         preSkipped.typeDisabled += 1;
                         preBlocked.push({ jobId: job.id, name: job.name, marketKey: job.marketKey, reason: 'type-disabled' });
-                    } else if (preGlobalLock !== null && preGlobalLock > preNow && jobNeedsDecrypt(job)) {
-                        preSkipped.locked += 1;
-                        preBlocked.push({
-                            jobId: job.id,
-                            name: job.name,
-                            marketKey: job.marketKey,
-                            reason: 'minigame-lock',
-                            lockExpiresAt: preGlobalLock,
-                        });
                     } else if (this.deps.locks.isLocked(job.id)) {
                         preSkipped.locked += 1;
                         const lockUntil = this.deps.locks.lockUntil(job.id);
@@ -201,7 +199,7 @@ export class AutoFinishCoordinator {
                 this.deps.logger.info('auto-jobs', preJobs.length === 0 ? 'Auto Finish: no jobs to run' : 'Auto Finish selection skipped every job', {
                     jobs: preJobs.length,
                     allowedTypes: [...preAllowed],
-                    completedJobs: Object.keys(preStored.completedJobs).length,
+                    completedJobs: Object.keys(preState.completedJobs).length,
                     skipped: preSkipped,
                     blocked: preBlocked.slice(0, 10),
                 });
@@ -209,9 +207,8 @@ export class AutoFinishCoordinator {
                 // it the UI kept the previous run's statuses and showed newly
                 // claimable jobs with no tag at all.
                 const markets = this.mergePreviousMarkets(buildLiveMarkets({ jobs: preJobs, markets: prefetched.markets }, preRunnable, preAllowed, this.deps.locks, this.now(), {
-                    completedJobs: preStored.completedJobs,
+                    completedJobs: preState.completedJobs,
                     resetByMarket: preResets,
-                    globalLock: preGlobalLock,
                 }));
                 const totalRetry = markets.reduce((sum, market) => sum + (market.retry ?? 0), 0);
                 const totalSkipped = markets.reduce((sum, market) => sum + (market.skipped ?? 0), 0);
@@ -241,8 +238,8 @@ export class AutoFinishCoordinator {
                     failures: [],
                     retryEntries: [],
                     retryFailuresForSchedule,
-                    completedResets: preStored.completedResets,
-                    completedJobs: preStored.completedJobs,
+                    completedResets: preState.completedResets,
+                    completedJobs: preState.completedJobs,
                     runDoneCount: 0,
                     runnableCount: 0,
                     totalRetry,
@@ -270,17 +267,17 @@ export class AutoFinishCoordinator {
         const runId = `auto-finish-${this.now()}`;
         this.live = { runId, startedAt: this.now(), markets: [] };
         this.broadcastLive();
-        this.deps.runLogs.add(runId, 'info', 'auto-jobs', `Run started (owner: ${owner}, force: ${force})`, { runId, owner, force });
+        this.deps.runLogs.add(runId, 'info', 'auto-jobs', `Run started (owner: ${owner}, forceRefresh: ${options.forceRefresh === true}, retryFailed: ${options.retryFailed === true})`, { runId, owner, options });
         await this.deps.scheduler.clear(AUTO_FINISH_RETRY_ALARM);
         try {
-            const synced = prefetched ?? await this.deps.markets.syncAll(
-                owner,
-                'auto-finish',
-                owner === 'auto-finish-retry' ? this.retryMarkets() : undefined,
-            );
+            const synced = prefetched && shouldUsePrefetched(options, prefetched)
+                ? prefetched
+                : await this.deps.markets.syncAll(
+                    owner,
+                    'auto-finish',
+                    owner === 'auto-finish-retry' ? this.retryMarkets() : undefined,
+                );
             const runJobs = this.withCachedClaimOnly(synced).jobs;
-            const globalLock = await this.readGlobalLock();
-            const runNow = this.now();
             this.publishSnapshot({ at: this.now(), jobs: synced.jobs, markets: synced.markets });
             this.deps.runLogs.add(runId, 'info', 'auto-jobs', `Synced ${synced.jobs.length} job(s) from ${synced.markets.filter((market) => market.ok).length} market(s)`, {
                 jobs: synced.jobs.length,
@@ -289,13 +286,17 @@ export class AutoFinishCoordinator {
             const currentSettings = await this.deps.settings.get();
             const allowedTypes = new Set(currentSettings.autoCompleteJobTypes);
             const stored = await this.deps.store.get();
-            const completedResets = force ? {} : stored.completedResets;
-            const completedJobs = force ? {} : stored.completedJobs;
-            const resetByMarket = new Map(synced.markets.filter((market) => market.ok).map((market) => [market.marketKey, market.resetAt ?? null]));
-            if (force) {
-                this.deps.locks.clearAttempts();
-                this.deps.locks.clearLocks();
+            const state = resolveAutoFinishRunState(options, stored);
+            const completedResets = state.completedResets;
+            const completedJobs = state.completedJobs;
+            const resetByMarket = new Map<string, string>();
+            for (const market of synced.markets) {
+                if (market.ok && typeof market.resetAt === 'string' && market.resetAt.length > 0) {
+                    resetByMarket.set(market.marketKey, market.resetAt);
+                }
             }
+            if (state.clearAttempts) this.deps.locks.clearAttempts();
+            if (state.clearLocks) this.deps.locks.clearLocks();
             this.deps.locks.reconcileResets(resetByMarket);
             const runnable = runJobs.filter((job) => {
                 // Claim-only jobs bypass locks, server/type checks and the
@@ -307,11 +308,10 @@ export class AutoFinishCoordinator {
                 }
                 if (job.serverId === null && !isServerlessJob(job.type)) return false;
                 if (!allowedTypes.has(job.type)) return false;
-                if (globalLock !== null && globalLock > runNow && jobNeedsDecrypt(job)) return false;
                 if (this.deps.locks.isRetryExhausted(job.id)) return false;
                 if (this.deps.locks.isLocked(job.id)) return false;
                 const resetAt = resetByMarket.get(job.marketKey) ?? null;
-                return !(resetAt !== null && completedJobs[job.id] === resetAt);
+                return !isCompletedForReset(job.id, completedJobs, resetAt);
             });
             const runnableIds = new Set(runnable.map((job) => job.id));
             const skipped = { noServer: 0, typeDisabled: 0, locked: 0, retryExhausted: 0, completed: 0 };
@@ -319,7 +319,6 @@ export class AutoFinishCoordinator {
                 if (runnableIds.has(job.id)) continue;
                 if (!job.serverId && !isServerlessJob(job.type)) skipped.noServer += 1;
                 else if (!allowedTypes.has(job.type)) skipped.typeDisabled += 1;
-                else if (globalLock !== null && globalLock > runNow && jobNeedsDecrypt(job)) skipped.locked += 1;
                 else if (this.deps.locks.isLocked(job.id)) skipped.locked += 1;
                 else if (this.deps.locks.isRetryExhausted(job.id)) skipped.retryExhausted += 1;
                 else skipped.completed += 1;
@@ -329,9 +328,6 @@ export class AutoFinishCoordinator {
                     .filter((job) => !runnableIds.has(job.id))
                     .slice(0, 10)
                     .map((job) => {
-                        if (globalLock !== null && globalLock > runNow && jobNeedsDecrypt(job)) {
-                            return { jobId: job.id, name: job.name, marketKey: job.marketKey, reason: 'minigame-lock', lockExpiresAt: globalLock };
-                        }
                         const lockUntil = this.deps.locks.lockUntil(job.id);
                         if (lockUntil !== undefined && lockUntil > this.now()) {
                             return { jobId: job.id, name: job.name, marketKey: job.marketKey, reason: 'minigame-lock', lockExpiresAt: lockUntil };
@@ -358,7 +354,6 @@ export class AutoFinishCoordinator {
                 markets: this.mergePreviousMarkets(buildLiveMarkets(synced, runnable, allowedTypes, this.deps.locks, this.now(), {
                     completedJobs,
                     resetByMarket,
-                    globalLock,
                 })),
             };
             this.broadcastLive();
@@ -477,30 +472,15 @@ export class AutoFinishCoordinator {
                 failedById,
                 stopped: result.stopped,
                 now: this.now(),
-                globalLock,
                 previousMarkets: this.last?.markets ?? [],
                 doneJobs: runDone,
             });
 
             const failures: AutoFinishFailure[] = terminalEntries.map(failureOf);
             const retryFailuresForSchedule: AutoFinishFailure[] = retryEntries.map(failureOf);
-            // Jobs skipped by an active minigame lock are not part of
+            // Jobs skipped by a per-job minigame lock are not part of
             // `retryEntries`, but they still need a wake-up when the lock
             // expires instead of waiting for the next market reset.
-            if (globalLock !== null && globalLock > runNow) {
-                for (const job of runJobs) {
-                    if (!jobNeedsDecrypt(job) || (job.alreadyTaken && job.canComplete)) continue;
-                    if (retryFailuresForSchedule.some((entry) => entry.jobId === job.id)) continue;
-                    retryFailuresForSchedule.push({
-                        jobId: job.id,
-                        name: job.name,
-                        serverName: job.serverName,
-                        code: 'MINIGAME_FAILED',
-                        message: 'Minigame is locked',
-                        lockExpiresAt: globalLock,
-                    });
-                }
-            }
             for (const job of synced.jobs) {
                 const until = this.deps.locks.lockUntil(job.id);
                 if (until === undefined || until <= this.now()) continue;
@@ -573,16 +553,6 @@ export class AutoFinishCoordinator {
 
     private now(): number {
         return this.deps.clock.now();
-    }
-
-    private async readGlobalLock(): Promise<number | null> {
-        if (!this.deps.minigameLock) return null;
-        try {
-            const value = await this.deps.minigameLock();
-            return typeof value === 'number' && value > this.now() ? value : null;
-        } catch {
-            return null;
-        }
     }
 
     /**

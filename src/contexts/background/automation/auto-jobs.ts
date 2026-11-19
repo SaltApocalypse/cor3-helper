@@ -28,7 +28,7 @@ export type AutoJobsCycleResult =
 export interface AutoFinishPort {
     run(
         owner: string,
-        force?: boolean,
+        options: import('./auto-finish-options.js').AutoFinishRunOptions,
         prefetched?: { readonly jobs: readonly import('../../../domains/jobs/model.js').JobOffer[]; readonly markets: readonly JobMarketSyncEntry[] },
     ): Promise<AutoFinishRunResult | { readonly busy: true }>;
     lastRun(): AutoFinishLastRun | null;
@@ -307,7 +307,7 @@ export class AutoJobsCoordinator {
                 this.stage = 'completing';
                 this.deps.events.publish('auto.jobs.cycle', { running: true, owner, reason, stage: this.stage });
                 if (tabId !== undefined) this.deps.events.publish('auto.start', { tabId, status: 'running' });
-                const completion = await this.autoFinish!.run(owner, false, synced);
+                const completion = await this.autoFinish!.run(owner, {}, synced);
                 if ('busy' in completion) {
                     return {
                         ok: false as const,

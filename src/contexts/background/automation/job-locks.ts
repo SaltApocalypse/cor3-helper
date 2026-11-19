@@ -114,16 +114,28 @@ export class JobLockRegistry {
         this.attempts.clear();
     }
 
-    /** Drop attempts whose market reset changed since they were recorded. */
-    reconcileResets(resetByMarket: ReadonlyMap<string, string | null>): void {
+    /**
+     * Drop attempts/locks only when the market reset is known and differs.
+     *
+     * A market missing from the map (sync failure, missing reset, unknown) must
+     * not be interpreted as a reset change; doing so erased retry budgets and
+     * locks during transient market failures. Records with an unknown previous
+     * reset (`null`) are also left alone because there is nothing reliable to
+     * compare against.
+     */
+    reconcileResets(resetByMarket: ReadonlyMap<string, string>): void {
         for (const [jobId, entry] of this.attempts) {
-            const resetAt = resetByMarket.get(entry.marketKey) ?? null;
+            const resetAt = resetByMarket.get(entry.marketKey);
+            if (resetAt === undefined) continue;
+            if (entry.resetAt === null) continue;
             if (resetAt !== entry.resetAt) this.attempts.delete(jobId);
         }
         for (const [jobId, entry] of this.locks) {
             if (entry.marketKey === null) continue;
-            const resetAt = resetByMarket.get(entry.marketKey) ?? null;
-            if (entry.resetAt !== resetAt) this.locks.delete(jobId);
+            const resetAt = resetByMarket.get(entry.marketKey);
+            if (resetAt === undefined) continue;
+            if (entry.resetAt === null) continue;
+            if (resetAt !== entry.resetAt) this.locks.delete(jobId);
         }
     }
 

@@ -24,6 +24,11 @@ export interface MarketSyncRequest {
 export interface MarketSyncError {
     readonly code: 'SNAPSHOT_FAILED' | 'ROUTE_FAILED' | 'MARKET_FETCH_FAILED';
     readonly message: string;
+    /**
+     * Last endpoint confirmed by routing, even when the market request failed.
+     * Callers use it to update the starting point for the next market.
+     */
+    readonly finalEndpoint?: ServerId;
 }
 
 export interface MarketSyncResult {
@@ -32,6 +37,8 @@ export interface MarketSyncResult {
     readonly direct: boolean;
     readonly directError?: GameError;
     readonly market: RawMarketSnapshot;
+    /** Last endpoint confirmed by the route executor. */
+    readonly finalEndpoint?: ServerId;
 }
 
 export interface MarketSyncOptions {
@@ -97,6 +104,7 @@ export class MarketSyncService {
             return err({
                 code: 'ROUTE_FAILED',
                 message: `${route.error?.message ?? 'No usable route'}${details ? ` — ${details}` : ''}`,
+                ...(route.finalEndpoint ? { finalEndpoint: route.finalEndpoint } : {}),
             });
         }
         // Let the game settle after the endpoint change before asking for the
@@ -108,12 +116,19 @@ export class MarketSyncService {
             await this.sleep(this.retryDelayMs * (attempt + 1));
             market = await this.markets.fetchMarket(request.marketId);
         }
-        if (!market.ok) return err({ code: 'MARKET_FETCH_FAILED', message: market.error.message });
+        if (!market.ok) {
+            return err({
+                code: 'MARKET_FETCH_FAILED',
+                message: market.error.message,
+                ...(route.finalEndpoint ? { finalEndpoint: route.finalEndpoint } : {}),
+            });
+        }
         return ok({
             snapshot: snapshot.value,
             route: route.route.nodes.map((node) => ({ id: node.id, name: node.name })),
             direct: route.direct === true,
             ...(route.directError ? { directError: route.directError } : {}),
+            ...(route.finalEndpoint ? { finalEndpoint: route.finalEndpoint } : {}),
             market: market.value,
         });
     }

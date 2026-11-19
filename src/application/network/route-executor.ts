@@ -46,6 +46,12 @@ export interface RouteExecutionResult {
     readonly accessEnsured?: boolean;
     /** Direct target failure, retained when path-through succeeds. */
     readonly directError?: GameError;
+    /**
+     * Last endpoint this execution confirmed reaching. On success this is the
+     * target. On failure it is the last intermediate/start that was actually
+     * set; it is never the unconfirmed target.
+     */
+    readonly finalEndpoint?: ServerId;
 }
 
 export interface RouteExecutionOptions {
@@ -94,6 +100,7 @@ export class RouteExecutor {
         const now = options.now ?? this.clock.now();
         const attempts: RouteAttempt[] = [];
         let currentEndpoint = options.currentEndpoint ?? null;
+        let confirmedEndpoint: ServerId | null = null;
         let directError: GameError | undefined;
 
         try {
@@ -109,6 +116,7 @@ export class RouteExecutor {
                         route: direct.route,
                         attempts: [],
                         direct: true,
+                        finalEndpoint: targetId,
                         ...(direct.accessEnsured ? { accessEnsured: true } : {}),
                     };
                 }
@@ -144,6 +152,7 @@ export class RouteExecutor {
                     attempts.push(attempt);
                     if (attempt.reached) {
                         currentEndpoint = attempt.reached;
+                        confirmedEndpoint = attempt.reached;
                         // Continue the remaining fallbacks from the last node
                         // that was actually reached instead of restarting at home.
                         if (attempt.reached !== start) enqueueStart(attempt.reached, true);
@@ -154,6 +163,7 @@ export class RouteExecutor {
                             route,
                             attempts,
                             direct: false,
+                            finalEndpoint: attempt.reached ?? targetId,
                             ...(directError ? { directError } : {}),
                         };
                     }
@@ -165,6 +175,7 @@ export class RouteExecutor {
                 return {
                     ok: false,
                     attempts,
+                    ...(confirmedEndpoint ? { finalEndpoint: confirmedEndpoint } : {}),
                     error: {
                         code: 'NO_ROUTE',
                         message: `${routeError?.message ?? 'No route'}${directSuffix}`,
@@ -176,6 +187,7 @@ export class RouteExecutor {
             return {
                 ok: false,
                 attempts,
+                ...(confirmedEndpoint ? { finalEndpoint: confirmedEndpoint } : {}),
                 error: {
                     code: 'ROUTE_FAILED',
                     message: `All route attempts failed${directSuffix}`,

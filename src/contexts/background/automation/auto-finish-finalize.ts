@@ -1,4 +1,5 @@
 import type { AutoFinishFailure, AutoFinishLastRun, AutoFinishMarketResult, AutoFinishRunResult } from '../../../contracts/auto-finish.js';
+import { UNKNOWN_RESET } from '../../../application/auto-job/completion.js';
 import type { SettingsV1 } from '../../../contracts/storage.js';
 import type { AutoFinishStateStore } from '../../../infrastructure/storage/auto-finish-state-store.js';
 import type { EventPublisher, RunLogSink, SchedulerPort, SettingsPort } from '../../../application/automation/ports.js';
@@ -66,8 +67,8 @@ export async function finalizeAutoFinish(
     const completedMarketResets = { ...input.completedResets };
     const completedJobResets = { ...input.completedJobs };
     for (const market of input.markets) {
-        if (!market.resetAt) continue;
-        if (market.ok) {
+        const resetAt = market.resetAt ?? UNKNOWN_RESET;
+        if (market.ok && market.resetAt) {
             const total = market.jobTotal ?? 0;
             const success = market.success ?? 0;
             // Do not mark a market complete just because every remaining job was
@@ -79,11 +80,12 @@ export async function finalizeAutoFinish(
             }
         }
         for (const job of market.jobs ?? []) {
-            if (job.status === 'done') completedJobResets[job.jobId] = market.resetAt;
+            if (job.status === 'done') completedJobResets[job.jobId] = resetAt;
         }
     }
     const now = deps.now();
     for (const [jobId, resetAt] of Object.entries(completedJobResets)) {
+        if (resetAt === UNKNOWN_RESET) continue;
         const resetTime = Date.parse(resetAt);
         if (!Number.isFinite(resetTime) || resetTime <= now) delete completedJobResets[jobId];
     }

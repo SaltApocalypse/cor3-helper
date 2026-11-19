@@ -142,29 +142,101 @@ describe('Auto Finish job-level completion', () => {
         expect(markets[1]?.jobs?.[0]?.jobId).toBe('dark-1');
     });
 
-    it('marks decrypt jobs retryable while the game minigame lock is active', () => {
+    it('keeps a per-job minigame lock scoped to the locked file', () => {
         const lockedJob: JobOffer = { ...job('locked'), type: 'File Decryption' };
+        const otherJob: JobOffer = { ...job('other'), type: 'File Decryption' };
+        const jobLocks = {
+            lockUntil: (jobId: string) => jobId === 'locked' ? 5_000 : undefined,
+            isRetryExhausted: () => false,
+        } as unknown as JobLockRegistry;
         const markets = buildFinalMarkets({
             synced: {
-                jobs: [lockedJob],
+                jobs: [lockedJob, otherJob],
                 markets: [{ marketKey: 'home', label: 'HOME', ok: true, skipped: 0, resetAt }],
             },
-            allowedTypes: new Set(['Data Upload']),
+            allowedTypes: new Set(['File Decryption']),
             doneIds: new Set(),
             completedJobs: {},
             resetByMarket: new Map([['home', resetAt]]),
+            locks: jobLocks,
+            outcomes: new Map(),
+            failedById: new Map(),
+            stopped: false,
+            now: 1,
+        });
+        expect(markets[0]?.jobs?.find((entry) => entry.jobId === 'locked')).toMatchObject({
+            status: 'retry',
+            code: 'MINIGAME_FAILED',
+            lockExpiresAt: 5_000,
+        });
+        expect(markets[0]?.jobs?.find((entry) => entry.jobId === 'other')?.status).toBe('pending');
+    });
+
+    it('keeps a lock in one market from blocking another market', () => {
+        const homeJob: JobOffer = { ...job('home-locked'), marketKey: 'home', type: 'File Decryption' };
+        const darkJob: JobOffer = { ...job('dark-ok'), marketKey: 'dark', type: 'File Decryption' };
+        const jobLocks = {
+            lockUntil: (jobId: string) => jobId === 'home-locked' ? 5_000 : undefined,
+            isRetryExhausted: () => false,
+        } as unknown as JobLockRegistry;
+        const markets = buildFinalMarkets({
+            synced: {
+                jobs: [homeJob, darkJob],
+                markets: [
+                    { marketKey: 'home', label: 'HOME', ok: true, skipped: 0, resetAt },
+                    { marketKey: 'dark', label: 'DARK', ok: true, skipped: 0, resetAt },
+                ],
+            },
+            allowedTypes: new Set(['File Decryption']),
+            doneIds: new Set(),
+            completedJobs: {},
+            resetByMarket: new Map([['home', resetAt], ['dark', resetAt]]),
+            locks: jobLocks,
+            outcomes: new Map(),
+            failedById: new Map(),
+            stopped: false,
+            now: 1,
+        });
+        expect(markets.find((market) => market.marketKey === 'home')?.jobs?.[0]?.status).toBe('retry');
+        expect(markets.find((market) => market.marketKey === 'dark')?.jobs?.[0]?.status).toBe('pending');
+    });
+
+    it('keeps a completed job suppressed when the current reset is unknown', () => {
+        const markets = buildFinalMarkets({
+            synced: {
+                jobs: [job('completed-job')],
+                markets: [{ marketKey: 'home', label: 'HOME', ok: true, skipped: 0, resetAt: null }],
+            },
+            allowedTypes: new Set(['Data Upload']),
+            doneIds: new Set(),
+            completedJobs: { 'completed-job': 'reset-a' },
+            resetByMarket: new Map(),
             locks,
             outcomes: new Map(),
             failedById: new Map(),
             stopped: false,
             now: 1,
-            globalLock: 5_000,
         });
-        expect(markets[0]?.jobs?.[0]).toMatchObject({
-            status: 'retry',
-            code: 'MINIGAME_FAILED',
-            lockExpiresAt: 5_000,
+        expect(markets[0]?.jobs?.[0]?.status).toBe('done');
+    });
+
+    it('allows a job whose completion belongs to a different, known reset', () => {
+        const markets = buildFinalMarkets({
+            synced: {
+                jobs: [job('completed-job')],
+                markets: [{ marketKey: 'home', label: 'HOME', ok: true, skipped: 0, resetAt: 'reset-b' }],
+            },
+            allowedTypes: new Set(['Data Upload']),
+            doneIds: new Set(),
+            completedJobs: { 'completed-job': 'reset-a' },
+            resetByMarket: new Map([['home', 'reset-b']]),
+            locks,
+            outcomes: new Map(),
+            failedById: new Map(),
+            stopped: false,
+            now: 1,
         });
+        expect(markets[0]?.jobs?.[0]?.status).toBe('pending');
     });
 
     it('adds cached claim-only completions to a failed market report', () => {

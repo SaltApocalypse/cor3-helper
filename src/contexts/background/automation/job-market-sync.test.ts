@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { JOB_MARKETS } from '../../../domains/jobs/markets.js';
 import type { NetworkServer, NetworkSnapshot } from '../../../domains/network/model.js';
-import { asServerId } from '../../../kernel/ids.js';
-import { err, ok } from '../../../kernel/result.js';
-import type { MarketSyncRequest, MarketSyncService } from '../../../application/network/market-sync.js';
+import { asServerId, type ServerId } from '../../../kernel/ids.js';
+import { err, ok, type Result } from '../../../kernel/result.js';
+import type { MarketSyncError, MarketSyncRequest, MarketSyncResult, MarketSyncService } from '../../../application/network/market-sync.js';
 import { MarketCacheStore } from '../../../infrastructure/storage/market-cache-store.js';
 import { MemoryStorageArea } from '../../../infrastructure/storage/storage-area.js';
 import { JobMarketSync } from './job-market-sync.js';
@@ -107,5 +107,182 @@ describe('JobMarketSync retry pass', () => {
         const result = await sync.syncAll('owner', 'auto-jobs', [JOB_MARKETS[0]!]);
         expect(result.markets[0]?.ok).toBe(false);
         expect(calls).toHaveLength(1);
+    });
+});
+
+function snapshotAt(endpointId: ServerId): NetworkSnapshot {
+    return { ...snapshot(), endpointId };
+}
+
+function endpointHarness(input: {
+    readonly initial: ServerId;
+    readonly getSnapshot: (force: boolean) => Promise<Result<NetworkSnapshot, { readonly code: string; readonly message: string }>>;
+    readonly sync: (request: MarketSyncRequest, index: number) => Promise<Result<MarketSyncResult, MarketSyncError>>;
+}) {
+    const starts: Array<ServerId | null> = [];
+    let index = 0;
+    const sync = new JobMarketSync({
+        snapshots: {
+            get: async (force = false) => input.getSnapshot(force),
+        },
+        marketSync: {
+            sync: async (request: MarketSyncRequest) => {
+                starts.push(request.snapshot?.endpointId ?? null);
+                const result = await input.sync(request, index);
+                index += 1;
+                return result;
+            },
+        } as unknown as MarketSyncService,
+        marketCache: new MarketCacheStore(new MemoryStorageArea()),
+        routing: { setEndpointIfNeeded: async () => ok(undefined) },
+        tabs: { findCor3Tab: async () => null, send: async () => null },
+        events: { publish: () => undefined },
+        logger: { debug: () => undefined, info: () => undefined, warn: () => undefined, error: () => undefined },
+        now: () => 1,
+        humanDelay: async () => undefined,
+    });
+    return { sync, starts };
+}
+
+const aEndpoint = asServerId('endpoint-a');
+const bEndpoint = asServerId('endpoint-b');
+const cEndpoint = asServerId('endpoint-c');
+const dEndpoint = asServerId('endpoint-d');
+const eEndpoint = asServerId('endpoint-e');
+const refreshedEndpoint = asServerId('refreshed');
+
+describe('JobMarketSync continuous endpoint state', () => {
+    it('passes the endpoint reached by each market to the next market', async () => {
+        const finalByMarket = new Map([
+            [JOB_MARKETS[0]!.marketId, bEndpoint],
+            [JOB_MARKETS[1]!.marketId, cEndpoint],
+            [JOB_MARKETS[2]!.marketId, dEndpoint],
+            [JOB_MARKETS[3]!.marketId, eEndpoint],
+        ]);
+        const harness = endpointHarness({
+            initial: aEndpoint,
+            getSnapshot: async () => ok(snapshotAt(aEndpoint)),
+            sync: async (request) => {
+                const finalEndpoint = finalByMarket.get(request.marketId);
+                return ok({
+                    snapshot: request.snapshot ?? snapshotAt(aEndpoint),
+                    route: [],
+                    direct: true,
+                    ...(finalEndpoint ? { finalEndpoint } : {}),
+                    market: { options: {}, lots: [], jobs: [] },
+                });
+            },
+        });
+        const result = await harness.sync.syncAll('owner', 'auto-jobs');
+        expect(harness.starts).toEqual([aEndpoint, bEndpoint, cEndpoint, dEndpoint]);
+        expect(result.finalEndpoint).toBe(eEndpoint);
+        expect(result.markets.every((market) => market.ok)).toBe(true);
+    });
+
+    it('keeps the routed endpoint when the market request fails', async () => {
+        let index = 0;
+        const harness = endpointHarness({
+            initial: aEndpoint,
+            getSnapshot: async () => ok(snapshotAt(aEndpoint)),
+            sync: async (request) => {
+                index += 1;
+                if (index === 1) {
+                    return err({
+                        code: 'MARKET_FETCH_FAILED',
+                        message: 'Target in maintenance',
+                        finalEndpoint: bEndpoint,
+                    });
+                }
+                return ok({
+                    snapshot: request.snapshot ?? snapshotAt(aEndpoint),
+                    route: [],
+                    direct: true,
+                    finalEndpoint: cEndpoint,
+                    market: { options: {}, lots: [], jobs: [] },
+                });
+            },
+        });
+        const result = await harness.sync.syncAll('owner', 'auto-jobs', [JOB_MARKETS[0]!, JOB_MARKETS[1]!]);
+        expect(harness.starts).toEqual([aEndpoint, bEndpoint]);
+        expect(result.markets[0]?.ok).toBe(false);
+        expect(result.markets[1]?.ok).toBe(true);
+        expect(result.finalEndpoint).toBe(cEndpoint);
+    });
+
+    it('does not let an unknown endpoint overwrite the last known endpoint', async () => {
+        let index = 0;
+        const harness = endpointHarness({
+            initial: aEndpoint,
+            getSnapshot: async () => ok(snapshotAt(aEndpoint)),
+            sync: async (request) => {
+                index += 1;
+                if (index === 1) {
+                    return err({ code: 'ROUTE_FAILED', message: 'Target in maintenance' });
+                }
+                return ok({
+                    snapshot: request.snapshot ?? snapshotAt(aEndpoint),
+                    route: [],
+                    direct: true,
+                    finalEndpoint: cEndpoint,
+                    market: { options: {}, lots: [], jobs: [] },
+                });
+            },
+        });
+        const result = await harness.sync.syncAll('owner', 'auto-jobs', [JOB_MARKETS[0]!, JOB_MARKETS[1]!]);
+        expect(harness.starts).toEqual([aEndpoint, aEndpoint]);
+        expect(result.finalEndpoint).toBe(cEndpoint);
+    });
+
+    it('starts a retry pass from the last confirmed endpoint when the map refresh fails', async () => {
+        let index = 0;
+        const harness = endpointHarness({
+            initial: aEndpoint,
+            getSnapshot: async (force) => force
+                ? err({ code: 'GAME_MAP_FAILED', message: 'no map' })
+                : ok(snapshotAt(aEndpoint)),
+            sync: async (request) => {
+                index += 1;
+                if (index === 1) {
+                    return err({ code: 'MARKET_FETCH_FAILED', message: 'market-not-reachable', finalEndpoint: bEndpoint });
+                }
+                return ok({
+                    snapshot: request.snapshot ?? snapshotAt(aEndpoint),
+                    route: [],
+                    direct: true,
+                    finalEndpoint: cEndpoint,
+                    market: { options: {}, lots: [], jobs: [] },
+                });
+            },
+        });
+        const result = await harness.sync.syncAll('owner', 'auto-jobs', [JOB_MARKETS[0]!]);
+        expect(harness.starts).toEqual([aEndpoint, bEndpoint]);
+        expect(result.markets[0]?.ok).toBe(true);
+        expect(result.finalEndpoint).toBe(cEndpoint);
+    });
+
+    it('starts a retry pass from the refreshed map endpoint', async () => {
+        let index = 0;
+        const harness = endpointHarness({
+            initial: aEndpoint,
+            getSnapshot: async (force) => force
+                ? ok(snapshotAt(refreshedEndpoint))
+                : ok(snapshotAt(aEndpoint)),
+            sync: async (request) => {
+                index += 1;
+                if (index === 1) {
+                    return err({ code: 'MARKET_FETCH_FAILED', message: 'market-not-reachable' });
+                }
+                return ok({
+                    snapshot: request.snapshot ?? snapshotAt(aEndpoint),
+                    route: [],
+                    direct: true,
+                    finalEndpoint: cEndpoint,
+                    market: { options: {}, lots: [], jobs: [] },
+                });
+            },
+        });
+        const result = await harness.sync.syncAll('owner', 'auto-jobs', [JOB_MARKETS[0]!]);
+        expect(harness.starts).toEqual([aEndpoint, refreshedEndpoint]);
+        expect(result.markets[0]?.ok).toBe(true);
     });
 });

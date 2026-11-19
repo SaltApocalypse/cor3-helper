@@ -68,11 +68,7 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
     const preflight = new JobPreflight({
         snapshots: game.snapshots,
         loadout: game.loadout,
-        jobActions: game.jobActions,
-        minigameSolversEnabled: async () => {
-            const current = await settings.get();
-            return current.autoDecryptEnabled || current.autoSimpleDecryptEnabled || current.autoIceWallEnabled;
-        },
+        locks,
         logger,
         now: () => clock.now(),
     });
@@ -245,7 +241,6 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
         markets,
         snapshots: game.snapshots,
         networkOps,
-        minigameLock: async () => (await game.jobActions.getMinigameLock?.()) ?? null,
         humanDelay,
     });
     autoFinishRef = autoFinish;

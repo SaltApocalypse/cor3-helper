@@ -6,10 +6,11 @@ import { mapMarketSnapshotJobs, type SkippedJob } from '../../../application/aut
 import { mapMarketView } from '../../../application/markets/map.js';
 import type { NetworkSnapshotService } from '../../../application/network/snapshot-service.js';
 import type { NetworkSnapshot } from '../../../domains/network/model.js';
+import { withSnapshotEndpoint } from '../../../domains/network/model.js';
 import type { MarketSyncService } from '../../../application/network/market-sync.js';
 import type { MarketCacheStore } from '../../../infrastructure/storage/market-cache-store.js';
 import type { AutomationLogger, EventPublisher } from '../../../application/automation/ports.js';
-import { asServerId } from '../../../kernel/ids.js';
+import { asServerId, type ServerId } from '../../../kernel/ids.js';
 import type { TabRequestPort } from './job-routing.js';
 
 export interface JobMarketSyncEntry {
@@ -88,11 +89,12 @@ export class JobMarketSync {
         targets?: readonly JobMarketDefinition[],
         onMarket?: (partial: { readonly jobs: readonly JobOffer[]; readonly markets: readonly JobMarketSyncEntry[] }) => void,
         shouldStop?: () => boolean,
-    ): Promise<{ jobs: JobOffer[]; markets: JobMarketSyncEntry[] }> {
+    ): Promise<{ jobs: JobOffer[]; markets: JobMarketSyncEntry[]; finalEndpoint?: ServerId }> {
         const selected = targets ?? JOB_MARKETS;
         const jobs: JobOffer[] = [];
         const marketEntries = new Map<string, JobMarketSyncEntry>();
         const networkSnapshot = await this.deps.snapshots.get();
+        let currentSnapshot = networkSnapshot.ok ? networkSnapshot.value : undefined;
         const failed: JobMarketDefinition[] = [];
         const publish = (): void => {
             onMarket?.({ jobs: [...jobs], markets: [...marketEntries.values()] });
@@ -104,9 +106,13 @@ export class JobMarketSync {
                 market,
                 owner,
                 reason,
-                networkSnapshot.ok ? networkSnapshot.value : undefined,
+                currentSnapshot,
                 'initial',
             );
+            const nextSnapshot = synced.snapshot ?? currentSnapshot;
+            if (nextSnapshot && synced.finalEndpoint) {
+                currentSnapshot = withSnapshotEndpoint(nextSnapshot, synced.finalEndpoint);
+            }
             jobs.push(...synced.jobs);
             marketEntries.set(market.key, synced.entry);
             if (!synced.entry.ok) failed.push(market);
@@ -126,7 +132,7 @@ export class JobMarketSync {
             });
             await this.humanDelay(round === 0 ? 3_000 : 6_000, round === 0 ? 5_000 : 8_000);
             const refreshed = await this.deps.snapshots.get(true);
-            const retrySnapshot = refreshed.ok ? refreshed.value : undefined;
+            let retrySnapshot = refreshed.ok ? refreshed.value : currentSnapshot;
             const next: JobMarketDefinition[] = [];
             for (const market of pending) {
                 if (shouldStop?.()) break;
@@ -137,6 +143,10 @@ export class JobMarketSync {
                     retrySnapshot,
                     'retry',
                 );
+                const nextSnapshot = synced.snapshot ?? retrySnapshot;
+                if (nextSnapshot && synced.finalEndpoint) {
+                    retrySnapshot = withSnapshotEndpoint(nextSnapshot, synced.finalEndpoint);
+                }
                 jobs.push(...synced.jobs);
                 marketEntries.set(market.key, synced.entry);
                 if (!synced.entry.ok && isRetryableMarketFailure(synced.entry)) next.push(market);
@@ -144,9 +154,14 @@ export class JobMarketSync {
                 if (pending.indexOf(market) < pending.length - 1) await this.humanDelay(350, 700);
             }
             pending = next;
+            currentSnapshot = retrySnapshot;
         }
 
-        return { jobs, markets: [...marketEntries.values()] };
+        return {
+            jobs,
+            markets: [...marketEntries.values()],
+            ...(currentSnapshot?.endpointId ? { finalEndpoint: currentSnapshot.endpointId } : {}),
+        };
     }
 
     private async syncMarketEntry(
@@ -155,7 +170,12 @@ export class JobMarketSync {
         reason: string,
         snapshot: NetworkSnapshot | undefined,
         phase: 'initial' | 'retry',
-    ): Promise<{ readonly entry: JobMarketSyncEntry; readonly jobs: readonly JobOffer[] }> {
+    ): Promise<{
+        readonly entry: JobMarketSyncEntry;
+        readonly jobs: readonly JobOffer[];
+        readonly snapshot?: NetworkSnapshot;
+        readonly finalEndpoint?: ServerId;
+    }> {
         const synced = await this.deps.marketSync.sync({
             marketId: market.marketId,
             serverId: asServerId(market.routeServerId),
@@ -182,6 +202,8 @@ export class JobMarketSync {
                     errorCode: synced.error.code,
                 },
                 jobs: [],
+                ...(snapshot ? { snapshot } : {}),
+                ...(synced.error.finalEndpoint ? { finalEndpoint: synced.error.finalEndpoint } : {}),
             };
         }
         const mapped = mapMarketSnapshotJobs(synced.value.market, market.marketId, market.key, market.completionServerId ?? market.routeServerId);
@@ -219,6 +241,8 @@ export class JobMarketSync {
                 stale: false,
             },
             jobs: mapped.jobs,
+            snapshot: synced.value.snapshot,
+            ...(synced.value.finalEndpoint ? { finalEndpoint: synced.value.finalEndpoint } : {}),
         };
     }
 

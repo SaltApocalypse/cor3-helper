@@ -5,7 +5,7 @@
     "description": "COR3 Helper 2.0 — Chrome extension for cor3.gg",
     "cor3Fork": {
         "releaseLabel": "salta",
-        "build": 281
+        "build": 285
     },
     "engines": {
         "node": ">=24"

@@ -6,15 +6,15 @@ import type { GameError } from '../../../application/game/ports.js';
 import type { LoadoutService } from '../../../application/loadout/service.js';
 import type { NetworkSnapshotService } from '../../../application/network/snapshot-service.js';
 import type { AutomationLogger } from '../../../application/automation/ports.js';
+import type { JobLockRegistry } from './job-locks.js';
 import { asServerId } from '../../../kernel/ids.js';
 import { err, ok, type Result } from '../../../kernel/result.js';
 
 export interface JobPreflightDeps {
     readonly snapshots: Pick<NetworkSnapshotService, 'get'>;
     readonly loadout: Pick<LoadoutService, 'canSatisfy'>;
-    readonly jobActions: { getMinigameLock?(): Promise<number | null> };
-    /** True when at least one decrypt minigame solver is enabled. */
-    readonly minigameSolversEnabled?: () => Promise<boolean>;
+    /** Per-job minigame locks. Only the current job's lock is consulted. */
+    readonly locks?: Pick<JobLockRegistry, 'isLocked' | 'lockUntil'>;
     readonly logger: AutomationLogger;
     readonly now?: () => number;
 }
@@ -77,10 +77,10 @@ function lockMessage(expiresAt: number, now: number): string {
 
 /**
  * Checks the ownership side of the preflight, not just route reachability:
- * - decrypt jobs need an owned DECRYPT module for the file type
+ * - decrypt jobs need an owned DECRYPT module
  * - jobs whose route still needs hacking need an owned HACK module for every
  *   server type on the route
- * - an active minigame lock means neither hacking nor decryption can run
+ * - a per-job minigame lock blocks only that job
  *
  * A stale/unknown map or an unavailable loadout snapshot deliberately does not
  * block the job. Only a definitive missing software/hardware result does;
@@ -96,18 +96,15 @@ export class JobPreflight {
 
     private async checkCapability(snapshot: NetworkSnapshot | null, job: JobOffer): Promise<Result<void, GameError>> {
         const missing: string[] = [];
-        let needsMinigame = false;
+
+        // A lock is scoped to the job/file that produced it. Never infer a
+        // global lock from another file's minigame.
+        if (this.deps.locks?.isLocked(job.id)) {
+            const until = this.deps.locks.lockUntil(job.id) ?? this.now();
+            return err({ code: 'PREFLIGHT_FAILED', message: lockMessage(until, this.now()) });
+        }
 
         if (jobRequiresDecrypt(job)) {
-            needsMinigame = true;
-            if (this.deps.minigameSolversEnabled && !(await this.deps.minigameSolversEnabled())) {
-                // Taking a decrypt job with no solver enabled only opens the
-                // minigame, fails, and can trigger a long game lock.
-                return err({
-                    code: 'PREFLIGHT_FAILED',
-                    message: 'Minigame solver is disabled: enable Auto Decrypt, ICE Wall or Simple Decrypt before taking decrypt jobs',
-                });
-            }
             const resolvedFileType = decryptFileType(job, job.fileInfo?.name);
             // `.enc`/`.bin` are generic wrappers, not reliable decrypt formats.
             // Treat them as unknown for the preflight so a wrapper does not
@@ -157,11 +154,9 @@ export class JobPreflight {
                 let hasCapableRoute = false;
                 for (const route of routeSets) {
                     const routeMissing: string[] = [];
-                    let routeNeedsMinigame = false;
                     for (const node of route.nodes) {
                         const server = snapshot.servers.get(node.id);
                         if (!server || server.id === snapshot.homeId || server.access.active) continue;
-                        routeNeedsMinigame = true;
                         if (!server.typeName) continue;
                         const capability = await this.deps.loadout.canSatisfy({ ability: 'HACK', target: server.typeName, requiredPower: 0 });
                         if (!capability.ok) {
@@ -178,7 +173,6 @@ export class JobPreflight {
                     }
                     if (routeMissing.length === 0) {
                         hasCapableRoute = true;
-                        if (routeNeedsMinigame) needsMinigame = true;
                         break;
                     }
                     for (const entry of routeMissing) {
@@ -196,14 +190,6 @@ export class JobPreflight {
             });
         }
 
-        // Block before take. Accepting a decrypt job while the game reports a
-        // minigame lock left every home decrypt job taken but uncompletable.
-        if (needsMinigame && this.deps.jobActions.getMinigameLock) {
-            const lock = await this.deps.jobActions.getMinigameLock();
-            if (lock !== null && lock > this.now()) {
-                return err({ code: 'PREFLIGHT_FAILED', message: lockMessage(lock, this.now()) });
-            }
-        }
         return ok(undefined);
     }
 

@@ -82,4 +82,19 @@ describe('finalizeAutoFinish', () => {
         ]));
         expect(finalized.completedResets).toEqual({});
     });
+
+    it('records a completion with an unknown reset marker and keeps it', async () => {
+        const made = deps();
+        const finalized = await finalizeAutoFinish(made.deps, input([
+            market({
+                resetAt: null,
+                jobTotal: 1,
+                success: 1,
+                jobs: [{ jobId: 'unknown-job', name: 'unknown', serverName: null, marketKey: 'home', status: 'done' }],
+            }),
+        ]));
+        expect(finalized.completedJobs).toEqual({ 'unknown-job': 'unknown' });
+        const calls = made.store.set.mock.calls as unknown[][];
+        expect(autoFinishStateSchema.safeParse(calls[0]?.[0]).success).toBe(true);
+    });
 });

@@ -16,7 +16,7 @@ const autoFinishRunSchema = z.object({
 export function registerAutoFinishHandlers(server: CoreRuntime['server'], deps: AutoFinishHandlerDeps): void {
     const { core, automation } = deps;
     server.register('auto-finish.run', autoFinishRunSchema, async ({ owner, force }) => {
-        const result = await automation.autoFinish.runExclusive(owner, force);
+        const result = await automation.autoFinish.runExclusive(owner, { forceRefresh: force });
         return result.ok
             ? ok(result.value)
             : { ok: false, error: result.error ?? { code: 'AUTO_FINISH_FAILED', message: 'Auto Finish failed' } };

@@ -20,14 +20,6 @@ export function isServerlessJob(type: JobType): boolean {
     return type === 'File Decryption';
 }
 
-/** True when the job requires opening the decrypt minigame at some point. */
-export function jobNeedsDecrypt(job: JobOffer): boolean {
-    if (job.type === 'File Decryption' || job.type === 'Decrypt & Extract') return true;
-    return (job.conditions ?? []).some((condition) =>
-        condition.type === 'DecryptFile' || condition.type === 'DecryptDownloadedFile',
-    );
-}
-
 export const DECRYPT_CONDITION_TYPES = ['DecryptFile', 'DecryptDownloadedFile'] as const;
 const GENERIC_ENCRYPTED_EXTENSIONS = new Set(['.enc', '.bin']);
 

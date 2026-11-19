@@ -35,6 +35,36 @@ describe('JobLockRegistry retry budget', () => {
         registry.reconcileResets(new Map([['home', 'reset-b']]));
         expect(registry.isRetryExhausted('job-1')).toBe(false);
     });
+
+    it('keeps the budget when the market is missing from the reconciliation input', () => {
+        const { registry } = makeRegistry();
+        for (let index = 0; index < MAX_RETRY_ATTEMPTS; index++) {
+            registry.recordRetry('job-1', 'home', 'reset-a');
+        }
+        registry.reconcileResets(new Map());
+        expect(registry.isRetryExhausted('job-1')).toBe(true);
+        expect(registry.retryAttempt('job-1')?.count).toBe(MAX_RETRY_ATTEMPTS);
+    });
+
+    it('does not compare a record whose previous reset was unknown', () => {
+        const { registry } = makeRegistry();
+        for (let index = 0; index < MAX_RETRY_ATTEMPTS; index++) {
+            registry.recordRetry('job-1', 'home', null);
+        }
+        registry.reconcileResets(new Map([['home', 'reset-b']]));
+        expect(registry.isRetryExhausted('job-1')).toBe(true);
+    });
+
+    it('does not touch other markets when one reset changes', () => {
+        const { registry } = makeRegistry();
+        for (let index = 0; index < MAX_RETRY_ATTEMPTS; index++) {
+            registry.recordRetry('home-job', 'home', 'reset-a');
+            registry.recordRetry('dark-job', 'dark', 'reset-dark');
+        }
+        registry.reconcileResets(new Map([['home', 'reset-b']]));
+        expect(registry.isRetryExhausted('home-job')).toBe(false);
+        expect(registry.isRetryExhausted('dark-job')).toBe(true);
+    });
 });
 
 describe('JobLockRegistry locks', () => {
@@ -50,6 +80,20 @@ describe('JobLockRegistry locks', () => {
         const made = makeRegistry();
         made.registry.setLock('job-1', made.now.value + 60_000, 'home', 'reset-a');
         made.registry.reconcileResets(new Map([['home', 'reset-a']]));
+        expect(made.registry.isLocked('job-1')).toBe(true);
+    });
+
+    it('keeps a lock when the market is missing from the reconciliation input', () => {
+        const made = makeRegistry();
+        made.registry.setLock('job-1', made.now.value + 60_000, 'home', 'reset-a');
+        made.registry.reconcileResets(new Map());
+        expect(made.registry.isLocked('job-1')).toBe(true);
+    });
+
+    it('does not clear a lock whose previous reset was unknown', () => {
+        const made = makeRegistry();
+        made.registry.setLock('job-1', made.now.value + 60_000, 'home', null);
+        made.registry.reconcileResets(new Map([['home', 'reset-b']]));
         expect(made.registry.isLocked('job-1')).toBe(true);
     });
 });

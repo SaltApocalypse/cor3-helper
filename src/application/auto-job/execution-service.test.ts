@@ -421,21 +421,53 @@ describe('JobExecutionService', () => {
         }
     });
 
-    it('skips decryption while the game reports an active minigame lock', async () => {
+    it('does not take a job when preflight rejects it', async () => {
         const fake = actions();
-        const lockExpiresAt = Date.now() + 60_000;
-        fake.port.getMinigameLock = async () => lockExpiresAt;
-        const service = new JobExecutionService(fake.port, undefined, undefined, {
-            solve: async () => ({ ok: true as const, value: { kind: 'none' as const, solved: false } }),
-            cancel: async () => ({ ok: true as const, value: undefined }),
-        });
+        let takeCalls = 0;
+        fake.port.take = async () => {
+            takeCalls += 1;
+            return { ok: true as const, value: undefined };
+        };
+        const service = new JobExecutionService(
+            fake.port,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            async () => ({ ok: false as const, error: { code: 'PREFLIGHT_FAILED', message: 'required solver disabled' } }),
+        );
         const result = await service.executeDetailed(job('File Decryption'));
         expect(result.ok).toBe(false);
-        if (!result.ok) {
-            expect(result.error.code).toBe('MINIGAME_FAILED');
-            expect(result.error.lockExpiresAt).toBe(lockExpiresAt);
-            expect(result.error.retryAt).toBe(lockExpiresAt);
-        }
+        if (!result.ok) expect(result.error.code).toBe('PREFLIGHT_FAILED');
+        expect(takeCalls).toBe(0);
+    });
+
+    it('completes a claim-only job without running a rejecting preflight', async () => {
+        const fake = actions();
+        let takeCalls = 0;
+        fake.port.take = async () => {
+            takeCalls += 1;
+            return { ok: true as const, value: undefined };
+        };
+        const service = new JobExecutionService(
+            fake.port,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            async () => ({ ok: false as const, error: { code: 'PREFLIGHT_FAILED', message: 'solver disabled' } }),
+        );
+        const result = await service.executeDetailed(job('File Decryption', {
+            alreadyTaken: true,
+            canComplete: true,
+        }));
+        expect(result.ok).toBe(true);
+        expect(takeCalls).toBe(0);
+        expect(fake.calls).toEqual(['complete']);
     });
 
     it('submits an already-decrypted file when analysis reports zero decrypt power', async () => {

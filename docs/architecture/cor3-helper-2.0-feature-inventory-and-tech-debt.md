@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-15 against build `2.0.6-salta.281`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (95 files / 478 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-15 against build `2.0.6-salta.285`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (98 files / 509 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.6-salta.281`)
+## Current completion snapshot (build `2.0.6-salta.285`)
 
 | Metric | Value |
 |---|---|
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 95 files / 478 tests pass
-- `npm run build` — pass, `2.0.6-salta.281`
+- `npm test` — 98 files / 509 tests pass
+- `npm run build` — pass, `2.0.6-salta.285`
 
 ---
 
@@ -736,7 +736,7 @@ Fixes:
 
 - typecheck / lint pass
 - 80 test files / 355 tests
-- build `2.0.6-salta.281`
+- build `2.0.6-salta.285`
 
 ---
 
@@ -1083,7 +1083,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 40 — Auto Jobs state truth, retry policy and market freshness (2.0.6-salta.281)
+# Part 40 — Auto Jobs state truth, retry policy and market freshness (2.0.6-salta.285)
 
 - Every Auto Finish cycle now persists and publishes a report, including "nothing runnable" passes. Previously a blocked cycle returned early, so the UI kept the previous run report and could show a claimable job with no tag at all.
 - Job status tags are derived from persisted completion state (`completedJobs`) first, then the latest run report, then the live snapshot (`ready to claim`). A completed job always shows `done` for its market reset.
@@ -1097,7 +1097,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 41 — Per-market refresh and push-first cache (2.0.6-salta.281)
+# Part 41 — Per-market refresh and push-first cache (2.0.6-salta.285)
 
 - Auto Jobs no longer refresh all four markets on every trigger. `ensureInfo` selects only markets whose `updatedAt` is older than their TTL: 60 seconds in steady state, 15 seconds within two minutes of a known reset. A recent game push therefore makes a ready/scheduled pass a no-op.
 - A trigger that arrives while a cycle is running is coalesced and re-checked after the cycle instead of being dropped.
@@ -1109,7 +1109,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 42 — Decrypt file matching, minigame locks and worker log noise (2.0.6-salta.281)
+# Part 42 — Decrypt file matching, minigame locks and worker log noise (2.0.6-salta.285)
 
 - A downloaded encrypted file is now matched to a job by the base name from its decrypt conditions as well as the file id/name. Previously `Decrypt & Extract` tried to match `export_9724.txt` against `export_9724.ab52p`, found nothing, and then attempted completion, producing `job-conditions-not-met`.
 - The `alreadyTaken` completion fallback for a missing decrypt file was removed. It masked the real file-matching failure and consumed retry budgets.
@@ -1118,3 +1118,36 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 - When every decrypt minigame solver is disabled, the decrypt preflight skips the job before take.
 - Startup no longer runs a full market refresh on every service-worker restart when a persisted snapshot exists. A `system` initialization line is logged once per browser session; later worker starts log at debug level.
 - Network market sync waits briefly after an endpoint change and retries transient `market-not-reachable` responses three times with increasing delays.
+
+
+---
+
+# Part 43 — Phase 1: file-scoped minigame locks and market-task solver behavior (2.0.6-salta.285)
+
+- Removed the global minigame-lock gate from Auto Finish, job preflight and the execution pre-take path. A lock now only blocks the job that owns it (`JobLockRegistry`); the game protocol exposes a single lock timestamp without a file/job id, so it is never interpreted as a lock for every decrypt job.
+- Market-task automation always calls the minigame solver. The auto-solver switches (`autoDecryptEnabled`, `autoIceWallEnabled`, `autoSimpleDecryptEnabled`) only control the background tick that reacts to minigames opened outside a market task; `JobPreflight` and the market-task execution path no longer read them.
+- `JobPreflight` now checks the current job's persisted lock before take. Claim-only jobs bypass preflight and are still completed.
+- The execution service no longer reads the hub's single `latestMinigameLock()` at all. A lock is persisted per job only when the current operation's error carries `lockExpiresAt`/a lock message. This avoids attributing one file's lock to another file.
+- The background auto-solver tick still uses the solver switches; `game.solveMinigame` called by a market task allows all solver kinds.
+
+
+---
+
+# Part 44 — Phase 2A: run semantics, reset reconciliation and unknown reset (2.0.6-salta.285)
+
+- `AutoFinishRunOptions` separates `forceRefresh`, `retryFailed`/`resetRetryBudget` and `clearLocalState`. A force refresh reloads market data but preserves `completedResets`/`completedJobs`; only `clearLocalState` clears completion records. `retryFailed`/`resetRetryBudget` clear retry attempts and locks without touching completions.
+- The bridge `auto-finish.run` keeps its `force` boolean and maps it to `forceRefresh` only.
+- `JobLockRegistry.reconcileResets` now accepts only known string resets. A missing market (sync failure/unknown) or an unknown previous reset does not clear attempts or locks; only a known reset change does.
+- Completion suppression uses `isCompletedForReset`: an unknown current reset keeps a persisted completion suppressed; a known different reset releases it. A completion recorded while the reset was unknown is stored as the `unknown` marker and is not pruned; it is not applied to a later known reset.
+- Added tests for force/retry/clear semantics, retry-budget reconciliation with missing/unknown resets, cross-market isolation, unknown completion suppression, and unknown reset persistence.
+
+
+---
+
+# Part 45 — Phase 2B: continuous Endpoint snapshot propagation (2.0.6-salta.285)
+
+- `RouteExecutor` reports `finalEndpoint`: the target on success, and the last intermediate or starting endpoint actually confirmed on failure. An unconfirmed target is never reported.
+- `MarketSyncService` forwards the confirmed endpoint on success and on `MARKET_FETCH_FAILED`/`ROUTE_FAILED`, so a market request failure does not discard the position reached by routing.
+- `JobMarketSync.syncAll` now keeps a single evolving `currentSnapshot` across markets. Each market starts from the endpoint confirmed by the previous market instead of the initial map snapshot. The retry pass starts from the refreshed map when available and otherwise from the last confirmed endpoint.
+- The failed-job dismisser follows the same rule: scan and refresh calls for later markets start from the endpoint confirmed by earlier calls, including confirmed positions from failed routes.
+- Added tests for A→B→C→D propagation, market-request failure, route failure with and without a known position, cross-market isolation, retry-pass snapshot source, and dismisser propagation.

@@ -123,16 +123,11 @@ export class JobExecutionService implements JobExecutionPort {
         if (this.shouldStop?.()) return err({ code: 'JOB_CANCELLED', message: 'Job run cancelled', retryable: false, stage: 'cancelled' });
         // Completion is the only remaining step for a claimable job. It must
         // not be rejected for a missing target server or a disabled type.
-        if (job.alreadyTaken && job.canComplete) return this.complete(job);
+        if (job.alreadyTaken && job.canComplete) {
+            return this.complete(job);
+        }
         if (!job.serverId && !isServerlessJob(job.type)) {
             return err({ code: 'NO_SERVER', message: 'Job has no server id' });
-        }
-        // Do not take (or re-take) a decrypt job while the game still reports a
-        // global minigame lock. Previously each job was taken and then failed
-        // with the lock, leaving every home decrypt job accepted but stuck.
-        if (requiresDecrypt(job)) {
-            const lock = await this.activeMinigameLock();
-            if (lock !== null) return this.lockedError(lock);
         }
         let current = job;
         if (!current.alreadyTaken) {
@@ -160,7 +155,9 @@ export class JobExecutionService implements JobExecutionPort {
                 const refreshed = await this.afterTake(current);
                 if (refreshed.ok) current = refreshed.value;
             }
-            if (current.alreadyTaken && current.canComplete) return this.complete(current);
+            if (current.alreadyTaken && current.canComplete) {
+                return this.complete(current);
+            }
         }
 
         if (this.beforeTarget && current.serverId) {
@@ -353,27 +350,7 @@ export class JobExecutionService implements JobExecutionPort {
         return analysis;
     }
 
-    private async activeMinigameLock(): Promise<number | null> {
-        if (!this.actions.getMinigameLock) return null;
-        const expiresAt = await this.actions.getMinigameLock();
-        return expiresAt !== null && expiresAt > Date.now() ? expiresAt : null;
-    }
-
-    private lockedError(expiresAt: number): Result<JobReward, JobExecutionError> {
-        const minutes = Math.max(1, Math.ceil((expiresAt - Date.now()) / 60_000));
-        return err({
-            code: 'MINIGAME_FAILED',
-            message: `Minigame locked (~${minutes}m remaining)`,
-            retryable: true,
-            retryAt: expiresAt,
-            lockExpiresAt: expiresAt,
-            stage: 'minigame',
-        });
-    }
-
     private async decryptAndComplete(job: JobOffer, file: DownloadFile): Promise<Result<JobReward, JobExecutionError>> {
-        const initialLock = await this.activeMinigameLock();
-        if (initialLock !== null) return this.lockedError(initialLock);
         // A decoded file can be picked up again when the user solved it manually
         // or when a previous run already decrypted it. Completing directly avoids
         // re-opening the minigame and avoids reporting "insufficient power (0)".
@@ -468,8 +445,6 @@ export class JobExecutionService implements JobExecutionPort {
                     // completion path instead of a single, easily-stale attempt.
                     return this.completeAfterDecrypt(job, file.id);
                 }
-                const lock = await this.activeMinigameLock();
-                if (lock !== null) return this.lockedError(lock);
                 return err({ code: 'ACTION_FAILED', message, ...retryMetadata(opened.error) });
             }
         }
@@ -484,8 +459,6 @@ export class JobExecutionService implements JobExecutionPort {
             },
         );
         if (openTimedOut) {
-            const lock = await this.activeMinigameLock();
-            if (lock !== null) return this.lockedError(lock);
             // The decrypt.file reply may only arrive after the minigame closes.
             // Never continue to completion when the file was not confirmed open:
             // it produced a burst of "job-conditions-not-met" retries in v2.
@@ -497,14 +470,12 @@ export class JobExecutionService implements JobExecutionPort {
             });
         }
         if (!result.ok) {
-            const lock = await this.activeMinigameLock();
-            if (lock !== null) return this.lockedError(lock);
             return err({ code: 'MINIGAME_FAILED', message: result.error.message, ...retryMetadata(result.error) });
         }
         if (!result.value.solved) {
             if (/solver disabled/i.test(result.value.message ?? '')) {
-                // Do not open the same minigame again immediately; a settings
-                // change or force run clears this cooldown.
+                // Market tasks always call the solver; this is a safety net for
+                // a disabled runtime, not a user solver-switch gate.
                 const until = Date.now() + 10 * 60_000;
                 return err({
                     code: 'MINIGAME_DISABLED',
@@ -515,8 +486,6 @@ export class JobExecutionService implements JobExecutionPort {
                     stage: 'minigame',
                 });
             }
-            const lock = await this.activeMinigameLock();
-            if (lock !== null) return this.lockedError(lock);
             // kind === 'none' means either no minigame appeared within the
             // detection window or another solver already owns the session.
             // Both are retryable, not success.
@@ -528,8 +497,6 @@ export class JobExecutionService implements JobExecutionPort {
                 stage: 'minigame',
             });
         }
-        const finalLock = await this.activeMinigameLock();
-        if (finalLock !== null) return this.lockedError(finalLock);
         // The game updates job conditions slightly after the minigame closes.
         // v1 waited here and retried completion; doing the same avoids marking the
         // first successful decryption as failed while it is still "ready to claim".
@@ -610,6 +577,7 @@ export class JobExecutionService implements JobExecutionPort {
 
     private async complete(job: JobOffer): Promise<Result<JobReward, JobExecutionError>> {
         await this.pace?.();
+        // The complete request may mutate remote state; record the intent first.
         if (this.beforeComplete) {
             const hook = await this.beforeComplete(job);
             if (!hook.ok) return err({ code: 'COMPLETE_FAILED', message: hook.error.message, ...retryMetadata(hook.error) });

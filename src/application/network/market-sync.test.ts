@@ -42,6 +42,7 @@ describe('MarketSyncService', () => {
         expect(result.ok).toBe(true);
         if (result.ok) {
             expect(result.value.route.map((node) => node.name)).toEqual(['home', 'market']);
+            expect(result.value.finalEndpoint).toBe(market);
             expect(result.value.market).toEqual({ options: { id: 'o' }, lots: { id: 'l' }, jobs: { id: 'j' } });
         }
     });
@@ -113,5 +114,27 @@ describe('MarketSyncService', () => {
         );
         expect((await service.sync({ marketId: 'm1', serverId: market, owner: 'market', reason: 'test' })).ok).toBe(false);
         expect(fetched).toBe(false);
+    });
+
+    it('returns the confirmed endpoint when the market request fails', async () => {
+        const clock = new FakeClock(0);
+        const executor = new RouteExecutor({
+            setEndpoint: async () => ({ ok: true, value: undefined }),
+        }, {
+            ensureAccess: async () => ({ ok: true, value: undefined }),
+        }, new InMemoryEndpointLeaseService(clock), clock);
+        const service = new MarketSyncService(
+            { get: async () => ({ ok: true, value: snapshot }) },
+            executor,
+            { fetchMarket: async () => ({ ok: false, error: { code: 'GAME_MARKET_FAILED', message: 'market-not-reachable' } }) },
+            clock,
+            { retryDelayMs: 0, sleep: async () => undefined },
+        );
+        const result = await service.sync({ marketId: 'm1', serverId: market, owner: 'market', reason: 'test' });
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+            expect(result.error.code).toBe('MARKET_FETCH_FAILED');
+            expect(result.error.finalEndpoint).toBe(market);
+        }
     });
 });

@@ -59,6 +59,7 @@ describe('RouteExecutor', () => {
 
         expect(result.ok).toBe(true);
         expect(result.direct).toBe(true);
+        expect(result.finalEndpoint).toBe(target);
         expect(endpoints).toEqual([target]);
         expect(accessCalls).toBe(0);
         expect(result.route?.nodes.map((node) => node.name)).toEqual(['home', 'target']);
@@ -85,6 +86,7 @@ describe('RouteExecutor', () => {
         expect(result.ok).toBe(true);
         expect(result.direct).toBe(true);
         expect(result.accessEnsured).toBe(true);
+        expect(result.finalEndpoint).toBe(target);
         expect(endpoints).toEqual([]);
         expect(accessCalls).toBe(1);
     });
@@ -113,6 +115,7 @@ describe('RouteExecutor', () => {
 
         expect(result.ok).toBe(true);
         expect(result.direct).toBe(false);
+        expect(result.finalEndpoint).toBe(target);
         expect(result.route?.nodes.map((node) => node.name)).toEqual(['home', 'b', 'target']);
         expect(endpoints).toEqual([target, a, b, target]);
         expect(leases.current()).toBeNull();
@@ -151,5 +154,48 @@ describe('RouteExecutor', () => {
         const result = await executor.execute(graph(), target, { owner: 'test', reason: 'unit' });
         expect(result.ok).toBe(false);
         expect(result.error?.code).toBe('LEASE_BUSY');
+        expect(result.finalEndpoint).toBeUndefined();
+    });
+
+    it('keeps a confirmed intermediate endpoint when the target cannot be reached', async () => {
+        const clock = new FakeClock(0);
+        const leases = new InMemoryEndpointLeaseService(clock);
+        const executor = new RouteExecutor({
+            setEndpoint: async (id) => id === target
+                ? err({ code: 'NO_ROUTE', message: 'target blocked' })
+                : ok(undefined),
+        }, {
+            ensureAccess: async () => ok(undefined),
+        }, leases, clock);
+
+        const result = await executor.execute(graph(), target, {
+            owner: 'test',
+            reason: 'unit',
+            currentEndpoint: home,
+        });
+
+        expect(result.ok).toBe(false);
+        expect(result.finalEndpoint).toBeDefined();
+        expect(result.finalEndpoint).not.toBe(target);
+        expect([a, b]).toContain(result.finalEndpoint);
+    });
+
+    it('does not invent a final endpoint when no location is confirmed', async () => {
+        const clock = new FakeClock(0);
+        const leases = new InMemoryEndpointLeaseService(clock);
+        const executor = new RouteExecutor({
+            setEndpoint: async () => err({ code: 'NO_ROUTE', message: 'all endpoints blocked' }),
+        }, {
+            ensureAccess: async () => ok(undefined),
+        }, leases, clock);
+
+        const result = await executor.execute(graph(), target, {
+            owner: 'test',
+            reason: 'unit',
+            currentEndpoint: null,
+        });
+
+        expect(result.ok).toBe(false);
+        expect(result.finalEndpoint).toBeUndefined();
     });
 });
