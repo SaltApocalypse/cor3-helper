@@ -9,6 +9,8 @@ export interface AutoJobProgress {
     readonly total: number;
     readonly jobId: string;
     readonly jobName: string;
+    /** Market identity is required to distinguish identical job ids across markets. */
+    readonly marketKey: string;
     readonly serverName: string | null;
     readonly doneCount: number;
     readonly failedCount: number;
@@ -61,6 +63,7 @@ export class AutoJobQueueService {
                 total: selected.length,
                 jobId: job.id,
                 jobName: job.name,
+                marketKey: job.marketKey,
                 serverName: job.serverName,
                 doneCount: done.length,
                 failedCount: failed.length,

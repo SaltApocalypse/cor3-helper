@@ -20,8 +20,9 @@ export type { LoadoutView } from '../loadout/view.js';
 
 import type { AutoFinishFailure, AutoFinishLastRun, AutoFinishMarketResult, AutoFinishRunResult } from '../../contracts/auto-finish.js';
 import type { AutoJobsSnapshot } from '../../contracts/auto-jobs.js';
+import type { MarketCompletedJobsState } from '../../contracts/market-completed-jobs.js';
 
-export type { AutoFinishFailure, AutoFinishLastRun, AutoFinishMarketResult, AutoFinishRunResult, AutoJobsSnapshot };
+export type { AutoFinishFailure, AutoFinishLastRun, AutoFinishMarketResult, AutoFinishRunResult, AutoJobsSnapshot, MarketCompletedJobsState };
 
 export interface JobRouteNode {
     readonly id: string;
@@ -349,8 +350,11 @@ export interface AutoFinishStatus {
     readonly progress: JobQueueProgress | null;
     readonly nextRetryAt: number | null;
     readonly retryReason: string | null;
-    /** Job id -> market reset it was completed for. */
-    readonly completedJobs: Readonly<Record<string, string>>;
+    /** Authoritative market-scoped completion state. */
+    readonly completedJobsByMarket: MarketCompletedJobsState;
+    /** Legacy jobId-only records; display/diagnostics only. */
+    readonly legacyCompletedJobs: Readonly<Record<string, string>>;
+    readonly completionStateStatus: 'not-loaded' | 'loaded' | 'unavailable';
 }
 
 export interface JobQueueState {

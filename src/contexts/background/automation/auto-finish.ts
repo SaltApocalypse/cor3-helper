@@ -13,7 +13,8 @@ import { finalizeAutoFinish } from './auto-finish-finalize.js';
 import { humanDelay as defaultHumanDelay } from './delay.js';
 import { failureOf, jobLocation, outcomeInputOf, countsAgainstRetryBudget } from './job-outcome.js';
 import { resolveAutoFinishRunState, shouldUsePrefetched, type AutoFinishRunOptions } from './auto-finish-options.js';
-import { isCompletedForReset } from '../../../application/auto-job/completion.js';
+import { isCompletedForMarketReset } from '../../../application/auto-job/market-completion.js';
+import { EMPTY_MARKET_COMPLETED_JOBS, type MarketCompletedJobsState } from '../../../contracts/market-completed-jobs.js';
 import type { JobMarketSyncEntry } from './job-market-sync.js';
 import { buildServerPriority } from './server-priority.js';
 import type { AutoFinishDeps, AutoFinishLiveRun, AutoFinishStatus, AutoJobsSink } from './auto-finish-types.js';
@@ -25,13 +26,16 @@ const CLAIM_ONLY_CACHE_MAX_AGE_MS = 5 * 60_000;
 
 export class AutoFinishCoordinator {
     private running = false;
+    private completionsStatus: 'not-loaded' | 'loaded' | 'unavailable' = 'not-loaded';
+    private completionsRevision = 0;
     private last: AutoFinishLastRun | null = null;
     private nextRetryAt: number | null = null;
     private retryReason: string | null = null;
     private live: AutoFinishLiveRun | null = null;
     private progress: AutoJobProgress | null = null;
     private completedResets: Readonly<Record<string, string>> = {};
-    private completedJobs: Readonly<Record<string, string>> = {};
+    private legacyCompletedJobs: Readonly<Record<string, string>> = {};
+    private completedJobsByMarket: MarketCompletedJobsState = EMPTY_MARKET_COMPLETED_JOBS;
     private cancelRequested = false;
     private autoJobs: AutoJobsSink | null = null;
     private readonly humanDelay: (minMs?: number, maxMs?: number) => Promise<void>;
@@ -60,8 +64,27 @@ export class AutoFinishCoordinator {
         return this.completedResets;
     }
 
-    completedJobsSnapshot(): Readonly<Record<string, string>> {
-        return this.completedJobs;
+    completedJobsByMarketSnapshot(): MarketCompletedJobsState {
+        return this.completedJobsByMarket;
+    }
+
+    legacyCompletedJobsSnapshot(): Readonly<Record<string, string>> {
+        return this.legacyCompletedJobs;
+    }
+
+    completionStateStatus(): 'not-loaded' | 'loaded' | 'unavailable' {
+        return this.completionsStatus;
+    }
+
+    completionsAvailable(): boolean {
+        return this.completionsStatus === 'loaded';
+    }
+
+    /** Accept a state produced by a successful store cleanup/finalize. */
+    applyCompletedByMarket(state: MarketCompletedJobsState): void {
+        this.completionsRevision += 1;
+        this.completionsStatus = 'loaded';
+        this.completedJobsByMarket = state;
     }
 
     progressValue(): AutoJobProgress | null {
@@ -76,7 +99,17 @@ export class AutoFinishCoordinator {
         const state = await this.deps.store.get();
         this.last = state.last;
         this.completedResets = state.completedResets;
-        this.completedJobs = state.completedJobs;
+        this.legacyCompletedJobs = state.completedJobs;
+        const revision = this.completionsRevision;
+        try {
+            const loaded = await this.deps.completions.getState();
+            if (revision === this.completionsRevision) this.applyCompletedByMarket(loaded);
+        } catch (error) {
+            this.completionsStatus = 'unavailable';
+            this.deps.logger.warn('auto-jobs', 'Failed to load market-scoped completions', {
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }
         await this.scheduleNextRefresh();
     }
 
@@ -91,7 +124,9 @@ export class AutoFinishCoordinator {
             progress: this.progress,
             nextRetryAt: this.nextRetryAt,
             retryReason: this.retryReason,
-            completedJobs: this.completedJobs,
+            completedJobsByMarket: this.completedJobsByMarket,
+            legacyCompletedJobs: this.legacyCompletedJobs,
+            completionStateStatus: this.completionsStatus,
         };
     }
 
@@ -139,6 +174,10 @@ export class AutoFinishCoordinator {
             const preSettings = await this.deps.settings.get();
             const preStored = await this.deps.store.get();
             const preState = resolveAutoFinishRunState(options, preStored);
+            if (options.clearLocalState === true) await this.clearCompletedByMarket();
+            const preLoaded = await this.loadCompletedByMarket('prefetch');
+            if (!preLoaded.ok) throw new Error('Market-scoped completion state is unavailable');
+            const preCompletedByMarket = preLoaded.state;
             const preAllowed = new Set(preSettings.autoCompleteJobTypes);
             const preResets = new Map<string, string>();
             for (const market of prefetched.markets) {
@@ -163,7 +202,7 @@ export class AutoFinishCoordinator {
                 if (this.deps.locks.isRetryExhausted(job.id)) return false;
                 if (this.deps.locks.isLocked(job.id)) return false;
                 const resetAt = preResets.get(job.marketKey) ?? null;
-                return !isCompletedForReset(job.id, preState.completedJobs, resetAt);
+                return !isCompletedForMarketReset(preCompletedByMarket, job.marketKey, job.id, resetAt);
             });
             if (preRunnable.length === 0) {
                 const preRunnableIds = new Set(preRunnable.map((job) => job.id));
@@ -199,7 +238,7 @@ export class AutoFinishCoordinator {
                 this.deps.logger.info('auto-jobs', preJobs.length === 0 ? 'Auto Finish: no jobs to run' : 'Auto Finish selection skipped every job', {
                     jobs: preJobs.length,
                     allowedTypes: [...preAllowed],
-                    completedJobs: Object.keys(preState.completedJobs).length,
+                    completedJobs: Object.values(preCompletedByMarket.byMarket).reduce((sum, jobs) => sum + Object.keys(jobs).length, 0),
                     skipped: preSkipped,
                     blocked: preBlocked.slice(0, 10),
                 });
@@ -207,7 +246,7 @@ export class AutoFinishCoordinator {
                 // it the UI kept the previous run's statuses and showed newly
                 // claimable jobs with no tag at all.
                 const markets = this.mergePreviousMarkets(buildLiveMarkets({ jobs: preJobs, markets: prefetched.markets }, preRunnable, preAllowed, this.deps.locks, this.now(), {
-                    completedJobs: preState.completedJobs,
+                    completedJobsByMarket: preCompletedByMarket,
                     resetByMarket: preResets,
                 }));
                 const totalRetry = markets.reduce((sum, market) => sum + (market.retry ?? 0), 0);
@@ -252,7 +291,9 @@ export class AutoFinishCoordinator {
                 });
                 this.last = finalized.last;
                 this.completedResets = finalized.completedResets;
-                this.completedJobs = finalized.completedJobs;
+                this.legacyCompletedJobs = finalized.completedJobs;
+                if (finalized.completionStateAvailable) this.applyCompletedByMarket(finalized.completedJobsByMarket);
+                else this.completionsStatus = 'unavailable';
                 this.nextRetryAt = finalized.nextRetryAt;
                 this.retryReason = finalized.retryReason;
                 this.deps.locks.pruneExpiredLocks();
@@ -288,7 +329,11 @@ export class AutoFinishCoordinator {
             const stored = await this.deps.store.get();
             const state = resolveAutoFinishRunState(options, stored);
             const completedResets = state.completedResets;
-            const completedJobs = state.completedJobs;
+            const legacyCompletedJobs = state.completedJobs;
+            if (options.clearLocalState === true) await this.clearCompletedByMarket();
+            const loaded = await this.loadCompletedByMarket('run');
+            if (!loaded.ok) throw new Error('Market-scoped completion state is unavailable');
+            const completedByMarket = loaded.state;
             const resetByMarket = new Map<string, string>();
             for (const market of synced.markets) {
                 if (market.ok && typeof market.resetAt === 'string' && market.resetAt.length > 0) {
@@ -311,7 +356,7 @@ export class AutoFinishCoordinator {
                 if (this.deps.locks.isRetryExhausted(job.id)) return false;
                 if (this.deps.locks.isLocked(job.id)) return false;
                 const resetAt = resetByMarket.get(job.marketKey) ?? null;
-                return !isCompletedForReset(job.id, completedJobs, resetAt);
+                return !isCompletedForMarketReset(completedByMarket, job.marketKey, job.id, resetAt);
             });
             const runnableIds = new Set(runnable.map((job) => job.id));
             const skipped = { noServer: 0, typeDisabled: 0, locked: 0, retryExhausted: 0, completed: 0 };
@@ -352,7 +397,7 @@ export class AutoFinishCoordinator {
             this.live = {
                 ...(this.live ?? { runId, startedAt: this.now() }),
                 markets: this.mergePreviousMarkets(buildLiveMarkets(synced, runnable, allowedTypes, this.deps.locks, this.now(), {
-                    completedJobs,
+                    completedJobsByMarket: completedByMarket,
                     resetByMarket,
                 })),
             };
@@ -465,7 +510,7 @@ export class AutoFinishCoordinator {
                 synced,
                 allowedTypes,
                 doneIds,
-                completedJobs,
+                completedJobsByMarket: completedByMarket,
                 resetByMarket,
                 locks: this.deps.locks,
                 outcomes,
@@ -527,7 +572,7 @@ export class AutoFinishCoordinator {
                 retryEntries,
                 retryFailuresForSchedule,
                 completedResets,
-                completedJobs,
+                completedJobs: legacyCompletedJobs,
                 runDoneCount: runDone.length,
                 runnableCount: runnable.length,
                 totalRetry,
@@ -539,7 +584,9 @@ export class AutoFinishCoordinator {
             });
             this.last = finalized.last;
             this.completedResets = finalized.completedResets;
-            this.completedJobs = finalized.completedJobs;
+            this.legacyCompletedJobs = finalized.completedJobs;
+            if (finalized.completionStateAvailable) this.applyCompletedByMarket(finalized.completedJobsByMarket);
+            else this.completionsStatus = 'unavailable';
             this.nextRetryAt = finalized.nextRetryAt;
             this.retryReason = finalized.retryReason;
             return finalized.result;
@@ -604,9 +651,35 @@ export class AutoFinishCoordinator {
         return JOB_MARKETS.filter((market) => keys.has(market.key));
     }
 
+    private async loadCompletedByMarket(context: string): Promise<{ readonly ok: true; readonly state: MarketCompletedJobsState } | { readonly ok: false }> {
+        const revision = this.completionsRevision;
+        try {
+            const state = await this.deps.completions.getState();
+            if (revision !== this.completionsRevision) {
+                // A cleanup/finalize updated the cache while this read was in
+                // flight; never overwrite it with an older observation.
+                return { ok: true, state: this.completedJobsByMarket };
+            }
+            this.applyCompletedByMarket(state);
+            return { ok: true, state };
+        } catch (error) {
+            this.completionsStatus = 'unavailable';
+            this.deps.logger.warn('auto-jobs', `Failed to load market-scoped completions (${context})`, {
+                message: error instanceof Error ? error.message : String(error),
+            });
+            return { ok: false };
+        }
+    }
+
+    private async clearCompletedByMarket(): Promise<void> {
+        await this.deps.completions.clear();
+        this.applyCompletedByMarket(EMPTY_MARKET_COMPLETED_JOBS);
+    }
+
     private finalizeDeps() {
         return {
             store: this.deps.store,
+            completions: this.deps.completions,
             events: this.deps.events,
             runLogs: this.deps.runLogs,
             settings: this.deps.settings,
@@ -617,11 +690,15 @@ export class AutoFinishCoordinator {
             onPersisted: (
                 last: import('../../../contracts/auto-finish.js').AutoFinishLastRun,
                 completedResets: Readonly<Record<string, string>>,
-                completedJobs: Readonly<Record<string, string>>,
+                legacyCompletedJobs: Readonly<Record<string, string>>,
+                completedJobsByMarket: MarketCompletedJobsState,
+                completionStateAvailable: boolean,
             ) => {
                 this.last = last;
                 this.completedResets = completedResets;
-                this.completedJobs = completedJobs;
+                this.legacyCompletedJobs = legacyCompletedJobs;
+                if (completionStateAvailable) this.applyCompletedByMarket(completedJobsByMarket);
+                else this.completionsStatus = 'unavailable';
                 void this.scheduleNextRefresh();
             },
         };

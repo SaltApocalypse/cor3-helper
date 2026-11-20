@@ -7,7 +7,9 @@ import {
     buildJobMarketViews,
     buildJobStatusById,
     classifyJobQueueResult,
+    countCompletionRecords,
     groupJobsByMarket,
+    jobStatusKey,
     jobStatusTone,
     resetAtByMarket,
     selectShownJobReport,
@@ -190,7 +192,7 @@ describe('buildJobStatusById', () => {
                 { jobId: 'b', name: 'B', serverName: null, marketKey: 'home', status: 'failed', code: 'EXPIRED' },
             ],
         }], { a: 'done' });
-        expect(result).toEqual({ a: 'done', b: 'expired' });
+        expect(result).toEqual({ a: 'done', [jobStatusKey('home', 'a')]: 'done', [jobStatusKey('home', 'b')]: 'expired' });
     });
 
     it('keeps a persisted Done status when a later report says skipped', () => {
@@ -201,17 +203,36 @@ describe('buildJobStatusById', () => {
             skipped: 0,
             jobs: [{ jobId: 'a', name: 'A', serverName: null, marketKey: 'home', status: 'skipped' }],
         }], {}, {
-            completedJobs: { a: '2026-11-18T04:00:00.000Z' },
+            completedJobsByMarket: { byMarket: { home: { a: '2026-11-18T04:00:00.000Z' } } },
             jobsByMarket: { home: [offer({ id: 'a', marketKey: 'home' })] },
         });
-        expect(result.a).toBe('done');
+        expect(result[jobStatusKey('home', 'a')]).toBe('done');
     });
 
     it('tags a claimable job that has no run report entry', () => {
         const result = buildJobStatusById(false, [], {}, {
             jobsByMarket: { home: [offer({ id: 'a', marketKey: 'home', alreadyTaken: true, canComplete: true })] },
         });
-        expect(result.a).toBe('ready');
+        expect(result[jobStatusKey('home', 'a')]).toBe('ready');
+    });
+
+    it('does not let a completed home job tag the same id in another market', () => {
+        const result = buildJobStatusById(false, [], {}, {
+            completedJobsByMarket: { byMarket: { home: { shared: '2026-11-18T04:00:00.000Z' } } },
+            jobsByMarket: {
+                home: [offer({ id: 'shared', marketKey: 'home' })],
+                dark: [offer({ id: 'shared', marketKey: 'dark' })],
+            },
+            resetByMarket: { home: '2026-11-18T04:00:00.000Z', dark: '2026-11-18T04:00:00.000Z' },
+        });
+        expect(result).toEqual({ [jobStatusKey('home', 'shared')]: 'done' });
+    });
+
+    it('keeps legacy completion counts separate from market-scoped counts', () => {
+        expect(countCompletionRecords(
+            { byMarket: { home: { a: 'reset-a', b: 'reset-a' }, dark: { c: 'reset-b' } } },
+            { legacy1: 'reset-a', legacy2: 'reset-b' },
+        )).toEqual({ marketScoped: 3, legacyUnknown: 2 });
     });
 
     it('ignores Auto Finish data while it is disabled', () => {

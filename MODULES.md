@@ -110,8 +110,8 @@ Behavior note: a known decrypt file type (for example `.xvct`) is planned exactl
 
 ## Current verification and known gaps
 
-- Last verified: 2026-11-15, build `2.0.6-salta.286`.
-- `npm run typecheck`, `npm run lint`, `npm test` (101 files / 530 tests) and `npm run build` pass.
+- Last verified: 2026-11-15, build `2.0.6-salta.293`.
+- `npm run typecheck`, `npm run lint`, `npm test` (106 files / 611 tests) and `npm run build` pass.
 - No domain/application imports of `chrome`, `window`, `document`, WebSocket, fetch or IndexedDB; an architecture-boundary test enforces this and the UI layer rules.
 - Persisted stores now use versioned envelopes with idempotent migrations (H9).
 - Release builds are tag-driven: `version` + `releaseLabel` determine the tag, and CI publishes `COR3 Helper v<version>-salta.zip`.

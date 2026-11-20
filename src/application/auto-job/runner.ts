@@ -1,4 +1,5 @@
 import { isServerlessJob, type JobOffer } from '../../domains/jobs/model.js';
+import { jobActiveKey } from '../../contracts/job-state.js';
 import type { GameError } from '../game/ports.js';
 import type { Result } from '../../kernel/result.js';
 
@@ -33,11 +34,28 @@ export interface AutoJobRunError {
  * market route -> take -> target route/access -> job actions -> market route -> complete.
  */
 export class AutoJobRunner {
+    private readonly active = new Set<string>();
+
     constructor(
         private readonly jobs: JobExecutionPort,
     ) {}
 
+    /** Executions currently inside the runner, keyed by market + job id. */
+    activeJobKeys(): ReadonlySet<string> {
+        return new Set(this.active);
+    }
+
     async run(job: JobOffer): Promise<Result<AutoJobRunResult, AutoJobRunError>> {
+        const key = jobActiveKey(job.marketKey, job.id);
+        this.active.add(key);
+        try {
+            return await this.runJob(job);
+        } finally {
+            this.active.delete(key);
+        }
+    }
+
+    private async runJob(job: JobOffer): Promise<Result<AutoJobRunResult, AutoJobRunError>> {
         if (!(job.alreadyTaken && job.canComplete) && !job.serverId && !isServerlessJob(job.type)) {
             return { ok: false, error: { code: 'NO_SERVER', message: 'Job has no target server' } };
         }

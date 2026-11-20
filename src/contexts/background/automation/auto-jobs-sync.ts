@@ -5,7 +5,7 @@ import type { JobOffer } from '../../../domains/jobs/model.js';
 import type { JobMarketSync, JobMarketSyncEntry } from './job-market-sync.js';
 
 export interface JobSnapshotSyncDeps {
-    readonly markets: Pick<JobMarketSync, 'syncAll' | 'syncOne'>;
+    readonly markets: Pick<JobMarketSync, 'syncAll' | 'syncOne' | 'reconcileMarketSnapshot'>;
     readonly snapshot: () => AutoJobsSnapshot | null;
     readonly publishSnapshot: (update: AutoJobsSnapshot) => void;
     readonly now: () => number;
@@ -37,6 +37,13 @@ export async function syncJobMarket(
     const market = jobMarketByKey(request.marketKey);
     const completionServerId = market ? market.completionServerId ?? request.serverId : request.serverId;
     const mapped = mapMarketSnapshotJobs(result.value.market, request.marketId, request.marketKey, completionServerId);
+    await deps.markets.reconcileMarketSnapshot({
+        marketKey: request.marketKey,
+        resetAt: mapped.resetAt ?? null,
+        observedAt: deps.now(),
+        jobs: mapped.jobs,
+        skippedJobs: mapped.skippedJobs,
+    });
     const previous = deps.snapshot();
     deps.publishSnapshot({
         at: deps.now(),

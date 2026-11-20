@@ -14,6 +14,7 @@ import type { ExpeditionOverview } from '../../domains/expeditions/model.js';
 import type { DroneState } from '../../domains/drone/model.js';
 import type { JobMarketDefinition } from '../../domains/jobs/markets.js';
 import { jobOfferSchema } from '../../contracts/jobs.js';
+import { marketCompletedJobsSchema } from '../../contracts/market-completed-jobs.js';
 import { buildNumberFromVersionName } from '../../kernel/version.js';
 
 const pingSchema = z.object({ version: z.string(), phase: z.string() });
@@ -456,7 +457,9 @@ const autoFinishStatusSchema = z.object({
     progress: autoFinishProgressSchema.nullable(),
     nextRetryAt: z.number().nullable(),
     retryReason: z.string().nullable(),
-    completedJobs: z.record(z.string(), z.string()).default({}),
+    completedJobsByMarket: marketCompletedJobsSchema.default({ byMarket: {} }),
+    legacyCompletedJobs: z.record(z.string(), z.string()).default({}),
+    completionStateStatus: z.enum(['not-loaded', 'loaded', 'unavailable']).default('not-loaded'),
 }).strict();
 const autoFinishRunSchema = z.object({
     jobs: z.number().int().nonnegative(),

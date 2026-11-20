@@ -1,4 +1,5 @@
 import type { AutoFinishLastRun, AutoFinishMarketResult } from '../../../contracts/auto-finish.js';
+import type { MarketCompletedJobsState } from '../../../contracts/market-completed-jobs.js';
 import type { AutoJobsSnapshot } from '../../../contracts/auto-jobs.js';
 import type { AutoJobProgress, AutoJobQueueService } from '../../../application/auto-job/queue.js';
 import type { AutoFinishStateStore } from '../../../infrastructure/storage/auto-finish-state-store.js';
@@ -38,6 +39,7 @@ export interface AutoFinishDeps {
     readonly runLogs: RunLogSink;
     readonly clock: { now(): number };
     readonly store: AutoFinishStateStore;
+    readonly completions: import('../../../application/auto-job/market-completion.js').MarketCompletionStorePort;
     readonly locks: JobLockRegistry;
     readonly history: JobHistoryRecorder;
     readonly queue: AutoJobQueueService;
@@ -56,6 +58,10 @@ export interface AutoFinishStatus {
     readonly progress: AutoJobProgress | null;
     readonly nextRetryAt: number | null;
     readonly retryReason: string | null;
-    /** Job id -> market reset it was completed for. */
-    readonly completedJobs: Readonly<Record<string, string>>;
+    /** Authoritative automation completion state, scoped by market. */
+    readonly completedJobsByMarket: MarketCompletedJobsState;
+    /** Legacy jobId-only records; display/diagnostics only, never automation input. */
+    readonly legacyCompletedJobs: Readonly<Record<string, string>>;
+    /** `unavailable` means the sidecar could not be read; it is not an empty store. */
+    readonly completionStateStatus: 'not-loaded' | 'loaded' | 'unavailable';
 }

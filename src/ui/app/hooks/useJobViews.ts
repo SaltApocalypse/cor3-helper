@@ -1,6 +1,7 @@
 import { useMemo } from 'preact/hooks';
 import type { AutoFinishMarketResult } from '../../../contracts/auto-finish.js';
 import type { AutoJobsMarket } from '../../../contracts/auto-jobs.js';
+import type { MarketCompletedJobsState } from '../../../contracts/market-completed-jobs.js';
 import type { JobOffer } from '../../../application/popup/catalog.js';
 import type { JobMarketView } from '../../components/JobMarketList.js';
 import {
@@ -20,7 +21,7 @@ import {
 export interface JobViewsInput {
     readonly autoFinishEnabled: boolean;
     readonly autoRunMarkets: readonly AutoFinishMarketResult[];
-    readonly completedJobs: Readonly<Record<string, string>>;
+    readonly completedJobsByMarket: MarketCompletedJobsState;
     readonly jobReport: readonly UiJobReport[];
     readonly autoJobsMarkets: readonly AutoJobsMarket[];
     readonly jobRunStatusById: Readonly<Record<string, JobRunStatus>>;
@@ -39,7 +40,7 @@ export function useJobViews(input: JobViewsInput): JobViews {
     const {
         autoFinishEnabled,
         autoRunMarkets,
-        completedJobs,
+        completedJobsByMarket,
         jobReport,
         autoJobsMarkets,
         jobRunStatusById,
@@ -49,11 +50,11 @@ export function useJobViews(input: JobViewsInput): JobViews {
 
     const jobStatusById = useMemo(
         () => buildJobStatusById(autoFinishEnabled, autoRunMarkets, jobRunStatusById, {
-            completedJobs,
+            completedJobsByMarket,
             resetByMarket: jobResetByMarket,
             jobsByMarket,
         }),
-        [autoFinishEnabled, autoRunMarkets, completedJobs, jobRunStatusById, jobResetByMarket, jobsByMarket],
+        [autoFinishEnabled, autoRunMarkets, completedJobsByMarket, jobRunStatusById, jobResetByMarket, jobsByMarket],
     );
 
     const jobReasonById = useMemo(

@@ -8,6 +8,9 @@ import type { NetworkSnapshotService } from '../../../application/network/snapsh
 import type { NetworkSnapshot } from '../../../domains/network/model.js';
 import { withSnapshotEndpoint } from '../../../domains/network/model.js';
 import type { MarketSyncService } from '../../../application/network/market-sync.js';
+import type { JobReconciliationResult, JobStateReconcilerPort, ReconcileMarketInput } from '../../../application/auto-job/job-state-reconciler.js';
+import type { MarketCompletionStorePort } from '../../../application/auto-job/market-completion.js';
+import type { MarketCompletedJobsState } from '../../../contracts/market-completed-jobs.js';
 import type { MarketCacheStore } from '../../../infrastructure/storage/market-cache-store.js';
 import type { AutomationLogger, EventPublisher } from '../../../application/automation/ports.js';
 import { asServerId, type ServerId } from '../../../kernel/ids.js';
@@ -40,6 +43,9 @@ export interface JobMarketSyncDeps {
     readonly tabs: TabRequestPort;
     readonly events: EventPublisher;
     readonly logger: AutomationLogger;
+    readonly reconciler?: JobStateReconcilerPort;
+    readonly completions?: Pick<MarketCompletionStorePort, 'pruneMarketBeforeReset'>;
+    readonly onCompletionsChanged?: (state: MarketCompletedJobsState) => void;
     readonly now?: () => number;
     readonly humanDelay?: (minMs?: number, maxMs?: number) => Promise<void>;
 }
@@ -81,6 +87,24 @@ export class JobMarketSync {
             owner,
             reason,
         });
+    }
+
+    /**
+     * Reconcile local lifecycle records against one successful market snapshot.
+     * Failed/stale snapshots must never reach this method.
+     */
+    async reconcileMarketSnapshot(input: ReconcileMarketInput): Promise<JobReconciliationResult | null> {
+        if (!this.deps.reconciler) return null;
+        try {
+            return await this.deps.reconciler.reconcile(input);
+        } catch (error) {
+            this.deps.logger.warn('job-state', 'Job state reconciliation failed', {
+                marketKey: input.marketKey,
+                resetAt: input.resetAt,
+                message: error instanceof Error ? error.message : String(error),
+            });
+            return null;
+        }
     }
 
     async syncAll(
@@ -207,6 +231,35 @@ export class JobMarketSync {
             };
         }
         const mapped = mapMarketSnapshotJobs(synced.value.market, market.marketId, market.key, market.completionServerId ?? market.routeServerId);
+        // A successful, non-stale market with a known reset is the only safe
+        // evidence for removing stale sidecar completions in this market.
+        if (this.deps.completions && mapped.resetAt) {
+            try {
+                const pruned = await this.deps.completions.pruneMarketBeforeReset(market.key, mapped.resetAt);
+                if (pruned.status === 'pruned' && pruned.removed > 0) {
+                    this.deps.logger.info('auto-jobs', 'Pruned stale market completions', {
+                        market: market.key,
+                        removed: pruned.removed,
+                        resetAt: mapped.resetAt,
+                    });
+                    this.deps.onCompletionsChanged?.(pruned.state);
+                }
+            } catch (error) {
+                this.deps.logger.warn('auto-jobs', 'Failed to prune stale market completions', {
+                    market: market.key,
+                    message: error instanceof Error ? error.message : String(error),
+                });
+            }
+        }
+        // Reconcile before returning the market to the scheduler. This is a
+        // successful, non-stale snapshot, so its game rows are valid evidence.
+        await this.reconcileMarketSnapshot({
+            marketKey: market.key,
+            resetAt: mapped.resetAt ?? null,
+            observedAt: this.now(),
+            jobs: mapped.jobs,
+            skippedJobs: mapped.skippedJobs,
+        });
         const view = mapMarketView(synced.value.market);
         if (view) {
             await this.deps.marketCache.set(market.marketId, view);

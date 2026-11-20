@@ -20,6 +20,7 @@ import { DroneDataCacheStore } from '../../../infrastructure/storage/drone-data-
 import { AutomationStateStore } from '../../../infrastructure/storage/automation-state-store.js';
 import { JobHistoryStore } from '../../../infrastructure/storage/job-history-store.js';
 import { JobStateStore } from '../../../infrastructure/storage/job-state-store.js';
+import { MarketCompletedJobsStore } from '../../../infrastructure/storage/market-completed-jobs-store.js';
 import { NetworkSnapshotStore } from '../../../infrastructure/storage/network-snapshot-store.js';
 import { NetworkOperationQueue } from '../../../application/network/operation-queue.js';
 import type { EventPublisher } from '../../../application/automation/ports.js';
@@ -81,6 +82,7 @@ export interface CoreRuntime {
         readonly dailyOpsCache: DailyOpsCacheStore;
         readonly jobHistory: JobHistoryStore;
         readonly jobState: JobStateStore;
+        readonly marketCompletedJobs: MarketCompletedJobsStore;
         readonly networkSnapshot: NetworkSnapshotStore;
     };
     readonly helperModeEnabled: () => Promise<boolean>;
@@ -200,6 +202,7 @@ export function createCoreRuntime(): CoreRuntime {
         dailyOpsCache: new DailyOpsCacheStore(storageArea),
         jobHistory: new JobHistoryStore(storageArea, undefined, logger),
         jobState: new JobStateStore(storageArea, undefined, logger),
+        marketCompletedJobs: new MarketCompletedJobsStore(storageArea, undefined, logger),
         networkSnapshot: new NetworkSnapshotStore(storageArea, undefined, logger),
     } as const;
 

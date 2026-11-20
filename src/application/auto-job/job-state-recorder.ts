@@ -25,6 +25,15 @@ export interface JobStateRecorderPort {
     start(job: JobOffer): Promise<JobStateSession>;
 }
 
+/** Narrow write port used by reconciliation; not used by the execution path. */
+export interface JobStateWriterPort {
+    /**
+     * Updates a record by exact identity. Returns false when persistence failed,
+     * so a reconciler never reports a successful recovery after a failed write.
+     */
+    update(key: JobStateKey, status: JobLifecycleStatus, details?: JobStateTransitionDetails): Promise<boolean>;
+}
+
 export interface JobStateRecorderDeps {
     readonly store: JobStateStorePort;
     readonly logger: Pick<AutomationLogger, 'warn'>;
@@ -97,28 +106,63 @@ class JobStateSessionImpl implements JobStateSession {
  * Records local job lifecycle transitions for later reconciliation. Recording
  * is observational: a storage failure is logged and never blocks the job.
  */
-export class JobStateRecorder implements JobStateRecorderPort {
+export class JobStateRecorder implements JobStateRecorderPort, JobStateWriterPort {
     private readonly now: () => number;
 
     constructor(private readonly deps: JobStateRecorderDeps) {
         this.now = deps.now ?? (() => Date.now());
     }
 
+    private async existingFor(key: JobStateKey): Promise<JobStateRecord | null> {
+        try {
+            return await this.deps.store.get(key);
+        } catch (error) {
+            this.deps.logger.warn('job-state', 'Failed to read job lifecycle state', {
+                jobId: key.jobId,
+                marketKey: key.marketKey,
+                resetAt: key.resetAt,
+                message: error instanceof Error ? error.message : String(error),
+            });
+            return null;
+        }
+    }
+
     async start(job: JobOffer): Promise<JobStateSession> {
         const resetAt = normalizeJobStateResetAt(this.deps.resetAtForMarket?.(job.marketKey) ?? null);
         const key: JobStateKey = { marketKey: job.marketKey, jobId: job.id, resetAt };
-        let existing: JobStateRecord | null = null;
+        const existing = await this.existingFor(key);
+        return new JobStateSessionImpl(this.deps, key, existing?.createdAt ?? iso(this.now()), this.now);
+    }
+
+    async update(key: JobStateKey, status: JobLifecycleStatus, details: JobStateTransitionDetails = {}): Promise<boolean> {
+        const normalized: JobStateKey = { ...key, resetAt: normalizeJobStateResetAt(key.resetAt) };
+        const existing = await this.existingFor(normalized);
+        const at = iso(this.now());
+        const record: JobStateRecord = {
+            marketKey: normalized.marketKey,
+            jobId: normalized.jobId,
+            resetAt: normalized.resetAt,
+            status,
+            createdAt: existing?.createdAt ?? at,
+            updatedAt: at,
+            lastTransitionAt: at,
+            ...(details.errorCode ? { errorCode: details.errorCode } : {}),
+            ...(details.message ? { lastError: safeErrorText(details.message) } : {}),
+            ...(details.stage ? { stage: details.stage } : {}),
+        };
         try {
-            existing = await this.deps.store.get(key);
+            await this.deps.store.upsert(record);
+            return true;
         } catch (error) {
-            this.deps.logger.warn('job-state', 'Failed to read job lifecycle state', {
-                jobId: job.id,
-                marketKey: job.marketKey,
-                resetAt,
+            this.deps.logger.warn('job-state', 'Failed to persist reconciled job lifecycle transition', {
+                jobId: normalized.jobId,
+                marketKey: normalized.marketKey,
+                resetAt: normalized.resetAt,
+                status,
                 message: error instanceof Error ? error.message : String(error),
             });
+            return false;
         }
-        return new JobStateSessionImpl(this.deps, key, existing?.createdAt ?? iso(this.now()), this.now);
     }
 
     async prune(maxAgeMs?: number): Promise<number> {

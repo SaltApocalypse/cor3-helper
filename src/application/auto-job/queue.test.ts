@@ -40,9 +40,9 @@ describe('AutoJobQueueService', () => {
             owner: 'auto',
             serverPriority: () => 0,
             shouldStop: () => stop,
-            onProgress: (progress) => seen.push(`progress:${progress.jobId}`),
+            onProgress: (progress) => seen.push(`progress:${progress.marketKey}:${progress.jobId}`),
         });
-        expect(seen).toEqual(['progress:1', '1']);
+        expect(seen).toEqual(['progress:home:1', '1']);
         expect(result.stopped).toBe(true);
         expect(result.done.map((entry) => entry.id)).toEqual(['1']);
     });

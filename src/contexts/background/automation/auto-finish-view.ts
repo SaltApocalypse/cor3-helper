@@ -1,6 +1,7 @@
 import type { AutoFinishJobResult, AutoFinishMarketResult } from '../../../contracts/auto-finish.js';
 import { isServerlessJob, type JobOffer } from '../../../domains/jobs/model.js';
-import { isCompletedForReset } from '../../../application/auto-job/completion.js';
+import { isCompletedForMarketReset } from '../../../application/auto-job/market-completion.js';
+import { EMPTY_MARKET_COMPLETED_JOBS, type MarketCompletedJobsState } from '../../../contracts/market-completed-jobs.js';
 import type { JobOutcome } from '../../../application/auto-job/outcome.js';
 import type { AutoJobQueueFailure } from '../../../application/auto-job/queue.js';
 import type { JobLockRegistry } from './job-locks.js';
@@ -42,12 +43,12 @@ export function buildLiveMarkets(
     locks: JobLockRegistry,
     now: number,
     completed?: {
-        readonly completedJobs?: Readonly<Record<string, string>>;
+        readonly completedJobsByMarket?: MarketCompletedJobsState;
         readonly resetByMarket?: ReadonlyMap<string, string>;
     },
 ): AutoFinishMarketResult[] {
     const runnableIds = new Set(runnable.map((job) => job.id));
-    const completedJobs = completed?.completedJobs ?? {};
+    const completedByMarket = completed?.completedJobsByMarket ?? EMPTY_MARKET_COMPLETED_JOBS;
     const resetByMarket = completed?.resetByMarket;
     return synced.markets.map((market) => {
         const base = autoFinishMarketBase(market);
@@ -64,7 +65,7 @@ export function buildLiveMarkets(
                 const resetAt = resetByMarket?.get(job.marketKey) ?? null;
                 // Jobs completed earlier in this reset stay done instead of
                 // reappearing as "already completed" (and losing their tag).
-                const completedForReset = isCompletedForReset(job.id, completedJobs, resetAt);
+                const completedForReset = isCompletedForMarketReset(completedByMarket, job.marketKey, job.id, resetAt);
                 const blocked = (needsServer && !job.serverId) || typeBlocked || locked || exhausted || !runnableIds.has(job.id);
                 return {
                     jobId: job.id,
@@ -108,7 +109,7 @@ export interface FinalMarketInput {
     readonly synced: { jobs: readonly JobOffer[]; markets: readonly JobMarketSyncEntry[] };
     readonly allowedTypes: ReadonlySet<JobOffer['type']>;
     readonly doneIds: ReadonlySet<string>;
-    readonly completedJobs: Readonly<Record<string, string>>;
+    readonly completedJobsByMarket: MarketCompletedJobsState;
     readonly resetByMarket: ReadonlyMap<string, string>;
     readonly locks: JobLockRegistry;
     readonly outcomes: ReadonlyMap<string, JobOutcome>;
@@ -123,7 +124,7 @@ export interface FinalMarketInput {
 
 /** Builds the per-market report shown by Auto Finish after a run. */
 export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketResult[] {
-    const { synced, allowedTypes, doneIds, completedJobs, resetByMarket, locks, outcomes, failedById, stopped, now, previousMarkets } = params;
+    const { synced, allowedTypes, doneIds, completedJobsByMarket, resetByMarket, locks, outcomes, failedById, stopped, now, previousMarkets } = params;
     const markets: AutoFinishMarketResult[] = synced.markets.map((market) => {
         const base = autoFinishMarketBase(market);
         if (!market.ok) {
@@ -163,7 +164,7 @@ export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketRes
             const failureError = failure?.error;
             const outcome = outcomes.get(job.id);
             const resetAt = resetByMarket.get(job.marketKey) ?? null;
-            const completedForReset = isCompletedForReset(job.id, completedJobs, resetAt);
+            const completedForReset = isCompletedForMarketReset(completedJobsByMarket, job.marketKey, job.id, resetAt);
             // Report a job as done when it completed in this run or earlier in
             // the same reset. This keeps the Done tag after claim-only passes
             // and after a market refresh failed in a later cycle.

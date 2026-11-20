@@ -169,13 +169,14 @@ describe('AutoJobsCoordinator reset completion', () => {
         canComplete: false,
     });
 
-    function coordinatorWithCompletedJobs(completedJobs: Readonly<Record<string, string>>) {
+    function coordinatorWithCompletedJobs(completedJobs: Readonly<Record<string, string>>, available = true) {
         const made = makeCoordinator({ helperMode: false, autoJobsEnabled: true, autoFinishEnabled: true });
         made.coordinator.attachAutoFinish({
             run: vi.fn(),
             lastRun: vi.fn(() => null),
             completedResetsSnapshot: () => ({}),
-            completedJobsSnapshot: () => completedJobs,
+            completedJobsByMarketSnapshot: () => ({ byMarket: { home: completedJobs } }),
+            completionsAvailable: () => available,
         } as unknown as AutoFinishPort);
         made.coordinator.publishSnapshot({
             at: 1,
@@ -226,6 +227,15 @@ describe('AutoJobsCoordinator reset completion', () => {
         });
         await made.coordinator.scheduleNextRefresh();
         expect(made.scheduler.create).toHaveBeenCalledWith(AUTO_JOBS_INFO_ALARM, { when: 601_000 });
+    });
+
+    it('does not treat an unavailable completion state as complete', async () => {
+        const { coordinator, scheduler } = coordinatorWithCompletedJobs({ 'new-job': resetAt }, false);
+        await coordinator.scheduleNextRefresh();
+        expect(scheduler.create).toHaveBeenCalledWith(AUTO_JOBS_INFO_ALARM, {
+            delayInMinutes: 60,
+            periodInMinutes: 60,
+        });
     });
 
     it('schedules the next reset only when every current job is completed for that reset', async () => {

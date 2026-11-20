@@ -70,6 +70,15 @@ export function sameJobStateKey(a: JobStateKey, b: JobStateKey): boolean {
     return jobStateKeyId(a) === jobStateKeyId(b);
 }
 
+/**
+ * Identity used for "this execution is active" checks. Reset is intentionally
+ * omitted because the live runner/queue progress does not carry it; marketKey +
+ * jobId still prevents cross-market collisions.
+ */
+export function jobActiveKey(marketKey: string, jobId: string): string {
+    return JSON.stringify([marketKey, jobId]);
+}
+
 export function normalizeJobStateRecord(record: JobStateRecord): JobStateRecord {
     const resetAt = normalizeJobStateResetAt(record.resetAt);
     return resetAt === record.resetAt ? record : { ...record, resetAt };

@@ -9,6 +9,8 @@ import { ChromeScheduler } from './chrome-scheduler.js';
 import { JobLockRegistry } from '../automation/job-locks.js';
 import { JobHistoryRecorder } from '../automation/job-outcome.js';
 import { JobStateRecorder } from '../../../application/auto-job/job-state-recorder.js';
+import { JobStateReconciler } from '../../../application/auto-job/job-state-reconciler.js';
+import { jobActiveKey } from '../../../contracts/job-state.js';
 import { JobRouting } from '../automation/job-routing.js';
 import { JobPreflight } from '../automation/job-preflight.js';
 import { JobMarketSync } from '../automation/job-market-sync.js';
@@ -57,6 +59,35 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
     const scheduler = new ChromeScheduler();
     const locks = new JobLockRegistry(stores.automationState, () => clock.now());
     const history = new JobHistoryRecorder(stores.jobHistory);
+    let autoFinishRef: AutoFinishCoordinator | null = null;
+    let queueRef: JobQueueCoordinator | null = null;
+    let autoJobsRef: AutoJobsCoordinator | null = null;
+    let autoJobsRunnerRef: AutoJobRunner | null = null;
+    const jobStates = new JobStateRecorder({
+        store: stores.jobState,
+        logger,
+        now: () => clock.now(),
+        resetAtForMarket: (marketKey) => {
+            const market = autoJobsRef?.snapshotView()?.markets.find((entry) => entry.marketKey === marketKey);
+            return market?.ok && market.stale !== true && typeof market.resetAt === 'string' && market.resetAt.length > 0
+                ? market.resetAt
+                : null;
+        },
+    });
+    const jobStateReconciler = new JobStateReconciler({
+        store: stores.jobState,
+        writer: jobStates,
+        completions: stores.marketCompletedJobs,
+        logger,
+        now: () => clock.now(),
+        isActive: (key) => {
+            const activeKey = jobActiveKey(key.marketKey, key.jobId);
+            const progress = autoFinishRef?.progressValue();
+            return autoJobsRunnerRef?.activeJobKeys().has(activeKey) === true
+                || queueRef?.activeJobKeys().has(activeKey) === true
+                || (progress !== null && progress !== undefined && jobActiveKey(progress.marketKey, progress.jobId) === activeKey);
+        },
+    });
 
     const routing = new JobRouting({
         snapshots: game.snapshots,
@@ -82,6 +113,9 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
         tabs,
         events,
         logger,
+        reconciler: jobStateReconciler,
+        completions: stores.marketCompletedJobs,
+        onCompletionsChanged: (state) => autoFinishRef?.applyCompletedByMarket(state),
         now: () => clock.now(),
         humanDelay,
     });
@@ -157,20 +191,6 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
         networkOps,
     });
 
-    let autoFinishRef: AutoFinishCoordinator | null = null;
-    let queueRef: JobQueueCoordinator | null = null;
-    let autoJobsRef: AutoJobsCoordinator | null = null;
-    const jobStates = new JobStateRecorder({
-        store: stores.jobState,
-        logger,
-        now: () => clock.now(),
-        resetAtForMarket: (marketKey) => {
-            const market = autoJobsRef?.snapshotView()?.markets.find((entry) => entry.marketKey === marketKey);
-            return market?.ok && market.stale !== true && typeof market.resetAt === 'string' && market.resetAt.length > 0
-                ? market.resetAt
-                : null;
-        },
-    });
     const jobExecution = new JobExecutionService(
         game.jobActions,
         (job) => routing.routeJobToMarket(job, 'complete'),
@@ -228,6 +248,7 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
         jobStates,
     );
     const autoJobsRunner = new AutoJobRunner(jobExecution);
+    autoJobsRunnerRef = autoJobsRunner;
     const autoJobsQueue = new AutoJobQueueService(autoJobsRunner);
 
     const queue = new JobQueueCoordinator({
@@ -251,6 +272,7 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
         runLogs,
         clock,
         store: stores.autoFinish,
+        completions: stores.marketCompletedJobs,
         locks,
         history,
         queue: autoJobsQueue,

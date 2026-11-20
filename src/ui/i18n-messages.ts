@@ -39,7 +39,8 @@ export const ZH_MESSAGES: Readonly<Record<string, string>> = {
     'skipped': '已跳过',
     'ready': '可领取',
     'updated {time} ago': '{time}前更新',
-    'Locks: {locks} · retry budgets: {retry} · completed: {completed}': '锁定 {locks} · 重试预算 {retry} · 已完成 {completed}',
+    'Locks: {locks} · retry budgets: {retry} · completed: {completed} · legacy unknown: {legacy}': '锁定 {locks} · 重试预算 {retry} · 已完成 {completed} · 旧记录归属未知 {legacy}',
+    'Completion state unavailable': '完成状态不可用',
 
     // Job market list
     '{count} job(s)': '{count} 个任务',

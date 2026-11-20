@@ -7,6 +7,7 @@ import { InfoTip } from '../../components/InfoTip.js';
 import { RefreshButton } from '../../components/RefreshButton.js';
 import { JobMarketList, type JobMarketView } from '../../components/JobMarketList.js';
 import { formatRemaining } from '../../format.js';
+import { countCompletionRecords } from '../../app/view-models/job-report.js';
 import { useT, type TranslateSource } from '../../i18n-context.js';
 
 export interface AutoJobsReportRow {
@@ -287,13 +288,16 @@ export function AutoJobsCard(props: AutoJobsCardProps) {
                     </summary>
                     <div class="v2-status-body">
                     <p class={`v2-muted ${jobStatusTone(jobStatus)}`}>{tr(jobStatus)}</p>
-                    {autoJobs && (Object.keys(autoJobs.locks).length > 0 || Object.keys(autoJobs.retryAttempts).length > 0 || Object.keys(autoFinish?.completedJobs ?? {}).length > 0) ? (
+                    {autoJobs && (Object.keys(autoJobs.locks).length > 0 || Object.keys(autoJobs.retryAttempts).length > 0 || autoFinish?.completionStateStatus === 'unavailable' || Object.values(autoFinish?.completedJobsByMarket.byMarket ?? {}).some((jobs) => Object.keys(jobs).length > 0) || Object.keys(autoFinish?.legacyCompletedJobs ?? {}).length > 0) ? (
                         <p class="v2-muted">
-                            {tr('Locks: {locks} · retry budgets: {retry} · completed: {completed}', {
-                                locks: Object.keys(autoJobs.locks).length,
-                                retry: Object.keys(autoJobs.retryAttempts).length,
-                                completed: Object.keys(autoFinish?.completedJobs ?? {}).length,
-                            })}
+                            {autoFinish?.completionStateStatus === 'unavailable'
+                                ? tr('Completion state unavailable')
+                                : tr('Locks: {locks} · retry budgets: {retry} · completed: {completed} · legacy unknown: {legacy}', {
+                                    locks: Object.keys(autoJobs.locks).length,
+                                    retry: Object.keys(autoJobs.retryAttempts).length,
+                                    completed: countCompletionRecords(autoFinish?.completedJobsByMarket ?? { byMarket: {} }, autoFinish?.legacyCompletedJobs ?? {}).marketScoped,
+                                    legacy: countCompletionRecords(autoFinish?.completedJobsByMarket ?? { byMarket: {} }, autoFinish?.legacyCompletedJobs ?? {}).legacyUnknown,
+                                })}
                         </p>
                     ) : null}
                     {jobProgress ? (

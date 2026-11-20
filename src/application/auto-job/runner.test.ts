@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { JobOffer } from '../../domains/jobs/model.js';
+import { jobActiveKey } from '../../contracts/job-state.js';
 import { AutoJobRunner } from './runner.js';
 
 const job: JobOffer = {
@@ -44,5 +45,23 @@ describe('AutoJobRunner', () => {
             serverName: null,
         });
         expect(result.ok).toBe(true);
+    });
+
+    it('tracks active executions by market and job id, not job id alone', async () => {
+        let release: (value: { ok: true; value: { credits: number; reputation: number; renown: number } }) => void = () => undefined;
+        const gate = new Promise<{ ok: true; value: { credits: number; reputation: number; renown: number } }>((resolve) => {
+            release = resolve;
+        });
+        const runner = new AutoJobRunner({
+            execute: () => gate,
+        });
+
+        const running = runner.run(job);
+        expect(runner.activeJobKeys().has(jobActiveKey('home', 'job1'))).toBe(true);
+        expect(runner.activeJobKeys().has(jobActiveKey('dark', 'job1'))).toBe(false);
+
+        release({ ok: true, value: { credits: 1, reputation: 1, renown: 1 } });
+        await running;
+        expect(runner.activeJobKeys().size).toBe(0);
     });
 });

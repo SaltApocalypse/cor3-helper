@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { JOB_MARKETS } from '../../../domains/jobs/markets.js';
 import type { NetworkServer, NetworkSnapshot } from '../../../domains/network/model.js';
 import { asServerId, type ServerId } from '../../../kernel/ids.js';
@@ -6,6 +6,9 @@ import { err, ok, type Result } from '../../../kernel/result.js';
 import type { MarketSyncError, MarketSyncRequest, MarketSyncResult, MarketSyncService } from '../../../application/network/market-sync.js';
 import { MarketCacheStore } from '../../../infrastructure/storage/market-cache-store.js';
 import { MemoryStorageArea } from '../../../infrastructure/storage/storage-area.js';
+import { JobStateStore } from '../../../infrastructure/storage/job-state-store.js';
+import { JobStateRecorder } from '../../../application/auto-job/job-state-recorder.js';
+import { JobStateReconciler } from '../../../application/auto-job/job-state-reconciler.js';
 import { JobMarketSync } from './job-market-sync.js';
 
 const home = asServerId('home');
@@ -284,5 +287,189 @@ describe('JobMarketSync continuous endpoint state', () => {
         const result = await harness.sync.syncAll('owner', 'auto-jobs', [JOB_MARKETS[0]!]);
         expect(harness.starts).toEqual([aEndpoint, refreshedEndpoint]);
         expect(result.markets[0]?.ok).toBe(true);
+    });
+});
+
+describe('JobMarketSync reconciliation trigger', () => {
+    function marketHarness(input: {
+        readonly sync: (request: MarketSyncRequest) => Promise<Result<MarketSyncResult, MarketSyncError>>;
+        readonly reconcile: (input: unknown) => Promise<unknown>;
+    }) {
+        return new JobMarketSync({
+            snapshots: { get: async () => ok(snapshot()) },
+            marketSync: { sync: async (request: MarketSyncRequest) => input.sync(request) } as unknown as MarketSyncService,
+            marketCache: new MarketCacheStore(new MemoryStorageArea()),
+            routing: { setEndpointIfNeeded: async () => ok(undefined) },
+            tabs: { findCor3Tab: async () => null, send: async () => null },
+            events: { publish: () => undefined },
+            logger: { debug: () => undefined, info: () => undefined, warn: () => undefined, error: () => undefined },
+            reconciler: { reconcile: input.reconcile } as never,
+            now: () => 1,
+            humanDelay: async () => undefined,
+        });
+    }
+
+    it('reconciles a successful market with mapped jobs, skipped jobs and reset', async () => {
+        const resetAt = '2026-11-20T11:00:00.000Z';
+        const reconcile = vi.fn(async () => ({
+            marketKey: JOB_MARKETS[0]!.key,
+            resetAt,
+            decisions: [],
+            updated: 0,
+            recoverable: [],
+            pending: 0,
+            conflicts: 0,
+            skippedActive: 0,
+            failedWrites: 0,
+            storeFailed: false,
+        }));
+        const sync = marketHarness({
+            reconcile,
+            sync: async () => ok({
+                snapshot: snapshot(),
+                route: [],
+                direct: true,
+                market: {
+                    options: {},
+                    lots: [],
+                    jobs: {
+                        jobs: [{
+                            id: 'open-job', name: 'IP Injection', jobType: 'IP_INJECTION',
+                            relatedServers: [{ id: 'server', serverName: 'Server' }],
+                        }],
+                        recentJobs: [
+                            { id: 'taken-job', name: 'IP Injection', jobType: 'IP_INJECTION', status: 'TAKEN', canComplete: true },
+                            { id: 'done-job', name: 'IP Injection', jobType: 'IP_INJECTION', isCompleted: true },
+                        ],
+                        nextJobsResetAt: resetAt,
+                    },
+                },
+            }),
+        });
+
+        await sync.syncAll('owner', 'auto-jobs', [JOB_MARKETS[0]!]);
+
+        expect(reconcile).toHaveBeenCalledTimes(1);
+        expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({
+            marketKey: JOB_MARKETS[0]!.key,
+            resetAt,
+            jobs: expect.arrayContaining([
+                expect.objectContaining({ id: 'open-job', alreadyTaken: false }),
+                expect.objectContaining({ id: 'taken-job', alreadyTaken: true, canComplete: true }),
+            ]),
+            skippedJobs: [expect.objectContaining({ id: 'done-job', status: 'completed' })],
+        }));
+    });
+
+    it('does not reconcile a failed market snapshot', async () => {
+        const reconcile = vi.fn(async () => ({
+            marketKey: JOB_MARKETS[0]!.key,
+            resetAt: null,
+            decisions: [],
+            updated: 0,
+            recoverable: [],
+            pending: 0,
+            conflicts: 0,
+            skippedActive: 0,
+            failedWrites: 0,
+            storeFailed: false,
+        }));
+        const sync = marketHarness({
+            reconcile,
+            sync: async () => err({ code: 'ROUTE_FAILED', message: 'Target in maintenance' }),
+        });
+
+        await sync.syncAll('owner', 'auto-jobs', [JOB_MARKETS[0]!]);
+
+        expect(reconcile).not.toHaveBeenCalled();
+    });
+});
+
+describe('JobMarketSync failed sync keeps local lifecycle state', () => {
+    it('does not change a taking record when the market snapshot fails', async () => {
+        const area = new MemoryStorageArea();
+        const store = new JobStateStore(area, { now: () => 1 });
+        const resetAt = '2026-11-20T11:00:00.000Z';
+        await store.upsert({
+            marketKey: JOB_MARKETS[0]!.key,
+            jobId: 'taking-job',
+            resetAt,
+            status: 'taking',
+            createdAt: '1970-01-01T00:00:00.001Z',
+            updatedAt: '1970-01-01T00:00:00.001Z',
+            lastTransitionAt: '1970-01-01T00:00:00.001Z',
+        });
+        const log = { debug: () => undefined, info: () => undefined, warn: () => undefined, error: () => undefined };
+        const recorder = new JobStateRecorder({ store, logger: log, now: () => 1 });
+        const reconciler = new JobStateReconciler({ store, writer: recorder, logger: log, now: () => 1 });
+        const sync = new JobMarketSync({
+            snapshots: { get: async () => ok(snapshot()) },
+            marketSync: { sync: async () => err({ code: 'ROUTE_FAILED', message: 'Target in maintenance' }) } as unknown as MarketSyncService,
+            marketCache: new MarketCacheStore(new MemoryStorageArea()),
+            routing: { setEndpointIfNeeded: async () => ok(undefined) },
+            tabs: { findCor3Tab: async () => null, send: async () => null },
+            events: { publish: () => undefined },
+            logger: log,
+            reconciler,
+            now: () => 1,
+            humanDelay: async () => undefined,
+        });
+
+        await sync.syncAll('owner', 'auto-jobs', [JOB_MARKETS[0]!]);
+
+        expect((await store.get({ marketKey: JOB_MARKETS[0]!.key, jobId: 'taking-job', resetAt }))?.status).toBe('taking');
+    });
+});
+
+describe('JobMarketSync completion reset pruning', () => {
+    it('prunes only after a successful market with a known reset', async () => {
+        const resetAt = '2026-11-20T11:00:00.000Z';
+        const prune = vi.fn(async () => ({ status: 'pruned' as const, removed: 2, state: { byMarket: { home: {} } } }));
+        const changed = vi.fn();
+        const sync = new JobMarketSync({
+            snapshots: { get: async () => ok(snapshot()) },
+            marketSync: {
+                sync: async () => ok({
+                    snapshot: snapshot(),
+                    route: [],
+                    direct: true,
+                    market: { options: {}, lots: [], jobs: { jobs: [], recentJobs: [], nextJobsResetAt: resetAt } },
+                }),
+            } as unknown as MarketSyncService,
+            marketCache: new MarketCacheStore(new MemoryStorageArea()),
+            routing: { setEndpointIfNeeded: async () => ok(undefined) },
+            tabs: { findCor3Tab: async () => null, send: async () => null },
+            events: { publish: () => undefined },
+            logger: { debug: () => undefined, info: () => undefined, warn: () => undefined, error: () => undefined },
+            completions: { pruneMarketBeforeReset: prune },
+            onCompletionsChanged: changed,
+            now: () => 1,
+            humanDelay: async () => undefined,
+        });
+
+        await sync.syncAll('owner', 'auto-jobs', [JOB_MARKETS[0]!]);
+
+        expect(prune).toHaveBeenCalledWith(JOB_MARKETS[0]!.key, resetAt);
+        expect(changed).toHaveBeenCalledWith({ byMarket: { home: {} } });
+    });
+
+    it('does not prune when the market sync fails', async () => {
+        const prune = vi.fn(async () => ({ status: 'pruned' as const, removed: 0, state: { byMarket: {} } }));
+        const sync = new JobMarketSync({
+            snapshots: { get: async () => ok(snapshot()) },
+            marketSync: { sync: async () => err({ code: 'ROUTE_FAILED', message: 'Target in maintenance' }) } as unknown as MarketSyncService,
+            marketCache: new MarketCacheStore(new MemoryStorageArea()),
+            routing: { setEndpointIfNeeded: async () => ok(undefined) },
+            tabs: { findCor3Tab: async () => null, send: async () => null },
+            events: { publish: () => undefined },
+            logger: { debug: () => undefined, info: () => undefined, warn: () => undefined, error: () => undefined },
+            completions: { pruneMarketBeforeReset: prune },
+            now: () => 1,
+            humanDelay: async () => undefined,
+        });
+
+        await sync.syncAll('owner', 'auto-jobs', [JOB_MARKETS[0]!]);
+
+        expect(prune).not.toHaveBeenCalled();
     });
 });

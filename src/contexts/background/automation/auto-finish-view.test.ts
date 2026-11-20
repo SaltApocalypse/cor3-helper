@@ -74,7 +74,7 @@ describe('Auto Finish job-level completion', () => {
             },
             allowedTypes: new Set(['Data Upload']),
             doneIds: new Set(),
-            completedJobs: { 'old-job': resetAt },
+            completedJobsByMarket: { byMarket: { home: { 'old-job': resetAt } } },
             resetByMarket: new Map([['home', resetAt]]),
             locks,
             outcomes: new Map(),
@@ -101,7 +101,7 @@ describe('Auto Finish job-level completion', () => {
             synced: { jobs: [], markets: [failedMarket] },
             allowedTypes: new Set(['Data Upload']),
             doneIds: new Set(),
-            completedJobs: {},
+            completedJobsByMarket: { byMarket: {} },
             resetByMarket: new Map(),
             locks,
             outcomes: new Map(),
@@ -129,7 +129,7 @@ describe('Auto Finish job-level completion', () => {
             },
             allowedTypes: new Set(['Data Upload']),
             doneIds: new Set(),
-            completedJobs: {},
+            completedJobsByMarket: { byMarket: {} },
             resetByMarket: new Map([['home', resetAt]]),
             locks,
             outcomes: new Map(),
@@ -156,7 +156,7 @@ describe('Auto Finish job-level completion', () => {
             },
             allowedTypes: new Set(['File Decryption']),
             doneIds: new Set(),
-            completedJobs: {},
+            completedJobsByMarket: { byMarket: {} },
             resetByMarket: new Map([['home', resetAt]]),
             locks: jobLocks,
             outcomes: new Map(),
@@ -189,7 +189,7 @@ describe('Auto Finish job-level completion', () => {
             },
             allowedTypes: new Set(['File Decryption']),
             doneIds: new Set(),
-            completedJobs: {},
+            completedJobsByMarket: { byMarket: {} },
             resetByMarket: new Map([['home', resetAt], ['dark', resetAt]]),
             locks: jobLocks,
             outcomes: new Map(),
@@ -201,6 +201,31 @@ describe('Auto Finish job-level completion', () => {
         expect(markets.find((market) => market.marketKey === 'dark')?.jobs?.[0]?.status).toBe('pending');
     });
 
+    it('does not suppress the same job id in a different market', () => {
+        const darkJob: JobOffer = { ...job('shared'), marketKey: 'dark', marketId: 'dark-market' };
+        const markets = buildFinalMarkets({
+            synced: {
+                jobs: [job('shared'), darkJob],
+                markets: [
+                    { marketKey: 'home', label: 'HOME', ok: true, skipped: 0, resetAt },
+                    { marketKey: 'dark', label: 'DARK', ok: true, skipped: 0, resetAt },
+                ],
+            },
+            allowedTypes: new Set(['Data Upload']),
+            doneIds: new Set(),
+            completedJobsByMarket: { byMarket: { home: { shared: resetAt } } },
+            resetByMarket: new Map([['home', resetAt], ['dark', resetAt]]),
+            locks,
+            outcomes: new Map(),
+            failedById: new Map(),
+            stopped: false,
+            now: 1,
+        });
+
+        expect(markets.find((market) => market.marketKey === 'home')?.jobs?.[0]?.status).toBe('done');
+        expect(markets.find((market) => market.marketKey === 'dark')?.jobs?.[0]?.status).toBe('pending');
+    });
+
     it('keeps a completed job suppressed when the current reset is unknown', () => {
         const markets = buildFinalMarkets({
             synced: {
@@ -209,7 +234,7 @@ describe('Auto Finish job-level completion', () => {
             },
             allowedTypes: new Set(['Data Upload']),
             doneIds: new Set(),
-            completedJobs: { 'completed-job': 'reset-a' },
+            completedJobsByMarket: { byMarket: { home: { 'completed-job': 'reset-a' } } },
             resetByMarket: new Map(),
             locks,
             outcomes: new Map(),
@@ -228,7 +253,7 @@ describe('Auto Finish job-level completion', () => {
             },
             allowedTypes: new Set(['Data Upload']),
             doneIds: new Set(),
-            completedJobs: { 'completed-job': 'reset-a' },
+            completedJobsByMarket: { byMarket: { home: { 'completed-job': 'reset-a' } } },
             resetByMarket: new Map([['home', 'reset-b']]),
             locks,
             outcomes: new Map(),
@@ -251,7 +276,7 @@ describe('Auto Finish job-level completion', () => {
             synced: { jobs: [], markets: [failedMarket] },
             allowedTypes: new Set(['File Decryption']),
             doneIds: new Set(['claimed']),
-            completedJobs: {},
+            completedJobsByMarket: { byMarket: {} },
             resetByMarket: new Map(),
             locks,
             outcomes: new Map(),

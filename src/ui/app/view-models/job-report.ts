@@ -3,6 +3,8 @@ import type { AutoJobsMarket } from '../../../contracts/auto-jobs.js';
 import { JOB_MARKETS, jobMarketByKey, type JobOffer } from '../../../application/popup/catalog.js';
 import type { JobQueueResult } from '../../../application/popup/portal.js';
 import { isExpiredJobFailureText } from '../../../application/auto-job/expiry.js';
+import { isCompletedForMarketReset } from '../../../application/auto-job/market-completion.js';
+import { EMPTY_MARKET_COMPLETED_JOBS, type MarketCompletedJobsState } from '../../../contracts/market-completed-jobs.js';
 import type { JobMarketView } from '../../components/JobMarketList.js';
 
 /**
@@ -151,33 +153,43 @@ export function classifyJobQueueResult(
     };
 }
 
+/** Composite key so the same job id in different markets cannot share a UI tag. */
+export function jobStatusKey(marketKey: string, jobId: string): string {
+    return `${marketKey}\u0000${jobId}`;
+}
+
 /** Merges Auto Finish per-job statuses with the manual queue statuses. */
 export function buildJobStatusById(
     autoFinishEnabled: boolean,
     autoRunMarkets: readonly AutoFinishMarketResult[],
     jobRunStatusById: Readonly<Record<string, JobRunStatus | undefined>>,
     extras: {
-        readonly completedJobs?: Readonly<Record<string, string>>;
+        readonly completedJobsByMarket?: MarketCompletedJobsState;
         readonly resetByMarket?: Readonly<Record<string, string | null>>;
         readonly jobsByMarket?: Readonly<Record<string, readonly JobOffer[]>>;
     } = {},
 ): Record<string, string> {
     const result: Record<string, string> = {};
-    const completedJobs = extras.completedJobs ?? {};
+    const completedJobsByMarket = extras.completedJobsByMarket ?? EMPTY_MARKET_COMPLETED_JOBS;
     const jobsByMarket = extras.jobsByMarket ?? {};
+    const keysByJobId = new Map<string, string[]>();
+    const setStatusKey = (marketKey: string, jobId: string, status: string): string => {
+        const key = jobStatusKey(marketKey, jobId);
+        result[key] = status;
+        const keys = keysByJobId.get(jobId) ?? [];
+        if (!keys.includes(key)) keys.push(key);
+        keysByJobId.set(jobId, keys);
+        return key;
+    };
     // A completed job keeps its Done tag even when a later market refresh
     // failed or the run was skipped. This is the persisted truth, not a report.
     const completedIds = new Set<string>();
     for (const [marketKey, jobs] of Object.entries(jobsByMarket)) {
         const currentReset = extras.resetByMarket?.[marketKey] ?? null;
         for (const job of jobs) {
-            const completedReset = completedJobs[job.id];
-            if (completedReset === undefined) continue;
-            // A completed entry from a previous market reset must not tag a
-            // newly generated job. When the reset is unknown, keep the tag.
-            if (currentReset !== null && completedReset !== currentReset) continue;
-            result[job.id] = 'done';
-            completedIds.add(job.id);
+            if (!isCompletedForMarketReset(completedJobsByMarket, marketKey, job.id, currentReset)) continue;
+            const key = setStatusKey(marketKey, job.id, 'done');
+            completedIds.add(key);
         }
     }
     if (autoFinishEnabled) {
@@ -186,20 +198,26 @@ export function buildJobStatusById(
             // stale `skipped`/`pending` entries overwrite a persisted Done.
             const staleMarket = market.stale === true || market.ok === false;
             for (const job of market.jobs ?? []) {
-                if (completedIds.has(job.jobId)) continue;
-                if (staleMarket && result[job.jobId] === 'done') continue;
-                result[job.jobId] = job.code === 'EXPIRED' || job.status === 'expired' ? 'expired' : job.status;
+                const key = jobStatusKey(market.marketKey, job.jobId);
+                if (completedIds.has(key)) continue;
+                if (staleMarket && result[key] === 'done') continue;
+                setStatusKey(market.marketKey, job.jobId, job.code === 'EXPIRED' || job.status === 'expired' ? 'expired' : job.status);
             }
         }
     }
     for (const [jobId, status] of Object.entries(jobRunStatusById)) {
-        if (status !== undefined) result[jobId] = status;
+        if (status === undefined) continue;
+        result[jobId] = status;
+        // Manual queue status is jobId-only; keep it overriding every visible
+        // market entry with that id, matching the existing queue semantics.
+        for (const key of keysByJobId.get(jobId) ?? []) result[key] = status;
     }
     // Last resort: a claimable row with no report entry still needs a tag.
-    for (const jobs of Object.values(jobsByMarket)) {
+    for (const [marketKey, jobs] of Object.entries(jobsByMarket)) {
         for (const job of jobs) {
-            if (result[job.id] !== undefined) continue;
-            if (job.alreadyTaken && job.canComplete) result[job.id] = 'ready';
+            const key = jobStatusKey(marketKey, job.id);
+            if (result[key] !== undefined || result[job.id] !== undefined) continue;
+            if (job.alreadyTaken && job.canComplete) setStatusKey(marketKey, job.id, 'ready');
         }
     }
     return result;
@@ -214,7 +232,7 @@ export function buildJobReasonById(
     if (!autoFinishEnabled) return result;
     for (const market of autoRunMarkets) {
         for (const job of market.jobs ?? []) {
-            if (job.error) result[job.jobId] = job.error;
+            if (job.error) result[jobStatusKey(market.marketKey, job.jobId)] = job.error;
         }
     }
     return result;
@@ -269,4 +287,19 @@ export function resetAtByMarket(
         if (market.ok || market.resetAt) resets[market.marketKey] = market.resetAt ?? null;
     }
     return resets;
+}
+
+export interface CompletionCounts {
+    readonly marketScoped: number;
+    readonly legacyUnknown: number;
+}
+
+/** Completion counts keep legacy jobId-only records separate from market data. */
+export function countCompletionRecords(
+    completedByMarket: MarketCompletedJobsState,
+    legacyCompletedJobs: Readonly<Record<string, string>>,
+): CompletionCounts {
+    const marketScoped = Object.values(completedByMarket.byMarket)
+        .reduce((sum, jobs) => sum + Object.keys(jobs).length, 0);
+    return { marketScoped, legacyUnknown: Object.keys(legacyCompletedJobs).length };
 }

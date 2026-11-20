@@ -1,4 +1,5 @@
 import type { JobOffer } from '../../../domains/jobs/model.js';
+import { jobActiveKey } from '../../../contracts/job-state.js';
 import type { AutoJobProgress, AutoJobQueueFailure, AutoJobQueueService } from '../../../application/auto-job/queue.js';
 import type { NetworkOperationQueue } from '../../../application/network/operation-queue.js';
 import type { NetworkSnapshotService } from '../../../application/network/snapshot-service.js';
@@ -77,6 +78,17 @@ export class JobQueueCoordinator {
 
     runningCount(): number {
         return [...this.runs.values()].filter((state) => state.status === 'running').length;
+    }
+
+    /** Active executions keyed by market + job id. */
+    activeJobKeys(): ReadonlySet<string> {
+        const keys = new Set<string>();
+        for (const state of this.runs.values()) {
+            if (state.status === 'running' && state.progress) {
+                keys.add(jobActiveKey(state.progress.marketKey, state.progress.jobId));
+            }
+        }
+        return keys;
     }
 
     cancel(runId: string): void {

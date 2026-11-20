@@ -6,6 +6,8 @@ import { JOB_MARKETS, type JobMarketDefinition } from '../../../domains/jobs/mar
 import { mapMarketSnapshotJobs } from '../../../application/auto-job/market-mapper.js';
 import { syncAllJobMarkets, syncJobMarket, type JobSnapshotSyncDeps } from './auto-jobs-sync.js';
 import { mergeAutoJobsSnapshot } from '../../../application/auto-job/snapshot.js';
+import { isCompletedForMarketReset } from '../../../application/auto-job/market-completion.js';
+import type { MarketCompletedJobsState } from '../../../contracts/market-completed-jobs.js';
 import type { NetworkOperationQueue } from '../../../application/network/operation-queue.js';
 import type { AutomationLogger, EventPublisher, RunLogSink, SchedulerPort, SettingsPort } from '../../../application/automation/ports.js';
 import type { AutoJobsSnapshotStore } from '../../../infrastructure/storage/auto-jobs-snapshot-store.js';
@@ -33,7 +35,8 @@ export interface AutoFinishPort {
     ): Promise<AutoFinishRunResult | { readonly busy: true }>;
     lastRun(): AutoFinishLastRun | null;
     completedResetsSnapshot(): Readonly<Record<string, string>>;
-    completedJobsSnapshot(): Readonly<Record<string, string>>;
+    completedJobsByMarketSnapshot(): MarketCompletedJobsState;
+    completionsAvailable(): boolean;
 }
 
 export interface AutoJobsDeps {
@@ -508,14 +511,14 @@ export class AutoJobsCoordinator {
             && new Date(market.resetAt).getTime() > now,
         );
         if (active.length !== snapshot.markets.length) return false;
-        const completedJobs = this.autoFinish?.completedJobsSnapshot() ?? {};
-        // Completion is tracked per job, not per market. A market can gain new
-        // jobs inside the same reset; those must still be processed. Empty
-        // markets are not considered finished so the next interval can find
-        // newly generated work.
+        if (this.autoFinish && !this.autoFinish.completionsAvailable()) return false;
+        const completedByMarket = this.autoFinish?.completedJobsByMarketSnapshot() ?? { byMarket: {} };
+        // Completion is tracked per market/job, not per job id alone. A market
+        // can gain new jobs inside the same reset; those must still be processed.
         return active.every((market) => {
             const jobs = snapshot.jobs.filter((job) => job.marketKey === market.marketKey);
-            return jobs.length > 0 && jobs.every((job) => completedJobs[job.id] === market.resetAt);
+            return jobs.length > 0 && jobs.every((job) =>
+                isCompletedForMarketReset(completedByMarket, market.marketKey, job.id, market.resetAt ?? null));
         });
     }
 

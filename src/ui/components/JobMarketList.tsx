@@ -50,6 +50,10 @@ function formatRemaining(timestamp: string | null, now: number): string {
     return `${hours}h ${minutes}m ${seconds}s`;
 }
 
+function statusKey(marketKey: string, jobId: string): string {
+    return `${marketKey}\u0000${jobId}`;
+}
+
 function statusRank(status: string | undefined): number {
     if (status === 'running') return 0;
     if (status === 'pending') return 1;
@@ -110,14 +114,18 @@ export function JobMarketList({
     const active = markets.find((entry) => entry.market.key === activeKey) ?? null;
     if (!active) return <p class="v2-muted">{emptyText ?? tr('No jobs loaded for this market.')}</p>;
 
+    const statusFor = (jobId: string): string | undefined =>
+        statusById?.[statusKey(active.market.key, jobId)] ?? statusById?.[jobId];
+    const statusReasonFor = (jobId: string): string | undefined =>
+        statusReasonById?.[statusKey(active.market.key, jobId)] ?? statusReasonById?.[jobId];
     const sortedJobs = [...active.jobs].sort((left, right) => {
-        const rank = statusRank(statusById?.[left.id]) - statusRank(statusById?.[right.id]);
+        const rank = statusRank(statusFor(left.id)) - statusRank(statusFor(right.id));
         return rank !== 0 ? rank : left.name.localeCompare(right.name);
     });
     const allSelected = sortedJobs.length > 0 && sortedJobs.every((job) => selectedIds?.has(job.id));
-    const failedCount = active.failed + sortedJobs.filter((job) => statusById?.[job.id] === 'failed').length;
-    const expiredCount = active.expired + sortedJobs.filter((job) => statusById?.[job.id] === 'expired').length;
-    const retryCount = sortedJobs.filter((job) => statusById?.[job.id] === 'retry').length;
+    const failedCount = active.failed + sortedJobs.filter((job) => statusFor(job.id) === 'failed').length;
+    const expiredCount = active.expired + sortedJobs.filter((job) => statusFor(job.id) === 'expired').length;
+    const retryCount = sortedJobs.filter((job) => statusFor(job.id) === 'retry').length;
     const resetLabel = formatRemaining(active.resetAt, now);
 
     return (
@@ -148,7 +156,7 @@ export function JobMarketList({
             {sortedJobs.length > 0 || active.skippedJobs.length > 0 ? (
                 <ul class="v2-job-list">
                     {sortedJobs.map((job) => {
-                        const status = statusById?.[job.id];
+                        const status = statusFor(job.id);
                         const selected = selectedIds?.has(job.id) ?? false;
                         const content = (
                             <span class="v2-job-main">
@@ -175,7 +183,7 @@ export function JobMarketList({
                                 {status ? (
                                     <span
                                         class={`v2-tag ${statusClass(status)}`}
-                                        title={statusReasonById?.[job.id]}
+                                        title={statusReasonFor(job.id)}
                                     >
                                         {tr(status)}
                                     </span>
