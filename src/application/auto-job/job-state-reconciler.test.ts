@@ -410,9 +410,70 @@ describe('JobStateReconciler completion bridge', () => {
         });
 
         expect(result.completionWrites).toBe(0);
+        expect(result.completionFailures).toBe(1);
         expect(result.decisions[0]?.completionStatus).toBe('skipped-unknown-reset');
+        expect(result.decisions[0]?.outcome).toBe('pending');
         expect(await made.completions.getState()).toEqual({ byMarket: {} });
-        expect((await made.store.get({ marketKey: 'home', jobId: 'job-1', resetAt: null }))?.status).toBe('completed');
+        expect((await made.store.get({ marketKey: 'home', jobId: 'job-1', resetAt: null }))?.status).toBe('claiming');
+    });
+
+    it('keeps an unconfirmed completion blocked on a claimable remote row', async () => {
+        const made = await harness([record({ jobId: 'job-1', status: 'unknown', unconfirmed: true })]);
+
+        const result = await made.reconciler.reconcile({
+            marketKey: 'home',
+            resetAt: resetA,
+            observedAt,
+            jobs: [job('job-1', { alreadyTaken: true, canComplete: true })],
+        });
+
+        expect(result.decisions[0]).toMatchObject({
+            previousStatus: 'unknown',
+            observation: 'taken-claimable',
+            outcome: 'pending',
+            reason: 'complete-result-unknown',
+        });
+        expect((await made.store.get({ marketKey: 'home', jobId: 'job-1', resetAt: resetA })))
+            .toMatchObject({ status: 'unknown', unconfirmed: true });
+        expect(await made.completions.getState()).toEqual({ byMarket: {} });
+    });
+
+    it('treats a legacy unknown COMPLETE_FAILED record as completion-uncertain', async () => {
+        const made = await harness([record({
+            jobId: 'job-1', status: 'unknown', errorCode: 'COMPLETE_FAILED',
+        })]);
+
+        const result = await made.reconciler.reconcile({
+            marketKey: 'home',
+            resetAt: resetA,
+            observedAt,
+            jobs: [job('job-1', { alreadyTaken: true, canComplete: true })],
+        });
+
+        expect(result.decisions[0]).toMatchObject({
+            outcome: 'pending',
+            reason: 'complete-result-unknown',
+        });
+        expect((await made.store.get({ marketKey: 'home', jobId: 'job-1', resetAt: resetA }))?.status).toBe('unknown');
+    });
+
+    it('recovers a durable barrier that has no Job State record', async () => {
+        const completions = new MarketCompletedJobsStore(new MemoryStorageArea(), { now: () => observedAt });
+        await completions.markUnconfirmed({ marketKey: 'home', jobId: 'job-1', resetAt: resetA });
+        const made = await harness([], { completions });
+
+        const result = await made.reconciler.reconcile({
+            marketKey: 'home',
+            resetAt: resetA,
+            observedAt,
+            jobs: [],
+            skippedJobs: [{ id: 'job-1', name: 'job', serverName: null, status: 'completed', reason: 'completed' }],
+        });
+
+        expect(result.completionWrites).toBe(1);
+        expect(await completions.getCompletion('home', 'job-1')).toBe(resetA);
+        expect(await completions.getUnconfirmedState()).toEqual({});
+        expect((await made.store.get({ marketKey: 'home', jobId: 'job-1', resetAt: resetA }))?.status).toBe('completed');
     });
 
     it('isolates the same job id across markets', async () => {

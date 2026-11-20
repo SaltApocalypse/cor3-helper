@@ -5,15 +5,15 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-15 against build `2.0.6-salta.293`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (106 files / 611 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-21 against build `2.0.6-salta.306`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (111 files / 719 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.6-salta.293`)
+## Current completion snapshot (build `2.0.6-salta.306`)
 
 | Metric | Value |
 |---|---|
-| TypeScript/TSX source files | 437 (including 106 test files) |
-| Files under `src/` | 446 (vendored JavaScript is limited to `src/libs/`) |
+| TypeScript/TSX source files | 440 (including 108 test files) |
+| Files under `src/` | 448 (vendored JavaScript is limited to `src/libs/`) |
 | v1 parity rows with a status | 147 |
 | Implemented / improved | 89 |
 | Partial | 37 |
@@ -358,7 +358,7 @@ Reading the numbers:
 | H7 | Job schema assumption | `application/auto-job/market-mapper.ts` validates `raw.name` against `JOB_TYPES` and sets `type: raw.name`; ignores `raw.jobType`. | Localization/rename silently marks every job unsupported. | Map from machine `jobType`; keep display names separate; fixtures for localized rows. |
 | H8 | Background god module | `contexts/background/index.ts` ~4,575 lines, ~98 handlers plus alarms/routing/business logic. `SidePanelApp.tsx` ~1,860 lines. | High merge/regression risk; hard to test. | Split into context composition + per-automation application services; small handler modules. |
 | H9 | Persistence/versioning | Unversioned stores: `daily-ops-cache-store`, `drone-data-cache-store`, `expedition-config-cache-store`, `feature-availability-store`, `automation-state-store`. `versioned-repository` discards incompatible data with no migration. `contracts/storage.ts` makes settings enums depend on `JOB_TYPES`. | Caches/settings silently reset; removing a job type invalidates all settings. | Version every persisted value; idempotent migrations; decouple settings from domain enums. |
-| H10 | Untested critical paths | 106 test files vs 437 TypeScript/TSX source files (446 files under `src/`). The dev.230 pass added a decrypt-pipeline integration test, store-migration tests and an architecture-boundary test, but background/content/portal orchestration and UI rendering still lack integration tests. Vitest uses node env; no coverage thresholds/fake timers. | Orchestration/races/migrations regress invisibly; UI mostly untestable. | Integration tests with fake tab transport/clock; migration/redaction tests; jsdom component tests. |
+| H10 | Untested critical paths | 108 test files vs 440 TypeScript/TSX source files (448 files under `src/`). The dev.230 pass added a decrypt-pipeline integration test, store-migration tests and an architecture-boundary test, but background/content/portal orchestration and UI rendering still lack integration tests. Vitest uses node env; no coverage thresholds/fake timers. | Orchestration/races/migrations regress invisibly; UI mostly untestable. | Integration tests with fake tab transport/clock; migration/redaction tests; jsdom component tests. |
 
 ## Medium severity
 
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 106 files / 611 tests pass
-- `npm run build` — pass, `2.0.6-salta.293`
+- `npm test` — 111 files / 719 tests pass
+- `npm run build` — pass, `2.0.6-salta.306`
 
 ---
 
@@ -736,7 +736,7 @@ Fixes:
 
 - typecheck / lint pass
 - 80 test files / 355 tests
-- build `2.0.6-salta.293`
+- build `2.0.6-salta.297`
 
 ---
 
@@ -1083,7 +1083,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 40 — Auto Jobs state truth, retry policy and market freshness (2.0.6-salta.293)
+# Part 40 — Auto Jobs state truth, retry policy and market freshness (2.0.6-salta.297)
 
 - Every Auto Finish cycle now persists and publishes a report, including "nothing runnable" passes. Previously a blocked cycle returned early, so the UI kept the previous run report and could show a claimable job with no tag at all.
 - Job status tags are derived from persisted completion state (`completedJobs`) first, then the latest run report, then the live snapshot (`ready to claim`). A completed job always shows `done` for its market reset.
@@ -1097,7 +1097,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 41 — Per-market refresh and push-first cache (2.0.6-salta.293)
+# Part 41 — Per-market refresh and push-first cache (2.0.6-salta.297)
 
 - Auto Jobs no longer refresh all four markets on every trigger. `ensureInfo` selects only markets whose `updatedAt` is older than their TTL: 60 seconds in steady state, 15 seconds within two minutes of a known reset. A recent game push therefore makes a ready/scheduled pass a no-op.
 - A trigger that arrives while a cycle is running is coalesced and re-checked after the cycle instead of being dropped.
@@ -1109,7 +1109,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 42 — Decrypt file matching, minigame locks and worker log noise (2.0.6-salta.293)
+# Part 42 — Decrypt file matching, minigame locks and worker log noise (2.0.6-salta.297)
 
 - A downloaded encrypted file is now matched to a job by the base name from its decrypt conditions as well as the file id/name. Previously `Decrypt & Extract` tried to match `export_9724.txt` against `export_9724.ab52p`, found nothing, and then attempted completion, producing `job-conditions-not-met`.
 - The `alreadyTaken` completion fallback for a missing decrypt file was removed. It masked the real file-matching failure and consumed retry budgets.
@@ -1122,7 +1122,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 43 — Phase 1: file-scoped minigame locks and market-task solver behavior (2.0.6-salta.293)
+# Part 43 — Phase 1: file-scoped minigame locks and market-task solver behavior (2.0.6-salta.297)
 
 - Removed the global minigame-lock gate from Auto Finish, job preflight and the execution pre-take path. A lock now only blocks the job that owns it (`JobLockRegistry`); the game protocol exposes a single lock timestamp without a file/job id, so it is never interpreted as a lock for every decrypt job.
 - Market-task automation always calls the minigame solver. The auto-solver switches (`autoDecryptEnabled`, `autoIceWallEnabled`, `autoSimpleDecryptEnabled`) only control the background tick that reacts to minigames opened outside a market task; `JobPreflight` and the market-task execution path no longer read them.
@@ -1133,7 +1133,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 44 — Phase 2A: run semantics, reset reconciliation and unknown reset (2.0.6-salta.293)
+# Part 44 — Phase 2A: run semantics, reset reconciliation and unknown reset (2.0.6-salta.297)
 
 - `AutoFinishRunOptions` separates `forceRefresh`, `retryFailed`/`resetRetryBudget` and `clearLocalState`. A force refresh reloads market data but preserves `completedResets`/`completedJobs`; only `clearLocalState` clears completion records. `retryFailed`/`resetRetryBudget` clear retry attempts and locks without touching completions.
 - The bridge `auto-finish.run` keeps its `force` boolean and maps it to `forceRefresh` only.
@@ -1144,7 +1144,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 45 — Phase 2B: continuous Endpoint snapshot propagation (2.0.6-salta.293)
+# Part 45 — Phase 2B: continuous Endpoint snapshot propagation (2.0.6-salta.297)
 
 - `RouteExecutor` reports `finalEndpoint`: the target on success, and the last intermediate or starting endpoint actually confirmed on failure. An unconfirmed target is never reported.
 - `MarketSyncService` forwards the confirmed endpoint on success and on `MARKET_FETCH_FAILED`/`ROUTE_FAILED`, so a market request failure does not discard the position reached by routing.
@@ -1155,7 +1155,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 46 — Phase 3A: Job State Store and lifecycle records (2.0.6-salta.293)
+# Part 46 — Phase 3A: Job State Store and lifecycle records (2.0.6-salta.297)
 
 - Added a durable local `JobStateStore` for per-job lifecycle records. It does not replace Auto Jobs snapshots, `completedJobs`/`completedResets`, `JobLockRegistry`, game `recentJobs` or `canComplete`; it exists to give Phase 3B a local history for reconciliation.
 - Identity is `{ marketKey, jobId, resetAt }`. Records are isolated by market and reset; `null` and Phase 2A's `'unknown'` reset both normalize to an unknown key and never match a known ISO reset.
@@ -1168,7 +1168,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 47 — Phase 3B: job state reconciliation and recovery (2.0.6-salta.293)
+# Part 47 — Phase 3B: job state reconciliation and recovery (2.0.6-salta.297)
 
 - Added `JobStateReconciler`, an application component that compares local lifecycle records with one successful, non-stale market snapshot. It never sends take/complete and never creates a recovery queue.
 - Game evidence used: active market rows (`alreadyTaken`, `canComplete`) and explicit `skippedJobs` statuses (`completed`, `expired`, `failed`). Absence from both lists is treated as insufficient evidence and stays `pending` for protected local states.
@@ -1183,7 +1183,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 48 — Phase 3B.1: reconciliation boundary review (2.0.6-salta.293)
+# Part 48 — Phase 3B.1: reconciliation boundary review (2.0.6-salta.297)
 
 - Tightened the `available` observation: `taking`, `taken`, `executing`, `waiting-minigame`, `ready-to-claim`, `claiming` and `unknown` now stay `pending` instead of being rewritten to `available`. A successful open row does not prove that an earlier take/complete request never reached the game, and treating it as proof invited duplicate-request risk.
 - Non-protected states keep the existing behavior: `blocked`/`failed`/`expired` may reconcile to `available`; a local `completed` record still conflicts and is never cleared.
@@ -1195,7 +1195,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 49 — Phase 3C.1: single completion write API (2.0.6-salta.293)
+# Part 49 — Phase 3C.1: single completion write API (2.0.6-salta.297)
 
 - Added `CompletionRecordWriter`, an application-layer single-record API over the existing `completedJobs` map. It validates a non-empty market/job and a known reset, rejects `null`/`'unknown'`, and returns `COMPLETION_IDENTITY_INCOMPLETE`, `COMPLETION_RESET_MISMATCH` or `COMPLETION_STORE_FAILED`.
 - `AutoFinishStateStore.recordCompletion()` performs the read-modify-write in one serialized queue slot, merging only `completedJobs[jobId]`. It never replaces `completedResets`, `last` or other job entries.
@@ -1207,7 +1207,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 50 — Phase 3C.2B: market-scoped completion store (2.0.6-salta.293)
+# Part 50 — Phase 3C.2B: market-scoped completion store (2.0.6-salta.297)
 
 - Added `v2.auto-finish.completedJobs`, a versioned sidecar with shape `byMarket[marketKey][jobId] = resetAt`. Legacy `v2.auto-finish` and its schema 1 are unchanged.
 - `MarketCompletedJobsStore` implements an atomic read-modify-write queue. Different markets/jobs never share a key, and a same-key concurrent compare-and-set has one winner.
@@ -1219,7 +1219,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 51 — Phase 3C.2C: market-scoped completion business cutover (2.0.6-salta.293)
+# Part 51 — Phase 3C.2C: market-scoped completion business cutover (2.0.6-salta.297)
 
 - Auto Finish selection, completion suppression, `allMarketsCompletedForCurrentReset()`, final reports and UI status now read `v2.auto-finish.completedJobs` by `{ marketKey, jobId }`. `isCompletedForReset()` remains in the codebase for legacy tests but has no production caller.
 - `finalizeAutoFinish()` writes done jobs through `CompletionRecordWriter` only. It reads the sidecar for `expectedExistingResetAt`, allows advancement only when the existing reset is older, retries once after a concurrent mismatch, and logs skipped/failed writes. A failed sidecar write is reported as `completionWriteFailures` and never counted as a recorded completion.
@@ -1229,7 +1229,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 52 — Phase 3C.2D: completion lifecycle management (2.0.6-salta.293)
+# Part 52 — Phase 3C.2D: completion lifecycle management (2.0.6-salta.297)
 
 - Clear Local State now calls `MarketCompletedJobsStore.clear()` and resets the Auto Finish in-memory sidecar snapshot before selection. Store writes and clear share one queue, so older queued writes finish before the clear and later writes are new post-clear records.
 - A clear failure rejects the run (`NETWORK_OPERATION_FAILED` through `runExclusive`) and leaves the previous in-memory snapshot intact instead of reporting a successful reset.
@@ -1242,7 +1242,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 53 — Phase 3C.3: market completion reconciler bridge (2.0.6-salta.293)
+# Part 53 — Phase 3C.3: market completion reconciler bridge (2.0.6-salta.297)
 
 - `JobStateReconciler` now receives the same `MarketCompletedJobsStore` singleton used by finalize, Auto Finish, market-sync pruning and clear. It does not construct a private store.
 - When the remote observation is explicitly `completed` and the current reset is known, the reconciler writes `{ marketKey, jobId, resetAt }` through `CompletionRecordWriter`. `taken-claimable`, `available`, `taken`, `expired`, `failed`, absent and unknown-reset observations never write.
@@ -1250,3 +1250,148 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 - A completion read/write failure is reported as `completionFailures` and leaves the Job State record in its previous non-completed state. The next successful market sync re-observes the completed row and retries; no legacy compensation or unconditional overwrite is used.
 - Job State is only advanced to completed after the sidecar result is confirmed (or the reset is unknown, in which case no sidecar write is attempted). `canComplete` remains claimable evidence, never completion evidence.
 - Reconciler result diagnostics now include `completionWrites` and `completionFailures`.
+
+
+---
+
+# Part 54 — Phase B1: solver completion handoff (2.0.6-salta.297)
+
+- `JobExecutionService.decryptAndComplete()` no longer immediately fails when `desktop:decrypt.file` times out. It polls the existing after-take job refresh for up to 10 × 3 s for a row that is both `alreadyTaken` and `canComplete`.
+- A claimable row is passed to the existing completion retry path with minigame reopening disabled. Solver success is never assumed to mean the reward is claimed; only the remote row plus an explicit complete request can do that.
+- If no claimable row appears, the job remains retryable and no Complete is sent. No second Take is issued and the same minigame is not reopened by the handoff path.
+- This also covers background Auto Solver takeover without adding a solver-to-runner notification: the background solver may finish after the execution promise ends, and the next job refresh exposes the claimable state.
+- Existing minigame solver architecture, activeSession, Take/Complete protocols, claim-only path, locks and market-scoped completion store are unchanged.
+
+
+---
+
+# Part 55 — Phase B1.2: handoff safety hardening (2.0.6-salta.297)
+
+- `JobRouting.refreshJobAfterTake()` now returns `fresh`, `missing` or `unavailable` (failed is an `Err`), and never returns the old job as if it were fresh. The refresh request accepts a remaining-time timeout through the internal tab/content/hub path.
+- `waitForClaimableJob()` accepts only `fresh` rows whose `jobId`, `marketId` and `marketKey` match the execution context. Missing/failed/unavailable ends handoff without using old data, and a hard 30 s deadline prevents another refresh.
+- `Complete` failures from timeout/socket/message-channel loss are marked unconfirmed. `completeAfterDecrypt()` stops immediately instead of sending up to four Complete requests; the job remains unknown/incomplete for later market/reconciliation recovery. Explicit business failures keep the existing bounded retry.
+- Added tests for refresh outcomes, cross-market identity, hard deadline, unconfirmed Complete timeout/transport errors, and preserved explicit-failure retries.
+- Reset identity remains `UNKNOWN`: `JobOffer` and after-take refresh do not carry a trustworthy market reset, so no resetAt was fabricated or added.
+
+
+---
+
+# Part 56 — Phase B1.4A: reset identity guard (2.0.6-salta.297)
+
+- `JobRefreshOutcome.fresh` now carries `resetAt` from the same `fetchMarketJobs` response that produced the job. Missing reset is represented as `null`, never backfilled from a stale snapshot or another market.
+- `JobExecutionService` passes the execution identity reset from `JobStateSession.key.resetAt` into the solver handoff. Both expected and refreshed resets are normalized with the existing `normalizeJobStateResetAt`, require a parseable value, and must match exactly.
+- Handoff still requires fresh status, matching `jobId`, `marketId`, `marketKey`, and `alreadyTaken && canComplete`. Missing, invalid, mismatched, missing/unavailable/error refresh all stop before Complete.
+- The execution reset is never updated to a refreshed value; a Reset change during solving fails closed. If the Job State session is absent, the handoff fails closed.
+- No `JobOffer` change, Take/Complete protocol change, Solver change, Runner/Queue change, Completion Store change or Reconciler rule change.
+
+
+---
+
+# Part 57 — Phase B1.4B: Complete error classification (2.0.6-salta.297)
+
+- `GameError` now carries an optional `unconfirmed` flag. `ChromeTabJobActionAdapter.complete()` catches tab transport throws and marks missing/invalid/no-code responses as unconfirmed; `ChromeTabJobCommandAdapter` does the same for its command path.
+- Explicit game business error codes are preserved and remain explicit failures. `NO_COR3_TAB` is confirmed not sent and keeps the existing bounded retry path.
+- `unconfirmedCompleteError()` respects the explicit flag, then the known transport code set, including `JOB_ACTION_FAILED` and `JOB_COMMAND_FAILED`. `completeAfterDecrypt()` stops immediately on unconfirmed and never writes completed.
+- `lifecycleStatusForFailure()` accepts `unconfirmed` and maps it to `unknown` even when the message does not contain a timeout keyword.
+- Added adapter classification tests, Complete call-count tests, lifecycle unknown propagation, confirmed-not-sent retry, and Reset Identity Guard regression.
+
+---
+
+# Part 58 — Phase B1.4C: Complete unknown recovery integration (2.0.6-salta.298)
+
+- An unconfirmed Complete (timeout, lost response, transport failure, or an unrecognized game error code) stays `unknown`; it is never turned into `completed` or a normal `failed`.
+- Recovery after unknown is limited to an explicit remote `completed` observation from a successful, non-stale market sync.
+- `taken`, `alreadyTaken`, `canComplete`, `alreadyTaken && canComplete`, `available`, and `absent` cannot promote `unknown` to `completed`. A claimable remote row recovers only to `ready-to-claim` and still goes through the normal Complete path.
+- The Completion Sidecar bridge is written before Job State becomes `completed`. A failed or unavailable sidecar blocks the Job State transition and is retried by a later sync.
+- An unparseable reset is never bridged (`skipped-unknown-reset`), and reset/market isolation prevents cross-reset or cross-market completion inheritance.
+- Integration coverage combines `JobExecutionService`, `JobStateStore`, `JobStateRecorder`, `JobStateReconciler`, `MarketCompletedJobsStore`, `CompletionRecordWriter`, and the Auto Finish completion predicate.
+
+---
+
+# Part 59 — Phase B1.4E: Error provenance and Complete response guard (2.0.6-salta.299)
+
+- `gameError()` now marks a locally synthesized fallback code with `unconfirmed: true`; a server-provided string code is preserved, but unknown codes still default to unconfirmed Complete handling.
+- `GAME_JOB_FAILED` is removed from `EXPLICIT_COMPLETE_CODES`: both server-provided and fallback forms are unconfirmed and never trigger an immediate Complete retry.
+- `jobCommand()` delegates to an action-aware interpreter. `job.complete` requires a non-empty response payload; missing, `null`, empty object/array/string responses become `COMPLETE_RESPONSE_INVALID` with `unconfirmed: true`.
+- Take and Dismiss keep their existing success and error behavior; no data guard is applied to them.
+- Socket frame-level tests cover fallback provenance, explicit codes, invalid Complete payloads, and Take/Dismiss regression.
+- The exact Complete success payload schema is still unknown; the guard checks payload presence only and fails closed.
+
+---
+
+# Part 60 — Phase B1.4F: Complete ACK semantics correction (2.0.6-salta.300)
+
+- The game client resolves a matching action with a falsy `error` as success and does not require a data payload. The extension now follows that ACK semantics.
+- `hasVerifiableCompletePayload()` and `COMPLETE_RESPONSE_INVALID` were removed; empty `undefined`/`null`/`{}` ACKs now complete normally.
+- `parseGameFrame()` validates only the Socket.IO envelope: `42` prefix, JSON array, string event name, object payload. Malformed or unparseable frames are ignored and the request times out as unconfirmed.
+- Request association remains Socket.IO `event:action` based; no request id was introduced.
+- `EXPLICIT_COMPLETE_CODES` now contains only local pre-send failures: `NO_COR3_TAB` and `INVALID_JOB`. `AUTH_REQUIRED` / `AUTH_EXPIRED` were removed because they are not produced on the job command path and lack Complete rejection evidence.
+- Empty ACK, malformed frame, fallback provenance, B1.4A–B1.4E regression and Take/Dismiss semantics are covered by tests.
+
+---
+
+# Part 61 — Phase B1.4G: Completion persistence invariant (2.0.6-salta.301)
+
+- Successful Complete ACK now persists the market-scoped Completion Sidecar before Job State transitions to `completed`.
+- The service uses the shared `CompletionRecordWriter` with reset-aware CAS: absent → write, same reset → idempotent, older reset → advance, newer/invalid reset → fail closed.
+- Sidecar read failure, write failure, unavailable store, missing/invalid reset and CAS mismatch all return an unconfirmed `COMPLETE_FAILED`; Job State stays unknown/claiming until a later sync or Auto Finish writes the sidecar.
+- Auto Finish finalize and Reconciler remain idempotent duplicate writers for crash/restart recovery.
+- Empty and non-empty Complete ACKs share the same persistence path; ACK payload shape does not affect persistence.
+- Integration tests cover Sidecar success/failure/unavailable/CAS mismatch, empty/non-empty ACKs, remote-completed recovery, alreadyTaken/canComplete and repeated completion idempotency.
+
+---
+
+# Part 62 — Phase B1.6: Complete unknown retry barrier (2.0.6-salta.302)
+
+- Unconfirmed Complete is persisted as an optional `unconfirmed` flag on the Job State record, not inferred later from message text.
+- The flag propagates through `JobExecutionError` → `AutoJobRunError` → `JobOutcomeInput`/`AutoFinishFailure`.
+- `classifyJobFailure()` maps unconfirmed results to non-retry `failed` regardless of timeout/network message text; deferred retry explicitly excludes them.
+- `JobExecutionService` checks the persisted barrier before any game action, covering AutoFinish, manual queue and single-job bridge entries.
+- AutoFinish runnable selection excludes unconfirmed records by exact `{marketKey, jobId, resetAt}` identity, before claim-only bypass.
+- The Reconciler keeps unconfirmed records pending on taken/claimable/available/absent observations; only explicit remote completed + sidecar success clears the barrier.
+- Completion Sidecar remains authoritative even for stale claim-only rows, preventing re-completion after remote completion.
+
+---
+
+# Part 63 — Phase B1.7: Unknown reset recovery and barrier durability (2.0.6-salta.303)
+
+- `isCompletionUncertainRecord()` provides a conservative classification for new `unconfirmed` records and legacy unknown `COMPLETE_FAILED`/missing-code records without backfilling stored fields.
+- Null-reset uncertain records are not migrated by job id. A later successful, non-stale market sync with explicit remote completed and a validated current reset may write that reset's Completion Sidecar, then mark the original null record completed.
+- Taken/claimable/available/absent observations do not release a null-reset or completion-uncertain barrier.
+- If the Job State unconfirmed transition fails, `JobExecutionService` writes a durable fallback barrier to the Completion Store (`unconfirmedByMarket` optional map). The execution layer fails closed for the rest of the runtime if that also fails.
+- AutoFinish and execution barriers combine Job State records, legacy classification, null-reset barriers, and completion-store fallbacks. A store read failure aborts AutoFinish or blocks execution.
+- Completion record writes clear the corresponding fallback barrier atomically; staler/newer reset CAS rules remain unchanged.
+- Tests cover null-reset ACK recovery, null-reset retry blocking, cross-reset no-migration, Job State write failure fallback, store unavailable, legacy unknown records, barrier clearing and normal reset paths.
+
+---
+
+# Part 64 — Phase B1.8: Unknown barrier final safety audit (2.0.6-salta.304)
+
+- Session-creation failure no longer skips completion persistence: a resolved reset writes the normal sidecar; otherwise the ACK becomes unconfirmed and a durable fallback barrier is written.
+- `JobExecutionService` writes the completion-store fallback before/independent of a Job State session; fallback failure latches the current runtime blocked.
+- Fallback barriers are cleared only by an exact known-reset completion. Reset A cannot clear Reset B, Reset B cannot clear Reset A, and unknown barriers are never auto-cleared by a known completion.
+- Direct `job.complete` bridge entries now check the same AutoFinish completion barrier; all AutoFinish/prefetched/deferred/scheduled/queue/run entries remain covered.
+- Clear Local State clears fallback barriers together with records; clear failure propagates and leaves the prior barrier intact.
+- New tests cover session start failure with ACK and timeout, fallback write failure/runtime latch, worker-style new service instance, reset matching table, legacy barriers, direct barrier identity, and clear semantics.
+
+---
+
+# Part 65 — Phase B1.9: Reset identity preservation and direct Complete (2.0.6-salta.305)
+
+- Execution Reset is captured once before `JobStateRecorder.start()` and passed as an override, so Session creation failure cannot lose the start identity and a reset advance during the task cannot relabel completion.
+- Session-null ACK without a captured reset fails closed; Session-null unconfirmed writes a durable fallback barrier using the captured reset or `unknown`.
+- Direct `job.complete` now resolves an active Job State reset for the job before falling back to the current snapshot; it checks the shared barrier, writes the Completion Sidecar after ACK, updates Job State completed, and writes a fallback barrier on ambiguous results or sidecar failure.
+- Direct Complete uses the same `AutoFinish` barrier sources and fails closed when the Job State or Completion Store is unavailable.
+- Reset identity decisions are covered by tests for normal Session, reset advance, Session failure, unknown start, cross-reset job id and direct handler paths.
+
+---
+
+# Part 66 — Phase B1.9.1: Direct Complete identity ambiguity (2.0.6-salta.306)
+
+- `resolveDirectReset()` no longer sorts active records by `updatedAt`.
+- Zero active records require a parseable current snapshot reset; unknown reset fails before Complete.
+- One or more active records must all share one parseable known reset; multiple resets or any unknown reset are `COMPLETE_IDENTITY_AMBIGUOUS`.
+- Store failure returns `COMPLETE_BARRIER_UNAVAILABLE`.
+- The handler returns the identity error before sending Complete, so no Sidecar, barrier clear or Job State mutation occurs.
+- Terminal completed/expired/failed/blocked records do not participate in identity selection.
+- Tests cover zero/one/multiple same/multiple different/known+unknown/terminal/store-failure cases and handler no-Complete behavior.

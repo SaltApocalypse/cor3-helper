@@ -14,6 +14,7 @@ export interface JobStateTransitionDetails {
     readonly errorCode?: string;
     readonly message?: string;
     readonly stage?: string;
+    readonly unconfirmed?: boolean;
 }
 
 export interface JobStateSession {
@@ -22,7 +23,8 @@ export interface JobStateSession {
 }
 
 export interface JobStateRecorderPort {
-    start(job: JobOffer): Promise<JobStateSession>;
+    /** Optional reset override captured once before execution starts. */
+    start(job: JobOffer, resetAtOverride?: string | null): Promise<JobStateSession>;
 }
 
 /** Narrow write port used by reconciliation; not used by the execution path. */
@@ -83,6 +85,7 @@ class JobStateSessionImpl implements JobStateSession {
                 ...(details.errorCode ? { errorCode: details.errorCode } : {}),
                 ...(details.message ? { lastError: safeErrorText(details.message) } : {}),
                 ...(details.stage ? { stage: details.stage } : {}),
+                ...(details.unconfirmed === true ? { unconfirmed: true } : {}),
             };
             try {
                 await this.deps.store.upsert(record);
@@ -95,6 +98,10 @@ class JobStateSessionImpl implements JobStateSession {
                     status,
                     message: error instanceof Error ? error.message : String(error),
                 });
+                // An unconfirmed completion must not silently lose its durable
+                // barrier. The execution layer falls back to the completion
+                // store and fails closed if both writes fail.
+                if (details.unconfirmed === true) throw error;
             }
         };
         this.chain = this.chain.then(run, run);
@@ -127,8 +134,12 @@ export class JobStateRecorder implements JobStateRecorderPort, JobStateWriterPor
         }
     }
 
-    async start(job: JobOffer): Promise<JobStateSession> {
-        const resetAt = normalizeJobStateResetAt(this.deps.resetAtForMarket?.(job.marketKey) ?? null);
+    async start(job: JobOffer, resetAtOverride?: string | null): Promise<JobStateSession> {
+        const resetAt = normalizeJobStateResetAt(
+            resetAtOverride !== undefined
+                ? resetAtOverride
+                : this.deps.resetAtForMarket?.(job.marketKey) ?? null,
+        );
         const key: JobStateKey = { marketKey: job.marketKey, jobId: job.id, resetAt };
         const existing = await this.existingFor(key);
         return new JobStateSessionImpl(this.deps, key, existing?.createdAt ?? iso(this.now()), this.now);
@@ -149,6 +160,7 @@ export class JobStateRecorder implements JobStateRecorderPort, JobStateWriterPor
             ...(details.errorCode ? { errorCode: details.errorCode } : {}),
             ...(details.message ? { lastError: safeErrorText(details.message) } : {}),
             ...(details.stage ? { stage: details.stage } : {}),
+            ...(details.unconfirmed === true ? { unconfirmed: true } : {}),
         };
         try {
             await this.deps.store.upsert(record);

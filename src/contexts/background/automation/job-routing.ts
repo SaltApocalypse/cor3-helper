@@ -7,6 +7,7 @@ import type { EndpointMutexPort } from '../../../application/network/endpoint-mu
 import type { GameError } from '../../../application/game/ports.js';
 import type { AutomationLogger } from '../../../application/automation/ports.js';
 import { asServerId, type ServerId } from '../../../kernel/ids.js';
+import type { JobRefreshOutcome } from '../../../application/auto-job/refresh-outcome.js';
 import { err, ok, type Result } from '../../../kernel/result.js';
 
 export interface TabRequestPort {
@@ -111,11 +112,15 @@ export class JobRouting {
      * well tripled the command count inside the tight take/route/action window and
      * contributed to "Too many requests" toasts.
      */
-    async fetchMarketJobs(marketId: string): Promise<Result<unknown, GameError>> {
+    async fetchMarketJobs(marketId: string, timeoutMs?: number): Promise<Result<unknown, GameError>> {
         const tabId = await this.deps.tabs.findCor3Tab();
         if (tabId === null) return err({ code: 'NO_COR3_TAB', message: 'No cor3.gg tab found' });
         try {
-            const response = await this.deps.tabs.send(tabId, { type: 'V2_REQUEST_MARKET_JOBS', marketId });
+            const response = await this.deps.tabs.send(tabId, {
+                type: 'V2_REQUEST_MARKET_JOBS',
+                marketId,
+                ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+            });
             if (!response || typeof response !== 'object') {
                 return err({ code: 'MARKET_COMMAND_FAILED', message: 'No market jobs result' });
             }
@@ -132,16 +137,19 @@ export class JobRouting {
         }
     }
 
-    async refreshJobAfterTake(job: JobOffer): Promise<Result<JobOffer, never>> {
-        if (!job.marketServerId) return ok(job);
-        const jobs = await this.fetchMarketJobs(job.marketId);
+    async refreshJobAfterTake(job: JobOffer, timeoutMs?: number): Promise<Result<JobRefreshOutcome, GameError>> {
+        if (!job.marketServerId) return ok({ status: 'unavailable' });
+        const jobs = await this.fetchMarketJobs(job.marketId, timeoutMs);
         if (!jobs.ok) {
             this.deps.logger.warn('auto-job', 'After-take market refresh failed', { jobId: job.id, message: jobs.error.message });
-            return ok(job);
+            return err(jobs.error);
         }
         const mapped = mapMarketSnapshotJobs({ jobs: jobs.value }, job.marketId, job.marketKey, job.marketServerId);
         const refreshed = mapped.jobs.find((entry) => entry.id === job.id);
-        if (!refreshed) this.deps.logger.warn('auto-job', 'Taken job missing from refreshed market data', { jobId: job.id });
-        return ok(refreshed ? { ...job, ...refreshed, alreadyTaken: true } : job);
+        if (!refreshed) {
+            this.deps.logger.warn('auto-job', 'Taken job missing from refreshed market data', { jobId: job.id });
+            return ok({ status: 'missing' });
+        }
+        return ok({ status: 'fresh', job: { ...job, ...refreshed, alreadyTaken: true }, resetAt: mapped.resetAt ?? null });
     }
 }

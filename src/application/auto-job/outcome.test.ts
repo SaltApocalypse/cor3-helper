@@ -43,6 +43,21 @@ describe('classifyJobFailure', () => {
         expect(classifyJobFailure({ code: 'SOMETHING_NEW', message: 'boom' }).status).toBe('failed');
     });
 
+    it('does not retry an unconfirmed completion even for retryable text', () => {
+        expect(classifyJobFailure({
+            code: 'JOB_FAILED',
+            detailCode: 'COMPLETE_FAILED',
+            message: 'Timed out waiting for desktop:complete',
+            unconfirmed: true,
+        })).toEqual({ status: 'failed', reason: 'unknown' });
+        expect(classifyJobFailure({
+            code: 'JOB_FAILED',
+            detailCode: 'COMPLETE_FAILED',
+            message: 'job-conditions-not-met',
+            unconfirmed: true,
+        })).toEqual({ status: 'failed', reason: 'unknown' });
+    });
+
     it('keeps cancelled jobs out of failed', () => {
         expect(classifyJobFailure({ code: 'JOB_CANCELLED', message: 'Job run cancelled', stage: 'cancelled' }).status).toBe('skipped');
     });

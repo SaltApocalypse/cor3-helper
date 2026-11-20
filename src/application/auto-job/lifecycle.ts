@@ -7,6 +7,7 @@ export interface JobLifecycleFailure {
     readonly stage?: string | undefined;
     readonly retryAt?: number | undefined;
     readonly lockExpiresAt?: number | undefined;
+    readonly unconfirmed?: boolean;
 }
 
 const UNCONFIRMED_RESULT = /timeout|timed out|no response|response (?:lost|missing)|lost response|disconnected|socket|connection (?:reset|closed|refused)|econn|not[-\s]?reachable|unknown (?:result|outcome)/i;
@@ -19,6 +20,7 @@ const CONDITIONS_NOT_MET = /conditions?.*not.*met|not met|not ready|still.*proce
  */
 export function lifecycleStatusForFailure(error: JobLifecycleFailure): JobLifecycleStatus {
     const text = `${error.code} ${error.message}`;
+    if (error.unconfirmed === true) return 'unknown';
     if (isExpiredJobFailureText(error.code, error.message)) return 'expired';
     if (error.code === 'JOB_CANCELLED' || error.stage === 'cancelled') return 'blocked';
     if (error.lockExpiresAt !== undefined

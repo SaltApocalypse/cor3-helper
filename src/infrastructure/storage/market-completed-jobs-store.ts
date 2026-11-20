@@ -28,6 +28,25 @@ function requireReset(value: string, field: string): string {
     return trimmed;
 }
 
+function withoutUnconfirmed(
+    state: MarketCompletedJobsState,
+    marketKey: string,
+    jobId: string,
+    resetAt: string,
+): MarketCompletedJobsState {
+    const markets = state.unconfirmedByMarket;
+    if (!markets?.[marketKey] || markets[marketKey]?.[jobId] !== resetAt) return state;
+    const jobs = { ...markets[marketKey] };
+    delete jobs[jobId];
+    const nextMarkets = { ...markets };
+    if (Object.keys(jobs).length === 0) delete nextMarkets[marketKey];
+    else nextMarkets[marketKey] = jobs;
+    return {
+        byMarket: state.byMarket,
+        ...(Object.keys(nextMarkets).length > 0 ? { unconfirmedByMarket: nextMarkets } : {}),
+    };
+}
+
 /**
  * Sidecar completion store keyed by market then job. It deliberately does not
  * read or write the legacy `v2.auto-finish` completedJobs map.
@@ -99,7 +118,7 @@ export class MarketCompletedJobsStore implements MarketCompletionStorePort {
                 }
             }
             if (removed === 0) return { status: 'pruned', removed: 0, state };
-            const updated = { byMarket: { ...state.byMarket, [market]: next } };
+            const updated = { ...state, byMarket: { ...state.byMarket, [market]: next } };
             await this.repository.set(updated);
             return { status: 'pruned', removed, state: updated };
         });
@@ -132,31 +151,60 @@ export class MarketCompletedJobsStore implements MarketCompletionStorePort {
                 if (expected !== undefined && expected !== existingResetAt) {
                     return { status: 'reset-mismatch', existingResetAt };
                 }
+                const cleared = withoutUnconfirmed(current, marketKey, jobId, resetAt);
+                if (cleared !== current) await this.repository.set(cleared);
                 return { status: 'already-recorded' };
             }
             if (existingResetAt !== undefined) {
                 if (expected === undefined || expected === null || expected !== existingResetAt) {
                     return { status: 'reset-mismatch', existingResetAt };
                 }
-                await this.repository.set({
+                await this.repository.set(withoutUnconfirmed({
+                    ...current,
                     byMarket: {
                         ...current.byMarket,
                         [marketKey]: { ...market, [jobId]: resetAt },
                     },
-                });
+                }, marketKey, jobId, resetAt));
                 return { status: 'written', previousResetAt: existingResetAt };
             }
             if (expected !== undefined && expected !== null) {
                 // Caller expected a specific old value, but there is no record.
                 return { status: 'reset-mismatch' };
             }
-            await this.repository.set({
+            await this.repository.set(withoutUnconfirmed({
+                ...current,
                 byMarket: {
                     ...current.byMarket,
                     [marketKey]: { ...market, [jobId]: resetAt },
                 },
-            });
+            }, marketKey, jobId, resetAt));
             return { status: 'written' };
+        });
+    }
+
+    async getUnconfirmedState(): Promise<Readonly<Record<string, Readonly<Record<string, string>>>>> {
+        return (await this.get()).unconfirmedByMarket ?? {};
+    }
+
+    async markUnconfirmed(input: {
+        readonly marketKey: string;
+        readonly jobId: string;
+        readonly resetAt: string | null;
+    }): Promise<void> {
+        const marketKey = requireValue(input.marketKey, 'marketKey');
+        const jobId = requireValue(input.jobId, 'jobId');
+        const value = input.resetAt === null ? JOB_STATE_UNKNOWN_RESET : requireReset(input.resetAt, 'resetAt');
+        await this.enqueue(async () => {
+            const current = await this.read();
+            const markets = current.unconfirmedByMarket ?? {};
+            await this.repository.set({
+                ...current,
+                unconfirmedByMarket: {
+                    ...markets,
+                    [marketKey]: { ...markets[marketKey], [jobId]: value },
+                },
+            });
         });
     }
 }

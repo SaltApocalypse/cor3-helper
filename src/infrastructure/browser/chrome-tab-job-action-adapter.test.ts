@@ -47,3 +47,93 @@ describe('ChromeTabJobActionAdapter', () => {
         expect(await adapter.complete(job)).toEqual({ ok: true, value: { credits: 100, reputation: 10, renown: 0 } });
     });
 });
+
+describe('ChromeTabJobActionAdapter complete error classification', () => {
+    const job = {
+        id: 'j', name: 'IP Injection', type: 'IP Injection' as const, marketId: 'm', marketKey: 'home',
+        serverId: 's', serverName: 's', rewardCredits: 100, rewardReputation: 10, deposit: 0,
+        alreadyTaken: true, canComplete: true,
+    };
+
+    it('marks a thrown tab transport failure as unconfirmed', async () => {
+        const adapter = new ChromeTabJobActionAdapter({
+            findCor3Tab: async () => 1,
+            send: async () => { throw new Error('message channel closed'); },
+        });
+        const result = await adapter.complete(job);
+        expect(result).toMatchObject({ ok: false, error: { code: 'JOB_ACTION_FAILED', unconfirmed: true } });
+    });
+
+    it('marks a missing response as unconfirmed', async () => {
+        const adapter = new ChromeTabJobActionAdapter({
+            findCor3Tab: async () => 1,
+            send: async () => undefined,
+        });
+        const result = await adapter.complete(job);
+        expect(result).toMatchObject({ ok: false, error: { code: 'JOB_ACTION_FAILED', unconfirmed: true } });
+    });
+
+    it('marks a candidate error without a code as unconfirmed', async () => {
+        const adapter = new ChromeTabJobActionAdapter({
+            findCor3Tab: async () => 1,
+            send: async () => ({ ok: false, error: { message: 'looks like a business error' } }),
+        });
+        const result = await adapter.complete(job);
+        expect(result).toMatchObject({ ok: false, error: { code: 'JOB_ACTION_FAILED', unconfirmed: true } });
+    });
+
+    it('preserves an explicit business error code', async () => {
+        const adapter = new ChromeTabJobActionAdapter({
+            findCor3Tab: async () => 1,
+            send: async () => ({ ok: false, error: { code: 'GAME_JOB_FAILED', message: 'job conditions not met' } }),
+        });
+        const result = await adapter.complete(job);
+        expect(result).toMatchObject({ ok: false, error: { code: 'GAME_JOB_FAILED' } });
+        if (!result.ok) expect(result.error.unconfirmed).toBeUndefined();
+    });
+
+    it('does not mark missing tab as unconfirmed', async () => {
+        const adapter = new ChromeTabJobActionAdapter({
+            findCor3Tab: async () => null,
+            send: async () => ({ ok: true }),
+        });
+        const result = await adapter.complete(job);
+        expect(result).toMatchObject({ ok: false, error: { code: 'NO_COR3_TAB' } });
+        if (!result.ok) expect(result.error.unconfirmed).toBeUndefined();
+    });
+});
+
+describe('ChromeTabJobActionAdapter completion ACK', () => {
+    const job = {
+        id: 'j', name: 'IP Injection', type: 'IP Injection' as const, marketId: 'm', marketKey: 'home',
+        serverId: 's', serverName: 's', rewardCredits: 100, rewardReputation: 10, deposit: 0,
+        alreadyTaken: true, canComplete: true,
+    };
+
+    it('accepts an empty tab ACK as a successful completion', async () => {
+        const adapter = new ChromeTabJobActionAdapter({
+            findCor3Tab: async () => 1,
+            send: async () => ({ ok: true, value: undefined }),
+        });
+        expect(await adapter.complete(job)).toEqual({
+            ok: true,
+            value: { credits: 100, reputation: 10, renown: 0 },
+        });
+    });
+
+    it('accepts a non-empty tab ACK as a successful completion', async () => {
+        const adapter = new ChromeTabJobActionAdapter({
+            findCor3Tab: async () => 1,
+            send: async () => ({ ok: true, value: { jobId: 'j' } }),
+        });
+        expect((await adapter.complete(job)).ok).toBe(true);
+    });
+
+    it('accepts a null tab ACK as a successful completion', async () => {
+        const adapter = new ChromeTabJobActionAdapter({
+            findCor3Tab: async () => 1,
+            send: async () => ({ ok: true, value: null }),
+        });
+        expect((await adapter.complete(job)).ok).toBe(true);
+    });
+});

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { jobOfferSchema } from '../../../contracts/jobs.js';
+import { JOB_MARKETS } from '../../../domains/jobs/markets.js';
 import { ok } from '../../../kernel/result.js';
 import type { CoreRuntime } from '../composition/core.js';
 import type { GameRuntime } from '../composition/game.js';
@@ -51,8 +52,75 @@ export function registerJobHandlers(server: CoreRuntime['server'], deps: JobsHan
         return result.ok ? ok(undefined) : { ok: false, error: { code: result.error.code, message: result.error.message } };
     });
     server.register('job.complete', jobCommandSchema, async ({ marketId, jobId }) => {
+        const market = JOB_MARKETS.find((entry) => entry.marketId === marketId);
+        if (!market) {
+            return { ok: false, error: { code: 'INVALID_JOB', message: 'Unknown job market' } };
+        }
+        const marketState = automation.autoJobs.snapshotView()?.markets.find((entry) => entry.marketKey === market.key);
+        let resetAt = marketState?.ok && marketState.stale !== true
+            && typeof marketState.resetAt === 'string' && marketState.resetAt.length > 0
+            ? marketState.resetAt
+            : null;
+        try {
+            const resolved = await automation.autoFinish.resolveDirectReset(market.key, jobId, resetAt);
+            if (!resolved.ok) return { ok: false, error: resolved.error };
+            resetAt = resolved.resetAt;
+        } catch (error) {
+            return {
+                ok: false,
+                error: {
+                    code: 'COMPLETE_BARRIER_UNAVAILABLE',
+                    message: `Completion barrier unavailable: ${error instanceof Error ? error.message : String(error)}`,
+                },
+            };
+        }
+        try {
+            if (await automation.autoFinish.isCompletionBlocked(market.key, jobId, resetAt)) {
+                return { ok: false, error: { code: 'COMPLETE_BLOCKED', message: 'Completion is blocked by an earlier unconfirmed Complete result' } };
+            }
+        } catch (error) {
+            return {
+                ok: false,
+                error: {
+                    code: 'COMPLETE_BARRIER_UNAVAILABLE',
+                    message: `Completion barrier unavailable: ${error instanceof Error ? error.message : String(error)}`,
+                },
+            };
+        }
         const result = await game.jobCommands.complete(marketId, jobId);
-        return result.ok ? ok(undefined) : { ok: false, error: { code: result.error.code, message: result.error.message } };
+        if (!result.ok) {
+            if (result.error.unconfirmed === true) {
+                try {
+                    await automation.autoFinish.markDirectUnconfirmed(market.key, jobId, resetAt);
+                } catch (error) {
+                    return {
+                        ok: false,
+                        error: {
+                            code: 'COMPLETE_BARRIER_UNAVAILABLE',
+                            message: `Completion barrier unavailable: ${error instanceof Error ? error.message : String(error)}`,
+                        },
+                    };
+                }
+            }
+            return { ok: false, error: { code: result.error.code, message: result.error.message } };
+        }
+        const persisted = await automation.autoFinish.recordDirectCompletion(market.key, jobId, resetAt);
+        if (!persisted.ok) {
+            try {
+                await automation.autoFinish.markDirectUnconfirmed(market.key, jobId, resetAt);
+            } catch (error) {
+                return {
+                    ok: false,
+                    error: {
+                        code: 'COMPLETE_BARRIER_UNAVAILABLE',
+                        message: `Completion barrier unavailable: ${error instanceof Error ? error.message : String(error)}`,
+                    },
+                };
+            }
+            return { ok: false, error: persisted.error };
+        }
+        await automation.jobStates.update({ marketKey: market.key, jobId, resetAt }, 'completed');
+        return ok(undefined);
     });
     server.register('job.dismiss', jobCommandSchema, async ({ marketId, jobId }) => {
         const result = await game.jobCommands.dismiss(marketId, jobId);

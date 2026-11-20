@@ -7,6 +7,8 @@ describe('lifecycleStatusForFailure', () => {
             .toBe('unknown');
         expect(lifecycleStatusForFailure({ code: 'GAME_TIMEOUT', message: 'No response' })).toBe('unknown');
         expect(lifecycleStatusForFailure({ code: 'TAKE_FAILED', message: 'socket disconnected' })).toBe('unknown');
+        expect(lifecycleStatusForFailure({ code: 'COMPLETE_FAILED', message: 'complete rejected', unconfirmed: true }))
+            .toBe('unknown');
     });
 
     it('keeps a minigame lock or failure in waiting-minigame', () => {

@@ -1,5 +1,5 @@
 import type { JobLifecycleStatus, JobStateKey, JobStateRecord } from '../../contracts/job-state.js';
-import { normalizeJobStateResetAt } from '../../contracts/job-state.js';
+import { isCompletionUncertainRecord, normalizeJobStateResetAt } from '../../contracts/job-state.js';
 import type { JobOffer } from '../../domains/jobs/model.js';
 import type { AutomationLogger } from '../automation/ports.js';
 import type { SkippedJob } from './market-mapper.js';
@@ -141,7 +141,14 @@ function buildRemoteObservations(input: ReconcileMarketInput): ReadonlyMap<strin
 export function decideJobStateReconciliation(
     previousStatus: JobLifecycleStatus,
     observation: RemoteJobObservation,
+    completionUnconfirmed = false,
 ): ReconciliationDecision {
+    // A Complete whose result was never confirmed cannot be cleared by the job
+    // merely still existing (taken/claimable/available/absent). Only explicit
+    // completed evidence may release the barrier; expired/failed remain terminal.
+    if (completionUnconfirmed && observation !== 'completed' && observation !== 'expired' && observation !== 'failed') {
+        return { outcome: 'pending', recoverable: false, reason: 'complete-result-unknown' };
+    }
     if (observation === 'completed') {
         if (previousStatus === 'completed') return { outcome: 'unchanged', recoverable: false, reason: 'already-completed' };
         return { outcome: 'reconciled', nextStatus: 'completed', recoverable: false, reason: 'remote-completed' };
@@ -244,7 +251,28 @@ export class JobStateReconciler implements JobStateReconcilerPort {
             record.marketKey === input.marketKey
             && normalizeJobStateResetAt(record.resetAt) === resetAt,
         );
-        if (local.length === 0) return emptyResult(input.marketKey, resetAt, false);
+        const nullUncertain = resetAt === null
+            ? []
+            : records.filter((record) =>
+                record.marketKey === input.marketKey
+                && normalizeJobStateResetAt(record.resetAt) === null
+                && isCompletionUncertainRecord(record),
+            );
+        let completionBarriers: Readonly<Record<string, Readonly<Record<string, string>>>> = {};
+        if (resetAt !== null && this.deps.completions?.getUnconfirmedState) {
+            try {
+                completionBarriers = await this.deps.completions.getUnconfirmedState();
+            } catch (error) {
+                this.deps.logger.warn('job-state', 'Unable to read completion barriers for reconciliation', {
+                    marketKey: input.marketKey,
+                    message: error instanceof Error ? error.message : String(error),
+                });
+            }
+        }
+        const marketBarriers = completionBarriers[input.marketKey] ?? {};
+        if (local.length === 0 && nullUncertain.length === 0 && Object.keys(marketBarriers).length === 0) {
+            return emptyResult(input.marketKey, resetAt, false);
+        }
 
         const remote = buildRemoteObservations(input);
         const decisions: JobReconciliationDecision[] = [];
@@ -309,14 +337,15 @@ export class JobStateReconciler implements JobStateReconcilerPort {
                 continue;
             }
 
-            let decision = decideJobStateReconciliation(record.status, observation);
+            let decision = decideJobStateReconciliation(record.status, observation, isCompletionUncertainRecord(record));
             let completionStatus: CompletionBridgeStatus | undefined;
             let completionError: string | undefined;
             if (observation === 'completed') {
                 const bridged = await this.bridgeCompletion(record.marketKey, record.jobId, resetAt);
                 completionStatus = bridged.status;
                 completionError = bridged.error;
-                if (bridged.blocksJobState) {
+                if (bridged.blocksJobState
+                    || (bridged.status !== 'written' && bridged.status !== 'already-recorded')) {
                     // Never claim Job State completed when the authoritative
                     // completion sidecar could not be updated. A later sync
                     // re-observes the same completed row and retries.
@@ -360,6 +389,118 @@ export class JobStateReconciler implements JobStateReconcilerPort {
             });
         }
 
+        if (resetAt !== null) {
+            const currentJobIds = new Set(local.map((record) => record.jobId));
+            for (const record of nullUncertain) {
+                if (currentJobIds.has(record.jobId)) continue;
+                const observation = remote.get(record.jobId) ?? 'absent';
+                // A null-reset record is never migrated because the job merely
+                // still exists. Only explicit completed evidence for the
+                // current, validated market/reset can establish a sidecar.
+                if (observation !== 'completed') continue;
+
+                const bridged = await this.bridgeCompletion(record.marketKey, record.jobId, resetAt);
+                const completionStatus = bridged.status;
+                const completionError = bridged.error;
+                if (bridged.blocksJobState
+                    || (bridged.status !== 'written' && bridged.status !== 'already-recorded')) {
+                    pending += 1;
+                    completionFailures += 1;
+                    decisions.push({
+                        marketKey: record.marketKey,
+                        jobId: record.jobId,
+                        resetAt: null,
+                        previousStatus: record.status,
+                        observation,
+                        outcome: 'pending',
+                        recoverable: false,
+                        persisted: false,
+                        reason: 'null-reset-completion-write-failed',
+                        completionStatus,
+                        ...(completionError !== undefined ? { completionError } : {}),
+                    });
+                    continue;
+                }
+
+                if (bridged.status === 'written') completionWrites += 1;
+                const persisted = await this.deps.writer.update({
+                    marketKey: record.marketKey,
+                    jobId: record.jobId,
+                    resetAt: null,
+                }, 'completed');
+                if (persisted) updated += 1;
+                else failedWrites += 1;
+                decisions.push({
+                    marketKey: record.marketKey,
+                    jobId: record.jobId,
+                    resetAt: null,
+                    previousStatus: record.status,
+                    observation,
+                    outcome: persisted ? 'reconciled' : 'pending',
+                    ...(persisted ? { nextStatus: 'completed' as const } : {}),
+                    recoverable: false,
+                    persisted,
+                    reason: 'null-reset-remote-completed',
+                    completionStatus,
+                    ...(completionError !== undefined ? { completionError } : {}),
+                });
+            }
+        }
+
+        if (resetAt !== null) {
+            const handledJobIds = new Set([...local, ...nullUncertain].map((record) => record.jobId));
+            for (const [jobId, barrierReset] of Object.entries(marketBarriers)) {
+                    // 'unknown' has no trustworthy reset identity; keep it fail-closed.
+                    if (barrierReset !== resetAt || handledJobIds.has(jobId)) continue;
+                    const observation = remote.get(jobId) ?? 'absent';
+                    if (observation !== 'completed') continue;
+                    const bridged = await this.bridgeCompletion(input.marketKey, jobId, resetAt);
+                    const completionStatus = bridged.status;
+                    const completionError = bridged.error;
+                    if (bridged.blocksJobState
+                        || (bridged.status !== 'written' && bridged.status !== 'already-recorded')) {
+                        pending += 1;
+                        completionFailures += 1;
+                        decisions.push({
+                            marketKey: input.marketKey,
+                            jobId,
+                            resetAt,
+                            previousStatus: 'unknown',
+                            observation,
+                            outcome: 'pending',
+                            recoverable: false,
+                            persisted: false,
+                            reason: 'barrier-completion-write-failed',
+                            completionStatus,
+                            ...(completionError !== undefined ? { completionError } : {}),
+                        });
+                        continue;
+                    }
+                    if (bridged.status === 'written') completionWrites += 1;
+                    const persisted = await this.deps.writer.update({
+                        marketKey: input.marketKey,
+                        jobId,
+                        resetAt,
+                    }, 'completed');
+                    if (persisted) updated += 1;
+                    else failedWrites += 1;
+                    decisions.push({
+                        marketKey: input.marketKey,
+                        jobId,
+                        resetAt,
+                        previousStatus: 'unknown',
+                        observation,
+                        outcome: persisted ? 'reconciled' : 'pending',
+                        ...(persisted ? { nextStatus: 'completed' as const } : {}),
+                        recoverable: false,
+                        persisted,
+                        reason: 'barrier-remote-completed',
+                        completionStatus,
+                        ...(completionError !== undefined ? { completionError } : {}),
+                    });
+                }
+            }
+
         const result: JobReconciliationResult = {
             marketKey: input.marketKey,
             resetAt,
@@ -388,7 +529,9 @@ export class JobStateReconciler implements JobStateReconcilerPort {
             // to the same singleton instance used by Auto Finish.
             return { status: 'unavailable', blocksJobState: false, error: 'completion store not configured' };
         }
-        if (resetAt === null) return { status: 'skipped-unknown-reset', blocksJobState: false };
+        if (resetAt === null || !Number.isFinite(Date.parse(resetAt))) {
+            return { status: 'skipped-unknown-reset', blocksJobState: false };
+        }
 
         const writer = new CompletionRecordWriter(this.deps.completions);
         for (let attempt = 0; attempt < 3; attempt++) {

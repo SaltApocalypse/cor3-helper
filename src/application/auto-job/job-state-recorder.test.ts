@@ -99,6 +99,23 @@ describe('JobStateRecorder', () => {
         }));
     });
 
+    it('rejects an unconfirmed write failure so the caller can persist a fallback barrier', async () => {
+        const store: JobStateStorePort = {
+            get: async () => null,
+            list: async () => [],
+            upsert: async () => { throw new Error('storage full'); },
+            prune: async () => 0,
+        };
+        const recorder = new JobStateRecorder({ store, logger: logger(), now: () => 1 });
+        const session = await recorder.start(job());
+
+        await expect(session.transition('unknown', {
+            errorCode: 'COMPLETE_FAILED',
+            message: 'complete timeout',
+            unconfirmed: true,
+        })).rejects.toThrow('storage full');
+    });
+
     it('redacts tokens from persisted error text', async () => {
         const store = new JobStateStore(new MemoryStorageArea());
         const recorder = new JobStateRecorder({ store, logger: logger() });

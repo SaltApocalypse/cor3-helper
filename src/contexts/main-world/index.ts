@@ -250,8 +250,11 @@ server.register('game.requestMarketLots', z.object({ marketId: z.string().min(1)
     const result = await hub.requestMarketLots(marketId);
     return result.ok ? ok(result.value) : err(result.error);
 });
-server.register('game.requestMarketJobs', z.object({ marketId: z.string().min(1) }).strict(), async ({ marketId }) => {
-    const result = await hub.requestMarketJobs(marketId);
+server.register('game.requestMarketJobs', z.object({
+    marketId: z.string().min(1),
+    timeoutMs: z.number().int().positive().optional(),
+}).strict(), async ({ marketId, timeoutMs }) => {
+    const result = await hub.requestMarketJobs(marketId, timeoutMs);
     return result.ok ? ok(result.value) : err(result.error);
 });
 

@@ -13,6 +13,14 @@ export const marketCompletedJobsSchema = z.object({
         z.string(),
         z.record(z.string(), z.string()),
     ).default({}),
+    /**
+     * Durable fallback barrier when the Job State write fails. Value is the
+     * execution reset or 'unknown'. Optional so existing sidecars stay valid.
+     */
+    unconfirmedByMarket: z.record(
+        z.string(),
+        z.record(z.string(), z.string()),
+    ).optional(),
 }).strict();
 
 export type MarketCompletedJobsState = z.infer<typeof marketCompletedJobsSchema>;

@@ -24,16 +24,18 @@ export class ChromeTabJobCommandAdapter implements JobCommandPort {
         try {
             const response = await this.tabs.send(tabId, { type, marketId, jobId });
             if (!response || typeof response !== 'object') {
-                return err({ code: 'JOB_COMMAND_FAILED', message: 'No job result' });
+                return err({ code: 'JOB_COMMAND_FAILED', message: 'No job result', unconfirmed: true });
             }
-            const candidate = response as { ok?: unknown; error?: { code?: unknown; message?: unknown } };
+            const candidate = response as { ok?: unknown; error?: { code?: unknown; message?: unknown; unconfirmed?: unknown } };
             if (candidate.ok === true) return ok(undefined);
+            const code = typeof candidate.error?.code === 'string' ? candidate.error.code : 'JOB_COMMAND_FAILED';
             return err({
-                code: typeof candidate.error?.code === 'string' ? candidate.error.code : 'JOB_COMMAND_FAILED',
+                code,
                 message: typeof candidate.error?.message === 'string' ? candidate.error.message : 'Job command failed',
+                ...(code === 'JOB_COMMAND_FAILED' || candidate.error?.unconfirmed === true ? { unconfirmed: true } : {}),
             });
         } catch (error) {
-            return err({ code: 'JOB_COMMAND_FAILED', message: error instanceof Error ? error.message : String(error) });
+            return err({ code: 'JOB_COMMAND_FAILED', message: error instanceof Error ? error.message : String(error), unconfirmed: true });
         }
     }
 }

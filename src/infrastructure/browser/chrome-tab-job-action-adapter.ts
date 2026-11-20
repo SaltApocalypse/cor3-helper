@@ -14,8 +14,23 @@ export class ChromeTabJobActionAdapter implements JobActionPort {
     }
 
     async complete(job: JobOffer): Promise<Result<JobReward, GameError>> {
-        const result = await this.command('V2_JOB_COMPLETE', { marketId: job.marketId, jobId: job.id });
-        if (!result.ok) return result;
+        let result: Result<void, GameError>;
+        try {
+            result = await this.command('V2_JOB_COMPLETE', { marketId: job.marketId, jobId: job.id });
+        } catch (error) {
+            return err({
+                code: 'JOB_ACTION_FAILED',
+                message: error instanceof Error ? error.message : String(error),
+                unconfirmed: true,
+            });
+        }
+        if (!result.ok) {
+            // JOB_ACTION_FAILED covers an invalid/no response or a candidate
+            // error without a code. Default to unknown, not a business retry.
+            return result.error.code === 'JOB_ACTION_FAILED' && result.error.unconfirmed === undefined
+                ? err({ ...result.error, unconfirmed: true })
+                : result;
+        }
         return ok({ credits: job.rewardCredits, reputation: job.rewardReputation, renown: 0 });
     }
 

@@ -14,6 +14,8 @@ import { humanDelay as defaultHumanDelay } from './delay.js';
 import { failureOf, jobLocation, outcomeInputOf, countsAgainstRetryBudget } from './job-outcome.js';
 import { resolveAutoFinishRunState, shouldUsePrefetched, type AutoFinishRunOptions } from './auto-finish-options.js';
 import { isCompletedForMarketReset } from '../../../application/auto-job/market-completion.js';
+import { isCompletionUncertainRecord, jobActiveKey, jobStateKeyId, JOB_STATE_UNKNOWN_RESET } from '../../../contracts/job-state.js';
+import { CompletionRecordWriter } from '../../../application/auto-job/completion-record.js';
 import { EMPTY_MARKET_COMPLETED_JOBS, type MarketCompletedJobsState } from '../../../contracts/market-completed-jobs.js';
 import type { JobMarketSyncEntry } from './job-market-sync.js';
 import { buildServerPriority } from './server-priority.js';
@@ -146,6 +148,157 @@ export class AutoFinishCoordinator {
         this.requestCancel();
     }
 
+    /**
+     * Durable barrier: a Complete with an unconfirmed result must not be
+     * re-executed merely because a fresh market row still contains the job.
+     */
+    /**
+     * Direct bridge completion has no execution session. Prefer an active
+     * Job State identity for the job over the current snapshot reset so a
+     * reset advance cannot relabel an older task.
+     */
+    async resolveDirectReset(
+        marketKey: string,
+        jobId: string,
+        fallback: string | null,
+    ): Promise<
+        | { readonly ok: true; readonly resetAt: string | null }
+        | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
+    > {
+        if (!this.deps.jobStates) return { ok: true, resetAt: fallback };
+        let records;
+        try {
+            records = await this.deps.jobStates.list();
+        } catch (error) {
+            return {
+                ok: false,
+                error: {
+                    code: 'COMPLETE_BARRIER_UNAVAILABLE',
+                    message: `Job state barrier unavailable: ${error instanceof Error ? error.message : String(error)}`,
+                },
+            };
+        }
+        const terminal = new Set(['completed', 'failed', 'expired', 'blocked']);
+        const active = records.filter((record) =>
+            record.marketKey === marketKey && record.jobId === jobId && !terminal.has(record.status));
+        if (active.length === 0) {
+            if (fallback === null || !Number.isFinite(Date.parse(fallback))) {
+                return {
+                    ok: false,
+                    error: {
+                        code: 'COMPLETE_RESET_UNKNOWN',
+                        message: 'No trustworthy reset is available for direct completion',
+                    },
+                };
+            }
+            return { ok: true, resetAt: fallback };
+        }
+        if (active.some((record) => record.resetAt === null || !Number.isFinite(Date.parse(record.resetAt)))) {
+            return {
+                ok: false,
+                error: {
+                    code: 'COMPLETE_IDENTITY_AMBIGUOUS',
+                    message: 'Active Job State records do not provide a trustworthy reset identity',
+                },
+            };
+        }
+        const resets = new Set(active.map((record) => record.resetAt!));
+        if (resets.size !== 1) {
+            return {
+                ok: false,
+                error: {
+                    code: 'COMPLETE_IDENTITY_AMBIGUOUS',
+                    message: 'Active Job State records span multiple resets',
+                },
+            };
+        }
+        return { ok: true, resetAt: active[0]!.resetAt };
+    }
+
+    /** Direct bridge completion must use the same authoritative sidecar. */
+    async recordDirectCompletion(
+        marketKey: string,
+        jobId: string,
+        resetAt: string | null,
+    ): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }> {
+        if (!resetAt || resetAt === JOB_STATE_UNKNOWN_RESET || !Number.isFinite(Date.parse(resetAt))) {
+            return { ok: false, error: { code: 'COMPLETION_RESET_UNKNOWN', message: 'A known reset is required to record a completion' } };
+        }
+        const writer = new CompletionRecordWriter(this.deps.completions);
+        const result = await writer.record({ marketKey, jobId, resetAt });
+        return result.ok
+            ? { ok: true }
+            : { ok: false, error: { code: result.error.code, message: result.error.message } };
+    }
+
+    /** Persist a durable barrier for an ambiguous direct Complete result. */
+    async markDirectUnconfirmed(marketKey: string, jobId: string, resetAt: string | null): Promise<void> {
+        const mark = this.deps.completions.markUnconfirmed;
+        if (!mark) throw new Error('completion barrier store is not configured');
+        await mark.call(this.deps.completions, { marketKey, jobId, resetAt });
+    }
+
+    /** Used by direct bridge entries (manual job.complete) before any command. */
+    async isCompletionBlocked(marketKey: string, jobId: string, resetAt: string | null): Promise<boolean> {
+        const barrier = await this.loadCompletionBarrier();
+        return this.matchesCompletionBarrier(barrier, { marketKey, id: jobId } as JobOffer, resetAt);
+    }
+
+    private async loadCompletionBarrier(): Promise<{
+        readonly exact: ReadonlySet<string>;
+        readonly unknown: ReadonlySet<string>;
+        readonly all: ReadonlySet<string>;
+    }> {
+        const exact = new Set<string>();
+        const unknown = new Set<string>();
+        const all = new Set<string>();
+
+        if (this.deps.jobStates) {
+            let records;
+            try {
+                records = await this.deps.jobStates.list();
+            } catch (error) {
+                throw new Error(`Job state barrier unavailable: ${error instanceof Error ? error.message : String(error)}`);
+            }
+            for (const record of records) {
+                if (record.status === 'completed' || !isCompletionUncertainRecord(record)) continue;
+                all.add(jobActiveKey(record.marketKey, record.jobId));
+                if (record.resetAt === null) unknown.add(jobActiveKey(record.marketKey, record.jobId));
+                else exact.add(jobStateKeyId(record));
+            }
+        }
+
+        const readUnconfirmed = this.deps.completions.getUnconfirmedState;
+        if (readUnconfirmed) {
+            let barriers;
+            try {
+                barriers = await readUnconfirmed.call(this.deps.completions);
+            } catch (error) {
+                throw new Error(`Completion barrier unavailable: ${error instanceof Error ? error.message : String(error)}`);
+            }
+            for (const [marketKey, jobs] of Object.entries(barriers)) {
+                for (const [jobId, resetAt] of Object.entries(jobs)) {
+                    all.add(jobActiveKey(marketKey, jobId));
+                    if (resetAt === 'unknown') unknown.add(jobActiveKey(marketKey, jobId));
+                    else exact.add(jobStateKeyId({ marketKey, jobId, resetAt }));
+                }
+            }
+        }
+
+        return { exact, unknown, all };
+    }
+
+    private matchesCompletionBarrier(
+        barrier: { readonly exact: ReadonlySet<string>; readonly unknown: ReadonlySet<string>; readonly all: ReadonlySet<string> },
+        job: JobOffer,
+        resetAt: string | null,
+    ): boolean {
+        const jobKey = jobActiveKey(job.marketKey, job.id);
+        if (resetAt === null) return barrier.all.has(jobKey);
+        if (barrier.unknown.has(jobKey)) return true;
+        return barrier.exact.has(jobStateKeyId({ marketKey: job.marketKey, jobId: job.id, resetAt }));
+    }
+
     async runExclusive(owner: string, options: AutoFinishRunOptions = {}): Promise<{ readonly ok: true; readonly value: AutoFinishRunResult } | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }> {
         const helperMode = (await this.deps.settings.get()).helperMode;
         if (helperMode) return { ok: false, error: { code: 'HELPER_MODE', message: 'Disable Helper Mode in Settings before starting automation' } };
@@ -185,10 +338,17 @@ export class AutoFinishCoordinator {
                     preResets.set(market.marketKey, market.resetAt);
                 }
             }
+            const preUnconfirmed = await this.loadCompletionBarrier();
             if (preState.clearAttempts) this.deps.locks.clearAttempts();
             if (preState.clearLocks) this.deps.locks.clearLocks();
             const preJobs = this.withCachedClaimOnly(prefetched).jobs;
             const preRunnable = preJobs.filter((job) => {
+                const resetAt = preResets.get(job.marketKey) ?? null;
+                if (this.matchesCompletionBarrier(preUnconfirmed, job, resetAt)) return false;
+                // The completion sidecar is authoritative even for a stale
+                // claim-only row. Never re-complete a job already recorded for
+                // this market reset.
+                if (isCompletedForMarketReset(preCompletedByMarket, job.marketKey, job.id, resetAt)) return false;
                 // A taken job that is already claimable only needs
                 // `job.complete`; it does not need a target server or an
                 // enabled job type, and a stale minigame lock must not strand
@@ -201,17 +361,19 @@ export class AutoFinishCoordinator {
                 if (!preAllowed.has(job.type)) return false;
                 if (this.deps.locks.isRetryExhausted(job.id)) return false;
                 if (this.deps.locks.isLocked(job.id)) return false;
-                const resetAt = preResets.get(job.marketKey) ?? null;
-                return !isCompletedForMarketReset(preCompletedByMarket, job.marketKey, job.id, resetAt);
+                return true;
             });
             if (preRunnable.length === 0) {
                 const preRunnableIds = new Set(preRunnable.map((job) => job.id));
-                const preSkipped = { noServer: 0, typeDisabled: 0, locked: 0, retryExhausted: 0, completed: 0 };
+                const preSkipped = { noServer: 0, typeDisabled: 0, locked: 0, retryExhausted: 0, completed: 0, completionUnknown: 0 };
                 const preBlocked: Array<{ jobId: string; name: string; marketKey: string; reason: string; lockExpiresAt?: number; resetAt?: string }> = [];
                 for (const job of preJobs) {
                     if (preRunnableIds.has(job.id)) continue;
                     const resetAt = preResets.get(job.marketKey) ?? null;
-                    if (job.serverId === null && !isServerlessJob(job.type)) {
+                    if (this.matchesCompletionBarrier(preUnconfirmed, job, resetAt)) {
+                        preSkipped.completionUnknown += 1;
+                        preBlocked.push({ jobId: job.id, name: job.name, marketKey: job.marketKey, reason: 'completion-unknown', ...(resetAt ? { resetAt } : {}) });
+                    } else if (job.serverId === null && !isServerlessJob(job.type)) {
                         preSkipped.noServer += 1;
                         preBlocked.push({ jobId: job.id, name: job.name, marketKey: job.marketKey, reason: 'no-server' });
                     } else if (!preAllowed.has(job.type)) {
@@ -340,10 +502,17 @@ export class AutoFinishCoordinator {
                     resetByMarket.set(market.marketKey, market.resetAt);
                 }
             }
+            const unconfirmed = await this.loadCompletionBarrier();
             if (state.clearAttempts) this.deps.locks.clearAttempts();
             if (state.clearLocks) this.deps.locks.clearLocks();
             this.deps.locks.reconcileResets(resetByMarket);
             const runnable = runJobs.filter((job) => {
+                const resetAt = resetByMarket.get(job.marketKey) ?? null;
+                if (this.matchesCompletionBarrier(unconfirmed, job, resetAt)) return false;
+                // The completion sidecar is authoritative even for a stale
+                // claim-only row. Never re-complete a job already recorded for
+                // this market reset.
+                if (isCompletedForMarketReset(completedByMarket, job.marketKey, job.id, resetAt)) return false;
                 // Claim-only jobs bypass locks, server/type checks and the
                 // retry/completion budgets: the decryption/minigame is already
                 // finished, only completion remains.
@@ -355,14 +524,15 @@ export class AutoFinishCoordinator {
                 if (!allowedTypes.has(job.type)) return false;
                 if (this.deps.locks.isRetryExhausted(job.id)) return false;
                 if (this.deps.locks.isLocked(job.id)) return false;
-                const resetAt = resetByMarket.get(job.marketKey) ?? null;
-                return !isCompletedForMarketReset(completedByMarket, job.marketKey, job.id, resetAt);
+                return true;
             });
             const runnableIds = new Set(runnable.map((job) => job.id));
-            const skipped = { noServer: 0, typeDisabled: 0, locked: 0, retryExhausted: 0, completed: 0 };
+            const skipped = { noServer: 0, typeDisabled: 0, locked: 0, retryExhausted: 0, completed: 0, completionUnknown: 0 };
             for (const job of runJobs) {
                 if (runnableIds.has(job.id)) continue;
-                if (!job.serverId && !isServerlessJob(job.type)) skipped.noServer += 1;
+                const resetAt = resetByMarket.get(job.marketKey) ?? null;
+                if (this.matchesCompletionBarrier(unconfirmed, job, resetAt)) skipped.completionUnknown += 1;
+                else if (!job.serverId && !isServerlessJob(job.type)) skipped.noServer += 1;
                 else if (!allowedTypes.has(job.type)) skipped.typeDisabled += 1;
                 else if (this.deps.locks.isLocked(job.id)) skipped.locked += 1;
                 else if (this.deps.locks.isRetryExhausted(job.id)) skipped.retryExhausted += 1;
@@ -373,6 +543,10 @@ export class AutoFinishCoordinator {
                     .filter((job) => !runnableIds.has(job.id))
                     .slice(0, 10)
                     .map((job) => {
+                        const resetAt = resetByMarket.get(job.marketKey) ?? null;
+                        if (this.matchesCompletionBarrier(unconfirmed, job, resetAt)) {
+                            return { jobId: job.id, name: job.name, marketKey: job.marketKey, reason: 'completion-unknown', ...(resetAt ? { resetAt } : {}) };
+                        }
                         const lockUntil = this.deps.locks.lockUntil(job.id);
                         if (lockUntil !== undefined && lockUntil > this.now()) {
                             return { jobId: job.id, name: job.name, marketKey: job.marketKey, reason: 'minigame-lock', lockExpiresAt: lockUntil };

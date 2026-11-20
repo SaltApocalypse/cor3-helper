@@ -5,8 +5,38 @@ import type { JobExecutionPort, JobReward } from './runner.js';
 import { conditionsOf, fileReferencesFromConditions, ipsFromConditions, type DownloadFile, type FileAnalysis, type JobActionPort } from './job-actions.js';
 import type { MinigamePort } from './minigame-port.js';
 import type { JobStateRecorderPort, JobStateSession } from './job-state-recorder.js';
+import type { JobStateStorePort } from './job-state-port.js';
+import type { JobRefreshHook, JobRefreshResult } from './refresh-outcome.js';
+import { isCompletionUncertainRecord, JOB_STATE_UNKNOWN_RESET, jobActiveKey, normalizeJobStateResetAt } from '../../contracts/job-state.js';
 import { lifecycleStatusForFailure } from './lifecycle.js';
+import { CompletionRecordWriter } from './completion-record.js';
+import type { MarketCompletionStorePort } from './market-completion.js';
 import { sleep as defaultSleep } from '../../kernel/sleep.js';
+
+/** Bounded wait for a background solver to make the job claimable. */
+const SOLVER_HANDOFF_DEADLINE_MS = 30_000;
+const SOLVER_HANDOFF_INTERVAL_MS = 3_000;
+const UNCONFIRMED_COMPLETE_CODES = new Set(['GAME_TIMEOUT', 'GAME_NO_SOCKET', 'JOB_COMMAND_FAILED', 'JOB_ACTION_FAILED', 'GAME_DISCONNECTED', 'GAME_SOCKET_CLOSED']);
+// Only locally-generated pre-send failures are provably safe to retry.
+const EXPLICIT_COMPLETE_CODES = new Set(['NO_COR3_TAB', 'INVALID_JOB']);
+
+function unconfirmedCompleteError(error: GameError): boolean {
+    if (error.unconfirmed !== undefined) return error.unconfirmed;
+    if (UNCONFIRMED_COMPLETE_CODES.has(error.code)) return true;
+    if (EXPLICIT_COMPLETE_CODES.has(error.code)) return false;
+    // Unknown codes are not proof of a business rejection. Default to the
+    // conservative outcome so a lost reply cannot trigger a second Complete.
+    // GAME_JOB_FAILED is deliberately not explicit: it is the socket fallback
+    // for code-less error frames and has no protocol guarantee that the state
+    // did not change.
+    return true;
+}
+
+function comparableReset(resetAt: string | null | undefined): string | null {
+    const normalized = normalizeJobStateResetAt(resetAt);
+    if (normalized === null) return null;
+    return Number.isFinite(Date.parse(normalized)) ? normalized : null;
+}
 
 export type JobExecutionErrorCode =
     | 'NO_SERVER'
@@ -29,6 +59,8 @@ export interface JobExecutionError {
     readonly retryAt?: number;
     readonly lockExpiresAt?: number;
     readonly stage?: string;
+    /** Complete reached an indeterminate transport result; do not resend blindly. */
+    readonly unconfirmed?: boolean;
 }
 
 function stageForJobError(code: JobExecutionErrorCode): string {
@@ -82,7 +114,6 @@ function retryMetadata(source: { readonly message: string; readonly retryAt?: nu
 }
 
 export type JobCompletionHook = (job: JobOffer) => Promise<Result<void, GameError>>;
-export type JobRefreshHook = (job: JobOffer) => Promise<Result<JobOffer, GameError>>;
 export type JobDecryptHook = (job: JobOffer, file: DownloadFile, requiredPower?: number) => Promise<Result<void, GameError>>;
 export type JobPreflightHook = (job: JobOffer) => Promise<Result<void, GameError>>;
 
@@ -105,6 +136,10 @@ export class JobExecutionService implements JobExecutionPort {
         private readonly trace?: (message: string, data?: unknown) => void,
         private readonly sleep: (ms: number) => Promise<void> = defaultSleep,
         private readonly stateRecorder?: JobStateRecorderPort,
+        private readonly solverHandoffDeadlineMs: number = SOLVER_HANDOFF_DEADLINE_MS,
+        private readonly completions?: MarketCompletionStorePort,
+        private readonly jobStates?: Pick<JobStateStorePort, 'get' | 'list'>,
+        private readonly resetAtForMarket?: (marketKey: string) => string | null,
     ) {}
 
     async execute(job: JobOffer): Promise<Result<JobReward, GameError>> {
@@ -117,28 +152,50 @@ export class JobExecutionService implements JobExecutionPort {
                 stage: result.error.stage ?? stageForJobError(result.error.code),
                 ...(result.error.retryAt !== undefined ? { retryAt: result.error.retryAt } : {}),
                 ...(result.error.lockExpiresAt !== undefined ? { lockExpiresAt: result.error.lockExpiresAt } : {}),
+                ...(result.error.unconfirmed === true ? { unconfirmed: true } : {}),
             });
         }
         return ok(result.value);
     }
 
     async executeDetailed(job: JobOffer): Promise<Result<JobReward, JobExecutionError>> {
-        const state = await this.startJobState(job);
-        const result = await this.executeJob(job, state);
+        // Capture the execution identity once, before any store/session work.
+        // It must not be replaced by a snapshot read at Complete time.
+        const executionResetAt = comparableReset(this.resetAtForMarket?.(job.marketKey));
+        const state = await this.startJobState(job, this.resetAtForMarket ? executionResetAt : undefined);
+        const result = await this.executeJob(job, state, executionResetAt);
         if (!result.ok) {
-            await state?.transition(lifecycleStatusForFailure(result.error), {
-                errorCode: result.error.code,
-                message: result.error.message,
-                ...(result.error.stage !== undefined ? { stage: result.error.stage } : {}),
-            });
+            if (state === null && result.error.unconfirmed === true) {
+                await this.rememberUnconfirmedCompletion(job, null, executionResetAt);
+            }
+            try {
+                await state?.transition(lifecycleStatusForFailure({
+                    ...result.error,
+                    ...(result.error.unconfirmed !== undefined ? { unconfirmed: result.error.unconfirmed } : {}),
+                }), {
+                    errorCode: result.error.code,
+                    message: result.error.message,
+                    ...(result.error.stage !== undefined ? { stage: result.error.stage } : {}),
+                    ...(result.error.unconfirmed === true ? { unconfirmed: true } : {}),
+                });
+            } catch (error) {
+                // The primary Job State write failed. Persist the durable
+                // fallback barrier in the completion store and fail closed for
+                // the rest of this runtime if even that fails.
+                await this.rememberUnconfirmedCompletion(job, state, executionResetAt);
+                this.trace?.('Failed to persist unconfirmed Job State', {
+                    jobId: job.id,
+                    message: error instanceof Error ? error.message : String(error),
+                });
+            }
         }
         return result;
     }
 
-    private async startJobState(job: JobOffer): Promise<JobStateSession | null> {
+    private async startJobState(job: JobOffer, executionResetAt: string | null | undefined): Promise<JobStateSession | null> {
         if (!this.stateRecorder) return null;
         try {
-            return await this.stateRecorder.start(job);
+            return await this.stateRecorder.start(job, executionResetAt);
         } catch (error) {
             // Recording is observational; a recorder bug must not stop the job.
             this.trace?.('Failed to start job lifecycle record', {
@@ -149,12 +206,14 @@ export class JobExecutionService implements JobExecutionPort {
         }
     }
 
-    private async executeJob(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
+    private async executeJob(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
         if (this.shouldStop?.()) return err({ code: 'JOB_CANCELLED', message: 'Job run cancelled', retryable: false, stage: 'cancelled' });
+        const blocked = await this.completionBarrier(job, state);
+        if (blocked) return err(blocked);
         // Completion is the only remaining step for a claimable job. It must
         // not be rejected for a missing target server or a disabled type.
         if (job.alreadyTaken && job.canComplete) {
-            return this.complete(job, state);
+            return this.complete(job, state, executionResetAt);
         }
         if (!job.serverId && !isServerlessJob(job.type)) {
             return err({ code: 'NO_SERVER', message: 'Job has no server id' });
@@ -187,10 +246,10 @@ export class JobExecutionService implements JobExecutionPort {
             await this.pace?.();
             if (this.afterTake) {
                 const refreshed = await this.afterTake(current);
-                if (refreshed.ok) current = refreshed.value;
+                if (refreshed.ok && refreshed.value.status === 'fresh') current = refreshed.value.job;
             }
             if (current.alreadyTaken && current.canComplete) {
-                return this.complete(current, state);
+                return this.complete(current, state, executionResetAt);
             }
         }
 
@@ -203,29 +262,29 @@ export class JobExecutionService implements JobExecutionPort {
         await state?.transition('executing');
         switch (current.type) {
             case 'IP Injection':
-                return this.injectIps(current, state);
+                return this.injectIps(current, state, executionResetAt);
             case 'IP Cleanup':
-                return this.cleanupIps(current, state);
+                return this.cleanupIps(current, state, executionResetAt);
             case 'File Elimination':
-                return this.eliminateFile(current, state);
+                return this.eliminateFile(current, state, executionResetAt);
             case 'Log Deletion':
-                return this.deleteLog(current, state);
+                return this.deleteLog(current, state, executionResetAt);
             case 'Log Download':
-                return this.downloadLog(current, state);
+                return this.downloadLog(current, state, executionResetAt);
             case 'Data Upload':
-                return this.uploadFile(current, state);
+                return this.uploadFile(current, state, executionResetAt);
             case 'Data Download':
-                return this.downloadFile(current, state);
+                return this.downloadFile(current, state, executionResetAt);
             case 'File Decryption':
-                return this.fileDecryption(current, state);
+                return this.fileDecryption(current, state, executionResetAt);
             case 'Decrypt & Extract':
-                return this.decryptAndExtract(current, state);
+                return this.decryptAndExtract(current, state, executionResetAt);
             default:
                 return err({ code: 'UNSUPPORTED_JOB_TYPE', message: `Unsupported job type: ${current.type}` });
         }
     }
 
-    private async injectIps(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
+    private async injectIps(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
         const ips = ipsFromConditions(job);
         if (ips.length === 0) return err({ code: 'ACTION_FAILED', message: 'No IPs found in job conditions' });
         for (const ip of ips) {
@@ -233,10 +292,10 @@ export class JobExecutionService implements JobExecutionPort {
             if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
             await this.pace?.();
         }
-        return this.complete(job, state);
+        return this.complete(job, state, executionResetAt);
     }
 
-    private async cleanupIps(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
+    private async cleanupIps(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
         let ips = ipsFromConditions(job, 'DeleteIps');
         if (ips.length === 0) {
             const transit = await this.actions.getTransit(job.serverId!);
@@ -250,10 +309,10 @@ export class JobExecutionService implements JobExecutionPort {
             if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
             await this.pace?.();
         }
-        return this.complete(job, state);
+        return this.complete(job, state, executionResetAt);
     }
 
-    private async eliminateFile(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
+    private async eliminateFile(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
         const files = await this.actions.getServerFiles(job.serverId!);
         if (!files.ok) return err({ code: 'ACTION_FAILED', message: files.error.message });
         const refs = fileReferencesFromConditions(job);
@@ -261,54 +320,54 @@ export class JobExecutionService implements JobExecutionPort {
             file.jobId === job.id
             || refs.some((ref) => ref.fileId === file.fileId || (ref.name !== undefined && ref.name === file.name)),
         ) ?? files.value.find((file) => file.source === 'job');
-        if (!target) return this.complete(job, state);
+        if (!target) return this.complete(job, state, executionResetAt);
         const result = await this.actions.deleteFile(job.serverId!, target.fileId);
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
-        return this.complete(job, state);
+        return this.complete(job, state, executionResetAt);
     }
 
-    private async deleteLog(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
+    private async deleteLog(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
         const logs = await this.actions.getServerLogs(job.serverId!);
         if (!logs.ok) return err({ code: 'ACTION_FAILED', message: logs.error.message });
         const target = logs.value.find((log) => log.jobId === job.id);
-        if (!target) return this.complete(job, state);
+        if (!target) return this.complete(job, state, executionResetAt);
         const result = await this.actions.deleteLog(job.serverId!, target.seq);
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
-        return this.complete(job, state);
+        return this.complete(job, state, executionResetAt);
     }
 
-    private async downloadLog(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
+    private async downloadLog(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
         const logs = await this.actions.getServerLogs(job.serverId!);
         if (!logs.ok) return err({ code: 'ACTION_FAILED', message: logs.error.message });
         const target = logs.value.find((log) => log.jobId === job.id);
-        if (!target) return this.complete(job, state);
+        if (!target) return this.complete(job, state, executionResetAt);
         const result = await this.actions.downloadLog(job.serverId!, target.seq);
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
-        return this.complete(job, state);
+        return this.complete(job, state, executionResetAt);
     }
 
-    private async downloadFile(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
+    private async downloadFile(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
         const files = await this.actions.getServerFiles(job.serverId!);
         if (!files.ok) return err({ code: 'ACTION_FAILED', message: files.error.message });
         const target = files.value.find((file) => file.jobId === job.id);
-        if (!target) return this.complete(job, state);
+        if (!target) return this.complete(job, state, executionResetAt);
         const result = await this.actions.downloadFile(job.serverId!, target.fileId);
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
         if (requiresDecrypt(job)) {
             const download = await this.findDownloadedFile(job, target.name);
             if (!download.ok) return download;
-            return this.decryptAndComplete(job, download.value, state);
+            return this.decryptAndComplete(job, download.value, state, executionResetAt);
         }
-        return this.complete(job, state);
+        return this.complete(job, state, executionResetAt);
     }
 
-    private async fileDecryption(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
+    private async fileDecryption(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
         const download = await this.findDownloadedFile(job);
         if (!download.ok) return download;
-        return this.decryptAndComplete(job, download.value, state);
+        return this.decryptAndComplete(job, download.value, state, executionResetAt);
     }
 
-    private async decryptAndExtract(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
+    private async decryptAndExtract(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
         const files = await this.actions.getServerFiles(job.serverId!);
         if (!files.ok) return err({ code: 'ACTION_FAILED', message: files.error.message });
         const target = files.value.find((file) => file.jobId === job.id);
@@ -318,7 +377,7 @@ export class JobExecutionService implements JobExecutionPort {
         }
         const download = await this.findDownloadedFile(job, target?.name);
         if (!download.ok) return download;
-        return this.decryptAndComplete(job, download.value, state);
+        return this.decryptAndComplete(job, download.value, state, executionResetAt);
     }
 
     private async findDownloadedFile(job: JobOffer, preferredName?: string): Promise<Result<DownloadFile, JobExecutionError>> {
@@ -385,12 +444,12 @@ export class JobExecutionService implements JobExecutionPort {
         return analysis;
     }
 
-    private async decryptAndComplete(job: JobOffer, file: DownloadFile, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
+    private async decryptAndComplete(job: JobOffer, file: DownloadFile, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
         // A decoded file can be picked up again when the user solved it manually
         // or when a previous run already decrypted it. Completing directly avoids
         // re-opening the minigame and avoids reporting "insufficient power (0)".
         this.trace?.(`Decrypt target file selected: ${file.name} (${file.id})`, { jobId: job.id, fileId: file.id, fileName: file.name, expectedType: decryptFileType(job, file.name), encrypted: file.isEncrypted });
-        if (file.isEncrypted === false) return this.completeAfterDecrypt(job, file.id, state);
+        if (file.isEncrypted === false) return this.completeAfterDecrypt(job, file.id, state, executionResetAt);
         let analysis = await this.actions.getFileAnalysis(file.id);
         this.trace?.(
             `Decrypt file analysis: canDecrypt=${analysis.ok ? analysis.value.canDecrypt : 'error'}, power=${analysis.ok ? analysis.value.decryptPower : '?'}`,
@@ -478,7 +537,7 @@ export class JobExecutionService implements JobExecutionPort {
                 if (message.includes('file-already-decrypted') || message.includes('cannot-read-sai-file')) {
                     // Conditions update shortly after decryption; use the retrying
                     // completion path instead of a single, easily-stale attempt.
-                    return this.completeAfterDecrypt(job, file.id, state);
+                    return this.completeAfterDecrypt(job, file.id, state, executionResetAt);
                 }
                 return err({ code: 'ACTION_FAILED', message, ...retryMetadata(opened.error) });
             }
@@ -494,12 +553,25 @@ export class JobExecutionService implements JobExecutionPort {
             },
         );
         if (openTimedOut) {
-            // The decrypt.file reply may only arrive after the minigame closes.
-            // Never continue to completion when the file was not confirmed open:
-            // it produced a burst of "job-conditions-not-met" retries in v2.
+            // The decrypt.file reply can time out before a slow minigame room
+            // loads. The in-flight solver (or the background solver tick after
+            // this promise ends) may still solve it. Never treat that as a
+            // successful completion by itself: wait for the market row to
+            // become claimable, then use the existing complete path.
+            this.trace?.('decrypt.file timed out; waiting for a claimable job row', { jobId: job.id, fileId: file.id });
+            const claimable = await this.waitForClaimableJob(job, state?.key.resetAt ?? executionResetAt);
+            if (claimable) {
+                this.trace?.('Minigame completed after decrypt.file timeout; attempting completion', { jobId: job.id, fileId: file.id });
+                return this.completeAfterDecrypt(claimable, file.id, state, executionResetAt, { reopenOnConditions: false });
+            }
+            const solverMessage = result.ok
+                ? result.value.solved
+                    ? 'Minigame solved but completion was not confirmed'
+                    : result.value.message ?? 'Minigame did not complete'
+                : result.error.message;
             return err({
                 code: 'ACTION_FAILED',
-                message: 'Timed out waiting for desktop:decrypt.file',
+                message: `Timed out waiting for desktop:decrypt.file; ${solverMessage}`,
                 retryable: true,
                 stage: 'minigame',
             });
@@ -536,12 +608,65 @@ export class JobExecutionService implements JobExecutionPort {
         // v1 waited here and retried completion; doing the same avoids marking the
         // first successful decryption as failed while it is still "ready to claim".
         await this.sleep(1500);
-        return this.completeAfterDecrypt(job, file.id, state);
+        return this.completeAfterDecrypt(job, file.id, state, executionResetAt);
     }
 
-    private async completeAfterDecrypt(job: JobOffer, fileId: string, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
+    /**
+     * Polls the existing after-take refresh for a remotely claimable row. This
+     * is deliberately not a solver event: only the game row can prove that the
+     * reward is ready, and no second Take is issued.
+     */
+    private async waitForClaimableJob(job: JobOffer, expectedResetAt: string | null): Promise<JobOffer | null> {
+        if (!this.afterTake) return null;
+        const expectedReset = comparableReset(expectedResetAt);
+        // Without a trusted original reset, fail closed rather than using the
+        // current refresh row to invent a new execution identity.
+        if (expectedReset === null) return null;
+        const deadline = Date.now() + this.solverHandoffDeadlineMs;
         let current = job;
-        let last = await this.complete(current, state);
+        while (Date.now() < deadline) {
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) break;
+            const refreshed = await this.refreshWithDeadline(current, remaining);
+            if (refreshed === null) break;
+            if (!refreshed.ok) break;
+            if (refreshed.value.status !== 'fresh') break;
+            const next = refreshed.value.job;
+            const refreshedReset = comparableReset(refreshed.value.resetAt);
+            // Both identities must be known and identical. Do not adopt the
+            // refreshed reset when it differs from the execution identity.
+            if (refreshedReset === null || refreshedReset !== expectedReset) break;
+            if (next.id !== job.id || next.marketId !== job.marketId || next.marketKey !== job.marketKey) break;
+            current = next;
+            if (current.alreadyTaken && current.canComplete) return current;
+            const wait = Math.min(SOLVER_HANDOFF_INTERVAL_MS, deadline - Date.now());
+            if (wait > 0) await this.sleep(wait);
+        }
+        return null;
+    }
+
+    private async refreshWithDeadline(job: JobOffer, remainingMs: number): Promise<JobRefreshResult | null> {
+        if (!this.afterTake) return null;
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const timeout = new Promise<null>((resolve) => {
+            timer = setTimeout(() => resolve(null), remainingMs);
+        });
+        try {
+            return await Promise.race([this.afterTake(job, remainingMs), timeout]);
+        } finally {
+            if (timer !== null) clearTimeout(timer);
+        }
+    }
+
+    private async completeAfterDecrypt(
+        job: JobOffer,
+        fileId: string,
+        state: JobStateSession | null,
+        executionResetAt: string | null,
+        options: { readonly reopenOnConditions?: boolean } = {},
+    ): Promise<Result<JobReward, JobExecutionError>> {
+        let current = job;
+        let last = await this.complete(current, state, executionResetAt);
         // Completion can fail because the game has not refreshed conditions yet,
         // the market endpoint was briefly unreachable, or the WS was reconnecting.
         // Refresh the job row before each retry: the deferred run-level pass proved
@@ -549,14 +674,19 @@ export class JobExecutionService implements JobExecutionPort {
         // stale row still says "conditions not met".
         for (let attempt = 0; attempt < 3 && !last.ok; attempt++) {
             this.trace?.(`Completion attempt failed (${attempt + 1}): ${last.error.code} — ${last.error.message}`, { jobId: current.id, attempt: attempt + 1, code: last.error.code, message: last.error.message });
+            // A lost response does not prove failure; do not send Complete again
+            // until the next market/reconciliation pass confirms the state.
+            if (last.error.unconfirmed === true) return last;
             if (last.error.code !== 'COMPLETE_FAILED' || /token|not found|stale/i.test(last.error.message)) return last;
-            if (/conditions.*not.*met|not met/i.test(last.error.message) && attempt < 2) {
+            if (options.reopenOnConditions !== false
+                && /conditions.*not.*met|not met/i.test(last.error.message)
+                && attempt < 2) {
                 await this.pace?.();
                 await this.reopenFileForCompletion(fileId);
             }
             current = await this.refreshForCompletion(current);
             await this.sleep(3000);
-            last = await this.complete(current, state);
+            last = await this.complete(current, state, executionResetAt);
         }
         return last;
     }
@@ -569,8 +699,7 @@ export class JobExecutionService implements JobExecutionPort {
     private async refreshForCompletion(job: JobOffer): Promise<JobOffer> {
         if (!this.afterTake) return job;
         const refreshed = await this.afterTake(job);
-        if (!refreshed.ok) return job;
-        return refreshed.value;
+        return refreshed.ok && refreshed.value.status === 'fresh' ? refreshed.value.job : job;
     }
 
     /**
@@ -593,7 +722,7 @@ export class JobExecutionService implements JobExecutionPort {
         await solving;
     }
 
-    private async uploadFile(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
+    private async uploadFile(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
         if (!job.serverId) return err({ code: 'NO_SERVER', message: 'Job has no target server for upload' });
         let fileName = job.fileInfo?.name ?? null;
         if (!fileName) {
@@ -607,10 +736,10 @@ export class JobExecutionService implements JobExecutionPort {
         if (!fileName) return err({ code: 'ACTION_FAILED', message: 'No upload file found' });
         const result = await this.actions.uploadFile(job.serverId, fileName);
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
-        return this.complete(job, state);
+        return this.complete(job, state, executionResetAt);
     }
 
-    private async complete(job: JobOffer, state: JobStateSession | null): Promise<Result<JobReward, JobExecutionError>> {
+    private async complete(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
         await this.pace?.();
         await state?.transition('ready-to-claim');
         // The complete request may mutate remote state; record the intent first.
@@ -620,9 +749,184 @@ export class JobExecutionService implements JobExecutionPort {
             if (!hook.ok) return err({ code: 'COMPLETE_FAILED', message: hook.error.message, ...retryMetadata(hook.error) });
         }
         const result = await this.actions.complete(job);
-        if (!result.ok) return err({ code: 'COMPLETE_FAILED', message: result.error.message, ...retryMetadata(result.error) });
+        if (!result.ok) {
+            return err({
+                code: 'COMPLETE_FAILED',
+                message: result.error.message,
+                ...retryMetadata(result.error),
+                ...(unconfirmedCompleteError(result.error) ? { unconfirmed: true } : {}),
+            });
+        }
+        const persisted = await this.persistCompletion(job, state, executionResetAt);
+        if (!persisted.ok) return persisted;
         await state?.transition('completed');
         return ok(result.value);
+    }
+
+    private readonly runtimeBarrierFailures = new Set<string>();
+
+    /** Refuse to execute a job whose earlier Complete result is still unknown. */
+    private async completionBarrier(job: JobOffer, state: JobStateSession | null): Promise<JobExecutionError | null> {
+        if (this.runtimeBarrierFailures.has(jobActiveKey(job.marketKey, job.id))) {
+            return this.blockedError();
+        }
+
+        const key = state?.key;
+        if (state && this.jobStates) {
+            let record;
+            try {
+                record = await this.jobStates.get(state.key);
+            } catch (error) {
+                return this.blockedError(`Completion state unavailable: ${error instanceof Error ? error.message : String(error)}`);
+            }
+            if (record && isCompletionUncertainRecord(record)) return this.blockedError();
+        }
+
+        if (this.jobStates?.list) {
+            let records;
+            try {
+                records = await this.jobStates.list();
+            } catch (error) {
+                return this.blockedError(`Job state barrier unavailable: ${error instanceof Error ? error.message : String(error)}`);
+            }
+            const nullResetBlocked = records.some((record) =>
+                record.marketKey === job.marketKey
+                && record.jobId === job.id
+                && record.resetAt === null
+                && isCompletionUncertainRecord(record));
+            if (nullResetBlocked) return this.blockedError();
+            if (!state) {
+                const anyBlocked = records.some((record) =>
+                    record.marketKey === job.marketKey
+                    && record.jobId === job.id
+                    && isCompletionUncertainRecord(record));
+                if (anyBlocked) return this.blockedError();
+            }
+        }
+
+        const readUnconfirmed = this.completions?.getUnconfirmedState;
+        if (readUnconfirmed) {
+            let barriers;
+            try {
+                barriers = await readUnconfirmed.call(this.completions);
+            } catch (error) {
+                return this.blockedError(`Completion barrier unavailable: ${error instanceof Error ? error.message : String(error)}`);
+            }
+            const value = barriers?.[job.marketKey]?.[job.id];
+            if (value !== undefined) {
+                const resetAt = key ? comparableReset(key.resetAt) : null;
+                if (value === JOB_STATE_UNKNOWN_RESET || resetAt === null || value === resetAt) {
+                    return this.blockedError();
+                }
+            }
+        }
+        return null;
+    }
+
+    private blockedError(message = 'Completion is blocked by an earlier unconfirmed Complete result'): JobExecutionError {
+        return {
+            code: 'COMPLETE_FAILED',
+            message,
+            retryable: false,
+            stage: 'complete',
+            unconfirmed: true,
+        };
+    }
+
+    private async rememberUnconfirmedCompletion(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<void> {
+        const mark = this.completions?.markUnconfirmed;
+        if (!mark) return;
+        const key = state?.key ?? {
+            marketKey: job.marketKey,
+            jobId: job.id,
+            resetAt: comparableReset(executionResetAt),
+        };
+        try {
+            await mark.call(this.completions, { marketKey: key.marketKey, jobId: key.jobId, resetAt: key.resetAt });
+        } catch (error) {
+            this.runtimeBarrierFailures.add(jobActiveKey(job.marketKey, job.id));
+            this.trace?.('Failed to persist unconfirmed completion barrier', {
+                jobId: job.id,
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    /**
+     * The authoritative completion sidecar must be written before Job State can
+     * become completed. A failed write leaves the lifecycle in claiming; the
+     * caller records unknown/unconfirmed and a later market sync can reconcile.
+     */
+    private async persistCompletion(
+        job: JobOffer,
+        state: JobStateSession | null,
+        executionResetAt: string | null,
+    ): Promise<Result<void, JobExecutionError>> {
+        // Test/embedding compositions may run without a sidecar. Production
+        // always wires the shared market completion store.
+        if (!this.completions) return ok(undefined);
+
+        const resetAt = state
+            ? comparableReset(state.key.resetAt)
+            : comparableReset(executionResetAt);
+        if (resetAt === null) {
+            return err({
+                code: 'COMPLETE_FAILED',
+                message: 'Cannot persist completion without a known reset',
+                retryable: false,
+                stage: 'complete',
+                unconfirmed: true,
+            });
+        }
+
+        let current: string | null;
+        try {
+            current = await this.completions.getCompletion(job.marketKey, job.id);
+        } catch (error) {
+            return err({
+                code: 'COMPLETE_FAILED',
+                message: `Completion sidecar read failed: ${error instanceof Error ? error.message : String(error)}`,
+                retryable: false,
+                stage: 'complete',
+                unconfirmed: true,
+            });
+        }
+
+        let expected: string | null | undefined;
+        if (current === null) {
+            expected = undefined;
+        } else if (current === resetAt) {
+            expected = current;
+        } else {
+            const currentTime = Date.parse(current);
+            if (!Number.isFinite(currentTime) || Date.parse(resetAt) < currentTime) {
+                return err({
+                    code: 'COMPLETE_FAILED',
+                    message: `Completion sidecar has a newer or invalid reset for ${job.marketKey}/${job.id}`,
+                    retryable: false,
+                    stage: 'complete',
+                    unconfirmed: true,
+                });
+            }
+            expected = current;
+        }
+
+        const writer = new CompletionRecordWriter(this.completions);
+        const written = await writer.record({
+            marketKey: job.marketKey,
+            jobId: job.id,
+            resetAt,
+            ...(expected !== undefined ? { expectedExistingResetAt: expected } : {}),
+        });
+        if (written.ok) return ok(undefined);
+
+        return err({
+            code: 'COMPLETE_FAILED',
+            message: `Completion sidecar write failed: ${written.error.code} ${written.error.message}`,
+            retryable: false,
+            stage: 'complete',
+            unconfirmed: true,
+        });
     }
 }
 

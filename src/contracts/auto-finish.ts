@@ -27,6 +27,7 @@ export const autoFinishFailureSchema = z.object({
     retryAt: z.number().optional(),
     lockExpiresAt: z.number().optional(),
     stage: z.string().optional(),
+    unconfirmed: z.boolean().optional(),
 }).strict();
 
 export const autoFinishMarketSchema = z.object({

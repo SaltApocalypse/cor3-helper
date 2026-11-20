@@ -30,6 +30,13 @@ export interface MarketCompletionStorePort {
     clear(): Promise<void>;
     /** Remove only records in this market whose stored reset is older than currentResetAt. */
     pruneMarketBeforeReset(marketKey: string, currentResetAt: string): Promise<MarketCompletionPruneOutcome>;
+    /** Optional durable fallback barrier used when Job State cannot persist. */
+    getUnconfirmedState?(): Promise<Readonly<Record<string, Readonly<Record<string, string>>>>>;
+    markUnconfirmed?(input: {
+        readonly marketKey: string;
+        readonly jobId: string;
+        readonly resetAt: string | null;
+    }): Promise<void>;
 }
 
 function nonEmpty(value: string | null | undefined): string | null {

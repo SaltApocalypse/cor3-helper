@@ -27,6 +27,8 @@ export interface AutoJobRunError {
     readonly retryAt?: number;
     readonly lockExpiresAt?: number;
     readonly stage?: string;
+    /** Complete result was unconfirmed; do not auto-retry. */
+    readonly unconfirmed?: boolean;
 }
 
 /**
@@ -73,6 +75,7 @@ export class AutoJobRunner {
                     ...(result.error.retryAt !== undefined ? { retryAt: result.error.retryAt } : {}),
                     ...(result.error.lockExpiresAt !== undefined ? { lockExpiresAt: result.error.lockExpiresAt } : {}),
                     ...(result.error.stage !== undefined ? { stage: result.error.stage } : {}),
+                    ...(result.error.unconfirmed === true ? { unconfirmed: true } : {}),
                 },
             };
         }

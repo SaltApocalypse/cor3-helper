@@ -436,11 +436,18 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
     }
     if (type === 'V2_REQUEST_MARKET_JOBS') {
         const marketId = (message as { marketId?: unknown }).marketId;
+        const requestedTimeout = (message as { timeoutMs?: unknown }).timeoutMs;
         if (typeof marketId !== 'string' || marketId.length === 0) {
             sendResponse({ ok: false, error: { code: 'INVALID_MARKET', message: 'Invalid market id' } });
             return true;
         }
-        void game.request('game.requestMarketJobs', { marketId }, z.unknown(), 35_000).then((result) => sendResponse(result));
+        const timeoutMs = typeof requestedTimeout === 'number' && requestedTimeout > 0
+            ? Math.min(requestedTimeout, 35_000)
+            : 35_000;
+        void game.request('game.requestMarketJobs', {
+            marketId,
+            timeoutMs,
+        }, z.unknown(), timeoutMs + 500).then((result) => sendResponse(result));
         return true;
     }
     return false;

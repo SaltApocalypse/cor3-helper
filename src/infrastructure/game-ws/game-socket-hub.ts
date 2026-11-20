@@ -283,17 +283,66 @@ declare global {
     }
 }
 
-function gameError(error: unknown, fallback: string): GameError {
+export function gameError(error: unknown, fallback: string): GameError {
     if (error && typeof error === 'object') {
         const candidate = error as { code?: unknown; message?: unknown; retryAt?: unknown; lockExpiresAt?: unknown };
+        const serverCode = typeof candidate.code === 'string' ? candidate.code : null;
         return {
-            code: typeof candidate.code === 'string' ? candidate.code : fallback,
+            code: serverCode ?? fallback,
             message: typeof candidate.message === 'string' ? candidate.message : fallback,
+            // A fallback code is synthesized locally; it is not proof that the
+            // server rejected the command, so the result stays unconfirmed.
+            ...(serverCode === null ? { unconfirmed: true } : {}),
             ...(typeof candidate.retryAt === 'number' ? { retryAt: candidate.retryAt } : {}),
             ...(typeof candidate.lockExpiresAt === 'number' ? { lockExpiresAt: candidate.lockExpiresAt } : {}),
         };
     }
-    return { code: fallback, message: fallback };
+    if (typeof error === 'string' && error.trim().length > 0) {
+        return { code: fallback, message: error, unconfirmed: true };
+    }
+    return { code: fallback, message: fallback, unconfirmed: true };
+}
+
+export interface GameFramePayload {
+    readonly event?: { readonly action?: unknown } | undefined;
+    readonly data?: unknown;
+    readonly error?: unknown;
+    readonly message?: unknown;
+}
+
+export interface ParsedGameFrame {
+    readonly eventName: string;
+    readonly action: string | undefined;
+    readonly payload: GameFramePayload;
+    readonly data: unknown;
+    readonly error: unknown;
+}
+
+/** Parse one Socket.IO `42[...]` frame and require the minimum envelope shape. */
+export function parseGameFrame(text: string): ParsedGameFrame | null {
+    if (!text.startsWith('42')) return null;
+    let parsed: unknown;
+    try { parsed = JSON.parse(text.substring(2)); } catch { return null; }
+    if (!Array.isArray(parsed) || parsed.length < 2) return null;
+    const eventName = parsed[0];
+    if (typeof eventName !== 'string') return null;
+    const rawPayload = parsed[1];
+    if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) return null;
+    const payload = rawPayload as GameFramePayload;
+    const event = payload.event;
+    const action = event && typeof event === 'object' && typeof event.action === 'string'
+        ? event.action
+        : undefined;
+    return { eventName, action, payload, data: payload.data, error: payload.error };
+}
+
+export function interpretJobCommandResponse(
+    response: { readonly data: unknown; readonly error: unknown },
+): Result<unknown, GameError> {
+    if (response.error) return err(gameError(response.error, 'GAME_JOB_FAILED'));
+    // The game client resolves a matching action with a falsy error as success
+    // and passes data through without requiring a payload. Empty ACKs are valid.
+    return ok(response.data);
 }
 
 /**
@@ -1178,8 +1227,7 @@ export class GameSocketHub {
     private async jobCommand(action: string, marketId: string, jobId: string): Promise<Result<unknown, GameError>> {
         const response = await this.request('market', action, { marketId, jobId }, 15000).catch((error) => error);
         if (response instanceof Error) return err({ code: 'GAME_TIMEOUT', message: response.message });
-        if (response.error) return err(gameError(response.error, 'GAME_JOB_FAILED'));
-        return ok(response.data);
+        return interpretJobCommandResponse(response);
     }
 
     async jobAction(kind: string, payload: Record<string, unknown>): Promise<Result<unknown, GameError>> {
@@ -1285,9 +1333,10 @@ export class GameSocketHub {
         return ok(response.data);
     }
 
-    async requestMarketJobs(marketId: string): Promise<Result<unknown, GameError>> {
-        this.pendingMarketActions.set('get.jobs', { marketId, expiresAt: Date.now() + 45_000 });
-        const response = await this.request('market', 'get.jobs', { marketId }, 35_000).catch((error) => error);
+    async requestMarketJobs(marketId: string, timeoutMs = 35_000): Promise<Result<unknown, GameError>> {
+        const timeout = Math.max(1_000, Math.min(timeoutMs, 35_000));
+        this.pendingMarketActions.set('get.jobs', { marketId, expiresAt: Date.now() + timeout + 10_000 });
+        const response = await this.request('market', 'get.jobs', { marketId }, timeout).catch((error) => error);
         if (response instanceof Error) {
             this.pendingMarketActions.delete('get.jobs');
             return err({ code: 'GAME_TIMEOUT', message: response.message });
@@ -1478,13 +1527,11 @@ export class GameSocketHub {
 
     private async handleIncoming(raw: unknown, ws: WebSocket): Promise<void> {
         const text = await this.decode(raw);
-        if (!text || !text.startsWith('42')) return;
-        let parsed: unknown;
-        try { parsed = JSON.parse(text.substring(2)); } catch { return; }
-        if (!Array.isArray(parsed) || parsed.length < 2) return;
-        const eventName = parsed[0];
-        const payload = parsed[1] as { event?: { action?: string }; data?: unknown; error?: unknown; message?: unknown };
-        this.recordFrame('in', String(eventName), payload?.event?.action ?? '', text, sanitizeSocketUrl(this.sockets.get(ws)?.url ?? null));
+        if (!text) return;
+        const frame = parseGameFrame(text);
+        if (!frame) return;
+        const { eventName, action, payload } = frame;
+        this.recordFrame('in', eventName, action ?? '', text, sanitizeSocketUrl(this.sockets.get(ws)?.url ?? null));
         if (eventName === 'error') {
             const errorText = payloadErrorMessage(payload.error ?? payload.message ?? payload.data, '');
             if (/token[-\s]?expired|invalid-access-token|unauthori[sz]ed/i.test(errorText)) {
@@ -1536,7 +1583,6 @@ export class GameSocketHub {
                     : 'Mail request failed'));
             }
         }
-        const action = payload?.event?.action;
         if (eventName === 'sai') this.handleSaiEvent(action, payload.data);
         if (eventName === 'expeditions'
             && action !== 'get.mercenaries'

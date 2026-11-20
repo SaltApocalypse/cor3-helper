@@ -42,6 +42,8 @@ export const jobStateRecordSchema = z.object({
     errorCode: z.string().optional(),
     lastError: z.string().optional(),
     stage: z.string().optional(),
+    /** Complete result was unconfirmed; block automatic re-execution until remote completed. */
+    unconfirmed: z.boolean().optional(),
 }).strict();
 
 export type JobStateRecord = z.infer<typeof jobStateRecordSchema>;
@@ -77,6 +79,17 @@ export function sameJobStateKey(a: JobStateKey, b: JobStateKey): boolean {
  */
 export function jobActiveKey(marketKey: string, jobId: string): string {
     return JSON.stringify([marketKey, jobId]);
+}
+
+/**
+ * Conservative classification for records that cannot be proven to be a
+ * non-Complete unknown. New records carry `unconfirmed`; legacy records from
+ * before B1.6 are inferred from status/errorCode without rewriting them.
+ */
+export function isCompletionUncertainRecord(record: Pick<JobStateRecord, 'status' | 'errorCode' | 'unconfirmed'>): boolean {
+    if (record.unconfirmed === true) return true;
+    return record.status === 'unknown'
+        && (record.errorCode === 'COMPLETE_FAILED' || record.errorCode === undefined);
 }
 
 export function normalizeJobStateRecord(record: JobStateRecord): JobStateRecord {

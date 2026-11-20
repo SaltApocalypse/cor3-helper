@@ -24,6 +24,7 @@ export function jobFailureView(entry: AutoJobQueueFailure) {
         ...(error.retryAt !== undefined ? { retryAt: error.retryAt } : {}),
         ...(error.lockExpiresAt !== undefined ? { lockExpiresAt: error.lockExpiresAt } : {}),
         ...(error.stage !== undefined ? { stage: error.stage } : {}),
+        ...(error.unconfirmed === true ? { unconfirmed: true } : {}),
     };
 }
 
@@ -37,6 +38,7 @@ export function outcomeInputOf(entry: AutoJobQueueFailure) {
         ...(error.retryable !== undefined ? { retryable: error.retryable } : {}),
         ...(error.retryAt !== undefined ? { retryAt: error.retryAt } : {}),
         ...(error.lockExpiresAt !== undefined ? { lockExpiresAt: error.lockExpiresAt } : {}),
+        ...(error.unconfirmed === true ? { unconfirmed: true } : {}),
     };
 }
 
@@ -52,6 +54,7 @@ export function failureOf(entry: AutoJobQueueFailure): AutoFinishFailure {
         ...(error.retryAt !== undefined ? { retryAt: error.retryAt } : {}),
         ...(error.lockExpiresAt !== undefined ? { lockExpiresAt: error.lockExpiresAt } : {}),
         ...(error.stage !== undefined ? { stage: error.stage } : {}),
+        ...(error.unconfirmed === true ? { unconfirmed: true } : {}),
     };
 }
 

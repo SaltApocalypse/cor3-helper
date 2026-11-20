@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectDecisionObjects, collectExpeditionObjects, isMinigameSocketUrl, looksLikeExpeditionData, looksLikeSpecialistState, parseOutgoingMarketRequest, pickActiveSocket } from './game-socket-hub.js';
+import { gameError, interpretJobCommandResponse, parseGameFrame, collectDecisionObjects, collectExpeditionObjects, isMinigameSocketUrl, looksLikeExpeditionData, looksLikeSpecialistState, parseOutgoingMarketRequest, pickActiveSocket } from './game-socket-hub.js';
 
 describe('isMinigameSocketUrl', () => {
     it('excludes minigame sockets from active selection', () => {
@@ -120,5 +120,136 @@ describe('parseOutgoingMarketRequest', () => {
         ]))).toBeNull();
         expect(parseOutgoingMarketRequest('42not-json')).toBeNull();
         expect(parseOutgoingMarketRequest('40{"token":"x"}')).toBeNull();
+    });
+});
+
+describe('gameError provenance', () => {
+    it('marks a server error without a string code as an unconfirmed fallback', () => {
+        const result = gameError({ message: 'job-conditions-not-met' }, 'GAME_JOB_FAILED');
+        expect(result).toMatchObject({
+            code: 'GAME_JOB_FAILED',
+            message: 'job-conditions-not-met',
+            unconfirmed: true,
+        });
+    });
+
+    it('marks non-object and structurally invalid errors as unconfirmed fallbacks', () => {
+        for (const error of ['rate-limited', [], true, 1, {}, { code: null, message: 'x' }, { code: 123, message: 'x' }]) {
+            expect(gameError(error, 'GAME_JOB_FAILED')).toMatchObject({
+                code: 'GAME_JOB_FAILED',
+                unconfirmed: true,
+            });
+        }
+        expect(gameError('rate-limited', 'GAME_JOB_FAILED')).toMatchObject({
+            code: 'GAME_JOB_FAILED',
+            message: 'rate-limited',
+            unconfirmed: true,
+        });
+    });
+
+    it('preserves a server-provided string code and optional retry metadata', () => {
+        expect(gameError({ code: 'GAME_JOB_FAILED', message: 'rejected', retryAt: 42, lockExpiresAt: 7 }, 'FALLBACK'))
+            .toEqual({ code: 'GAME_JOB_FAILED', message: 'rejected', retryAt: 42, lockExpiresAt: 7 });
+    });
+});
+
+describe('parseGameFrame', () => {
+    const frame = (payload: unknown, eventName: unknown = 'market') => `42${JSON.stringify([eventName, payload])}`;
+
+    it('parses a matching protocol frame and exposes action/data/error', () => {
+        const parsed = parseGameFrame(frame({ event: { action: 'job.complete' }, data: { jobId: 'job-1' } }));
+        expect(parsed).toMatchObject({
+            eventName: 'market',
+            action: 'job.complete',
+            data: { jobId: 'job-1' },
+            error: undefined,
+        });
+    });
+
+    it('rejects unparseable, truncated, or non-protocol frames', () => {
+        for (const text of [
+            '',
+            '40{"token":"x"}',
+            '42not-json',
+            frame(undefined),
+            frame(null),
+            frame('payload'),
+            frame([]),
+        ]) {
+            expect(parseGameFrame(text)).toBeNull();
+        }
+        expect(parseGameFrame(`42${JSON.stringify([])}`)).toBeNull();
+        expect(parseGameFrame(`42${JSON.stringify(['market'])}`)).toBeNull();
+        expect(parseGameFrame(`42${JSON.stringify([42, { event: { action: 'job.complete' } }])}`)).toBeNull();
+    });
+
+    it('keeps a frame with no action for push handlers, but no command can match it', () => {
+        const parsed = parseGameFrame(frame({ data: { files: [] } }));
+        expect(parsed).toMatchObject({ eventName: 'market', action: undefined, data: { files: [] } });
+        expect(parsed?.action).toBeUndefined();
+        expect(parseGameFrame(frame({ event: { action: 123 } }))?.action).toBeUndefined();
+    });
+
+    it('exposes a different action for an unrelated frame', () => {
+        const parsed = parseGameFrame(frame({ event: { action: 'get.jobs' }, data: {} }));
+        expect(parsed?.action).toBe('get.jobs');
+        expect(parsed?.action).not.toBe('job.complete');
+    });
+});
+
+describe('interpretJobCommandResponse', () => {
+    it('classifies frame-level fallback errors as unconfirmed', () => {
+        const frames = [
+            { message: 'job-conditions-not-met' },
+            { message: 'market-not-reachable' },
+            { message: 'rate-limited' },
+            {},
+            { code: null, message: 'x' },
+            { code: 123, message: 'x' },
+            'rate-limited',
+            [],
+            true,
+        ];
+        for (const error of frames) {
+            const result = interpretJobCommandResponse({ data: { jobId: 'job-1' }, error });
+            expect(result.ok).toBe(false);
+            if (!result.ok) {
+                expect(result.error.code).toBe('GAME_JOB_FAILED');
+                expect(result.error.unconfirmed).toBe(true);
+            }
+        }
+    });
+
+    it('keeps a server-provided GAME_JOB_FAILED code without local unconfirmed', () => {
+        const result = interpretJobCommandResponse({
+            data: undefined,
+            error: { code: 'GAME_JOB_FAILED', message: 'rejected' },
+        });
+        expect(result).toMatchObject({ ok: false, error: { code: 'GAME_JOB_FAILED', message: 'rejected' } });
+        if (!result.ok) expect(result.error.unconfirmed).toBeUndefined();
+    });
+
+    it('accepts empty ACKs for matching responses without an error', () => {
+        for (const data of [undefined, null, {}, [], '', 0, false]) {
+            expect(interpretJobCommandResponse({ data, error: undefined }))
+                .toEqual({ ok: true, value: data });
+        }
+        expect(interpretJobCommandResponse({ data: undefined, error: null }))
+            .toEqual({ ok: true, value: undefined });
+    });
+
+    it('accepts non-empty payloads without assuming field semantics', () => {
+        for (const data of [{ jobId: 'job-1' }, 'ok', 1, true, [1]]) {
+            expect(interpretJobCommandResponse({ data, error: undefined }))
+                .toEqual({ ok: true, value: data });
+        }
+    });
+
+    it('rejects a matching response with a truthy error', () => {
+        const result = interpretJobCommandResponse({
+            data: { jobId: 'job-1' },
+            error: { code: 'GAME_JOB_FAILED', message: 'rejected' },
+        });
+        expect(result).toMatchObject({ ok: false, error: { code: 'GAME_JOB_FAILED', message: 'rejected' } });
     });
 });

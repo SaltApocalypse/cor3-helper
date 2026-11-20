@@ -39,6 +39,7 @@ export async function runDeferredRetryPass(deps: DeferredRetryDeps): Promise<Def
 
     const deferredNow = deps.now();
     const retryCandidates = deps.failed.filter((entry) => {
+        if (entry.error.unconfirmed === true) return false;
         const outcome = classifyJobFailure(outcomeInputOf(entry));
         if (outcome.status !== 'retry') return false;
         const notBefore = entry.error.lockExpiresAt ?? entry.error.retryAt;
@@ -70,6 +71,7 @@ export async function runDeferredRetryPass(deps: DeferredRetryDeps): Promise<Def
         }
         const retryJobs: JobOffer[] = [];
         for (const entry of retryCandidates) {
+            if (entry.error.unconfirmed === true) continue;
             const fresh = freshById.get(entry.job.id);
             if (fresh) {
                 retryJobs.push(fresh);

@@ -63,16 +63,17 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
     let queueRef: JobQueueCoordinator | null = null;
     let autoJobsRef: AutoJobsCoordinator | null = null;
     let autoJobsRunnerRef: AutoJobRunner | null = null;
+    const resetAtForMarket = (marketKey: string): string | null => {
+        const market = autoJobsRef?.snapshotView()?.markets.find((entry) => entry.marketKey === marketKey);
+        return market?.ok && market.stale !== true && typeof market.resetAt === 'string' && market.resetAt.length > 0
+            ? market.resetAt
+            : null;
+    };
     const jobStates = new JobStateRecorder({
         store: stores.jobState,
         logger,
         now: () => clock.now(),
-        resetAtForMarket: (marketKey) => {
-            const market = autoJobsRef?.snapshotView()?.markets.find((entry) => entry.marketKey === marketKey);
-            return market?.ok && market.stale !== true && typeof market.resetAt === 'string' && market.resetAt.length > 0
-                ? market.resetAt
-                : null;
-        },
+        resetAtForMarket,
     });
     const jobStateReconciler = new JobStateReconciler({
         store: stores.jobState,
@@ -246,6 +247,10 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
         (message, data) => logger.info('auto-job', message, data),
         undefined,
         jobStates,
+        undefined,
+        stores.marketCompletedJobs,
+        stores.jobState,
+        resetAtForMarket,
     );
     const autoJobsRunner = new AutoJobRunner(jobExecution);
     autoJobsRunnerRef = autoJobsRunner;

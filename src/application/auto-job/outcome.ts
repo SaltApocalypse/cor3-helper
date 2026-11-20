@@ -33,6 +33,7 @@ export interface JobOutcomeInput {
     readonly retryable?: boolean;
     readonly retryAt?: number;
     readonly lockExpiresAt?: number;
+    readonly unconfirmed?: boolean;
 }
 
 export interface JobOutcome {
@@ -65,6 +66,11 @@ export function classifyJobFailure(input: JobOutcomeInput, _now = Date.now()): J
     // already completed, or job-not-found. Keep this before every retry rule.
     if (isExpiredJobFailureText(code, message)) {
         return { status: 'expired', reason: 'expired' };
+    }
+    // A Complete whose remote result is unknown must not be retried by any
+    // scheduler. Only explicit remote completed evidence can release it.
+    if (input.unconfirmed === true) {
+        return { status: 'failed', reason: 'unknown' };
     }
     if (code === 'JOB_CANCELLED' || input.stage === 'cancelled') {
         return skippedOutcome('cancelled');

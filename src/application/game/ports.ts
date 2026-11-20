@@ -8,6 +8,8 @@ export interface GameError {
     readonly retryAt?: number;
     readonly lockExpiresAt?: number;
     readonly stage?: string;
+    /** Transport/response ambiguity: the remote command may have executed. */
+    readonly unconfirmed?: boolean;
 }
 
 export interface GameCommandPort {
