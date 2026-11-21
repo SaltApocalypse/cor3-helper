@@ -6,7 +6,7 @@ import { AutomationCard } from '../../components/AutomationCard.js';
 import { InfoTip } from '../../components/InfoTip.js';
 import { RefreshButton } from '../../components/RefreshButton.js';
 import { JobMarketList, type JobMarketView } from '../../components/JobMarketList.js';
-import { formatRemaining } from '../../format.js';
+import { formatAge, formatRemaining } from '../../format.js';
 import { countCompletionRecords } from '../../app/view-models/job-report.js';
 import { useT, type TranslateSource } from '../../i18n-context.js';
 
@@ -152,6 +152,13 @@ export function AutoJobsCard(props: AutoJobsCardProps) {
                 onEnable={() => void toggleAutoJobs()}
                 onDisable={() => void toggleAutoJobs()}
             >
+                <p class="v2-muted">
+                    {tr('Next refresh')} {autoJobs?.nextRefreshAt != null && Number.isFinite(autoJobs.nextRefreshAt)
+                        ? formatRemaining(new Date(autoJobs.nextRefreshAt).toISOString(), now)
+                        : '--'}
+                    {' · '}
+                    {tr('Last sync')} {autoJobs?.lastRefreshAt != null ? formatAge(now - autoJobs.lastRefreshAt) : tr('Never')}
+                </p>
                 <div class="v2-auto-complete">
                     <div class="v2-auto-complete-header">
                         <span class="v2-auto-complete-title">

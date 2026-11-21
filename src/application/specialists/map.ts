@@ -29,7 +29,11 @@ export function mapSpecialistState(raw: unknown): SpecialistState | null {
             const kind = temporary.kind ?? 'TEMPORARY';
             const level = temporary.level ?? 0;
             const bonusSlots = temporary.bonusSlots ?? 0;
-            const status = temporary.status ?? 'ACTIVE';
+            const owned = temporary.owned === true;
+            // Missing status on an unowned priced row must not look active.
+            // The game omits status on some offer payloads; only owned rows
+            // default to ACTIVE.
+            const status = temporary.status ?? (owned ? 'ACTIVE' : 'AVAILABLE');
             const expiresAt = toIsoString(temporary.expiresAt);
             if (temporary.owned === true && expiresAt) {
                 expansions.push({

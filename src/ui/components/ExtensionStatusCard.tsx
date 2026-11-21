@@ -1,7 +1,7 @@
 import type { ActivityState, OverviewState } from '../../application/popup/portal.js';
 import type { GameReadiness } from '../../application/game/readiness.js';
 import { isGameReady } from '../../application/game/readiness.js';
-import { formatRemaining } from '../format.js';
+import { formatAge, formatRemaining } from '../format.js';
 import { useT, type TranslateSource } from '../i18n-context.js';
 import {
     automationTone,
@@ -30,14 +30,6 @@ function activityDetail(detail: string | undefined, tr: TranslateSource): string
         total: completing[3] ?? '',
     });
     return tr(detail);
-}
-
-function formatAge(ms: number | null): string {
-    if (ms === null || !Number.isFinite(ms)) return '--';
-    const seconds = Math.max(0, Math.round(ms / 1000));
-    if (seconds < 60) return `${seconds}s`;
-    if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
-    return `${Math.round(seconds / 3600)}h`;
 }
 
 function healthLabel(health: ExtensionHealth, tr: TranslateSource): string {

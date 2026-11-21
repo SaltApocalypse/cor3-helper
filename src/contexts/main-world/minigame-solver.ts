@@ -18,6 +18,8 @@ function simpleDecryptApp(): Element | null {
 }
 
 function configHackApp(): Element | null {
+    // The in-game window is named "Terminal Hack"; the internal kind stays
+    // `config-hack` for compatibility with existing settings and bridge data.
     return document.querySelector('[data-sentry-component="ConfigHackApplication"], [data-component-name="ConfigHackApplication"]');
 }
 

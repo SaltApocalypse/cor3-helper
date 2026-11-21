@@ -139,6 +139,15 @@ export function SidePanelApp({ portal, windowMode = false }: SidePanelAppProps) 
         valuableActive: valuable.valuableRunId !== null,
     });
 
+    const refreshSession = useCallback(async () => {
+        await Promise.all([
+            settings.loadAuth(),
+            network.loadNetwork(),
+            gameStatus.loadOverview(),
+            connection.check(settings.tt),
+        ]);
+    }, [settings.loadAuth, settings.tt, network.loadNetwork, gameStatus.loadOverview, connection.check]);
+
     const reloadAutomation = useCallback(async () => {
         await Promise.all([
             autoJobs.loadAutoJobs(),
@@ -197,14 +206,13 @@ export function SidePanelApp({ portal, windowMode = false }: SidePanelAppProps) 
         <LanguageProvider language={settings.language}>
             <AppShell
                 language={settings.language}
-                ping={connection.ping}
                 authenticated={settings.auth?.authenticated ?? false}
-                hasEndpoint={Boolean(network.network?.endpoint)}
                 helperMode={settings.helperMode}
                 activePage={activePage}
                 developerMode={settings.settings?.developerMode !== false}
                 windowMode={windowMode}
                 onOpenWindow={windowMode ? undefined : () => void portal.openWindow()}
+                onRefreshAuth={refreshSession}
                 onPageChange={setActivePage}
             >
                 {activePage === 'developer' ? (

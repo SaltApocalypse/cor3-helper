@@ -152,7 +152,8 @@ export function InventoryPage({
         });
     const visibleGroups = filteredGroups.slice(0, visibleLimit);
     const rental = inventory?.rental ?? null;
-    const rentalActive = Boolean(rental && (rental.expiresAt || rental.status));
+    const rentalStatus = (rental?.status ?? '').trim().toUpperCase();
+    const rentalActive = Boolean(rental && (rental.expiresAt || rentalStatus === 'ACTIVE' || rentalStatus === 'IN_GRACE'));
     const requestSpecialistPurchase = (purchase: SpecialistPurchase) => {
         const key = `${purchase.kind}:${purchase.level}:${purchase.priceId}`;
         if (confirmSpecialist !== key) {

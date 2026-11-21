@@ -13,17 +13,13 @@ export interface WelcomeAppProps {
     readonly portal: PopupPortal;
 }
 
-type PingState = 'idle' | 'checking' | 'ok' | 'error';
-
 /**
  * Small launcher shown from the browser toolbar. The full workspace lives in
  * the side panel or a detached window so the popup can stay lightweight.
  */
 export function WelcomeApp({ portal }: WelcomeAppProps) {
-    const [ping, setPing] = useState<PingState>('idle');
     const [auth, setAuth] = useState<AuthStatus | null>(null);
     const [settings, setSettings] = useState<SettingsV1 | null>(null);
-    const [hasEndpoint, setHasEndpoint] = useState(false);
     const [message, setMessage] = useState('');
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [confirmText, setConfirmText] = useState('');
@@ -33,18 +29,12 @@ export function WelcomeApp({ portal }: WelcomeAppProps) {
     const helperMode = settings?.helperMode ?? false;
 
     const refresh = useCallback(async () => {
-        setPing('checking');
-        const [pingResult, authResult, settingsResult] = await Promise.all([
-            portal.ping(),
+        const [authResult, settingsResult] = await Promise.all([
             portal.authStatus(),
             portal.getSettings(),
         ]);
-        setPing(pingResult.ok ? 'ok' : 'error');
         if (authResult.ok) setAuth(authResult.value);
         if (settingsResult.ok) setSettings(settingsResult.value);
-        void portal.networkSummary().then((networkResult) => {
-            if (networkResult.ok) setHasEndpoint(Boolean(networkResult.value.endpoint));
-        });
     }, [portal]);
 
     useEffect(() => {
@@ -105,15 +95,16 @@ export function WelcomeApp({ portal }: WelcomeAppProps) {
         <LanguageProvider language={language}>
         <main class="v2-shell v2-welcome">
             <BrandHeader>
-                <span class={`v2-status v2-status-${ping === 'ok' ? 'ok' : ping === 'error' ? 'error' : ''}`} title={t(language, 'status.pingHint')}>
-                    {ping === 'ok' ? t(language, 'status.ok') : ping === 'error' ? t(language, 'status.offline') : '…'}
-                </span>
-                <span class={`v2-status ${auth?.authenticated ? 'v2-status-ok' : 'v2-status-bad'}`} title={t(language, 'status.authHint')}>
-                    {auth?.authenticated ? t(language, 'status.auth') : t(language, 'status.needsRefresh')}
-                </span>
-                <span class={`v2-status ${hasEndpoint ? 'v2-status-ok' : 'v2-status-muted'}`} title={t(language, 'status.endpointHint')}>
-                    {hasEndpoint ? t(language, 'status.endpoint') : t(language, 'status.noEndpoint')}
-                </span>
+                {!auth?.authenticated ? (
+                    <button
+                        type="button"
+                        class="v2-status v2-status-bad v2-status-action"
+                        title={t(language, 'status.authHint')}
+                        onClick={() => void refresh()}
+                    >
+                        {t(language, 'status.needsRefresh')}
+                    </button>
+                ) : null}
             </BrandHeader>
 
             <section class="v2-card">

@@ -19,12 +19,14 @@ const failedMarket: JobMarketSyncEntry = {
     skipped: 0,
     error: 'market-not-reachable',
     errorCode: 'MARKET_FETCH_FAILED',
+    reconciliationStatus: 'partial',
 };
 
 describe('auto-finish market view', () => {
-    it('drops Auto Jobs errorCode from Auto Finish market payloads', () => {
+    it('drops Auto Jobs diagnostic fields from Auto Finish market payloads', () => {
         const base = autoFinishMarketBase(failedMarket);
         expect('errorCode' in base).toBe(false);
+        expect('reconciliationStatus' in base).toBe(false);
         expect(autoFinishMarketSchema.safeParse({ ...base, jobs: [] }).success).toBe(true);
         const last = {
             runId: 'run-1',

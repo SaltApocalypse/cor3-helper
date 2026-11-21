@@ -119,7 +119,7 @@ export const ZH_MESSAGES: Readonly<Record<string, string>> = {
     // Hacking automation
     'Hacking Automation': '黑客自动化',
     'Automatically solve hacking minigames when they appear.': '出现黑客小游戏时自动完成。',
-    'Auto Decrypt Hacking': '自动解密',
+    'Auto Terminal Hack': '自动 Terminal Hack',
     'Auto ICE Wall Hacking': '自动 ICE 墙',
     'Auto Simple Decrypt Hacking': '自动简易解密',
 

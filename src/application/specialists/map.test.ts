@@ -83,3 +83,38 @@ describe('mapSpecialistState', () => {
         expect(mapSpecialistState({ specialists: 'nope' })).toBeNull();
     });
 });
+
+describe('mapSpecialistState status defaults', () => {
+    it('does not label an unowned offer as active when the game omits status', () => {
+        const state = mapSpecialistState({
+            specialists: [{
+                id: 'engineer-1',
+                specialistType: 'ENGINEER',
+                temporary: [{
+                    owned: false,
+                    kind: 'TEMPORARY',
+                    level: 1,
+                    bonusSlots: 10,
+                    prices: [{ id: 'buy-10', credits: 2500 }],
+                }],
+            }],
+        });
+        expect(state?.offers[0]?.status).toBe('AVAILABLE');
+        expect(state?.expansions).toEqual([]);
+    });
+
+    it('still treats an owned expansion without a status as active', () => {
+        const state = mapSpecialistState({
+            specialists: [{
+                id: 'engineer-1',
+                temporary: [{
+                    owned: true,
+                    expiresAt: '2026-01-02T00:00:00.000Z',
+                    bonusSlots: 20,
+                    prices: [{ id: 'renew-20', credits: 5000 }],
+                }],
+            }],
+        });
+        expect(state?.expansions[0]?.status).toBe('ACTIVE');
+    });
+});

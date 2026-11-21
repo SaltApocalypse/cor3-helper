@@ -9,14 +9,16 @@ import type { JobLockRegistry } from './job-locks.js';
 import type { JobMarketSyncEntry } from './job-market-sync.js';
 import { codeForOutcome, outcomeReasonText } from './job-outcome.js';
 
-export function autoFinishMarketBase(market: JobMarketSyncEntry): Omit<JobMarketSyncEntry, 'skippedJobs' | 'expired' | 'errorCode'> {
+export function autoFinishMarketBase(market: JobMarketSyncEntry): Omit<JobMarketSyncEntry, 'skippedJobs' | 'expired' | 'errorCode' | 'reconciliationStatus'> {
     // Auto Finish has its own market schema and does not expose Auto Jobs'
-    // short error codes. Keeping errorCode here makes the persisted
-    // auto-finish state fail validation and aborts the whole Auto Jobs cycle.
-    const { skippedJobs, expired, errorCode, ...base } = market;
+    // short error codes or reconciliation health. Keeping either field here
+    // makes the persisted auto-finish state fail validation and aborts the
+    // whole Auto Jobs cycle.
+    const { skippedJobs, expired, errorCode, reconciliationStatus, ...base } = market;
     void skippedJobs;
     void expired;
     void errorCode;
+    void reconciliationStatus;
     return base;
 }
 

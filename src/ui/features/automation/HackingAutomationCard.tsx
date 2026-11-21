@@ -12,7 +12,7 @@ export interface HackingAutomationCardProps {
 }
 
 const ROWS: readonly { key: HackToggleKey; label: string }[] = [
-    { key: 'autoDecryptEnabled', label: 'Auto Decrypt Hacking' },
+    { key: 'autoDecryptEnabled', label: 'Auto Terminal Hack' },
     { key: 'autoIceWallEnabled', label: 'Auto ICE Wall Hacking' },
     { key: 'autoSimpleDecryptEnabled', label: 'Auto Simple Decrypt Hacking' },
 ];

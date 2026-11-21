@@ -794,6 +794,8 @@ button.v2-icon-button:hover { color: var(--v2-accent); border-color: var(--v2-ac
 .v2-header { align-items: flex-start; }
 .v2-status-bad { color: var(--v2-error); border-color: var(--v2-error); background: rgba(255, 107, 107, .08); }
 .v2-status-muted { color: var(--v2-muted); border-color: var(--v2-border); opacity: .75; }
+.v2-status-action { background: rgba(255, 107, 107, .08); cursor: pointer; font-family: inherit; }
+.v2-status-action:hover { color: var(--v2-text); border-color: var(--v2-accent); filter: none; }
 
 /* Settings / developer rows */
 .v2-page-intro { margin: 0 0 10px; }
