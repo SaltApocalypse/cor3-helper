@@ -5,15 +5,15 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-21 against build `2.0.6-salta.310`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (117 files / 917 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-22 against build `2.0.7-salta.311`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (122 files / 986 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.6-salta.310`)
+## Current completion snapshot (build `2.0.7-salta.311`)
 
 | Metric | Value |
 |---|---|
-| TypeScript/TSX source files | 451 (including 117 test files) |
-| Files under `src/` | 460 (vendored JavaScript is limited to `src/libs/`) |
+| TypeScript/TSX source files | 461 (including 122 test files) |
+| Files under `src/` | 470 (vendored JavaScript is limited to `src/libs/`) |
 | v1 parity rows with a status | 147 |
 | Implemented / improved | 89 |
 | Partial | 37 |
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 117 files / 917 tests pass
-- `npm run build` — pass, `2.0.6-salta.310`
+- `npm test` — 122 files / 986 tests pass
+- `npm run build` — pass, `2.0.7-salta.311`
 
 ---
 
@@ -1418,3 +1418,16 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 - Normal success clears any repair alarm. disable/helper mode clears both normal and repair alarms and cannot reactivate an Alarm.
 - Repair scheduling uses the same generation/queue checks as normal scheduling; stale generations cannot publish or overwrite the latest decision.
 - Tests cover normal create failures, clear+create failures, repair creation failure, repair backoff, repair recovery, and the existing scheduling/concurrency suite.
+
+---
+
+# Part 69 — Update check unification and status UI (2.0.7-salta)
+
+- Update checking now runs only in the Background through one `UpdateCheckService`, backed by a versioned `UpdateCheckStore` with a 6-hour TTL, in-flight dedupe and persisted `lastSuccess`.
+- `system.updateStatus` reads the cached status only; `system.updateCheck` forces a check. Settings and Popup consume only these bridge endpoints.
+- Install, update and startup lifecycle events trigger checks without blocking worker startup or throwing unhandled rejections.
+- Settings and Popup share one `UpdateStatus` component: current/latest version, last check time, release link, typed error messages, preserved `lastSuccess` and collapsible technical details.
+- Native `fetch` is invoked with the global receiver, fixing `Illegal invocation` failures in the MV3 worker.
+- Persisted results are projected onto the strict `UpdateCheckResult` contract, fixing the `source` key rejection that surfaced as "Could not save the update status".
+- Storage read failures surface as `STORAGE_READ_FAILED` instead of appearing as an empty cache.
+- Verification: 122 files / 986 tests, including service/store/lifecycle coverage and a UI architecture guard against direct GitHub or `UpdateChecker` access.
