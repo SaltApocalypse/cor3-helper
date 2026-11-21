@@ -40,8 +40,8 @@ export function SettingsPanel({
             onImportSettings={settings.importSettings}
             onResetSettings={settings.resetSettings}
             onOpenDeveloper={() => onOpenDeveloper('developer')}
-            updateInfo={settings.updateInfo}
-            updateError={settings.updateError}
+            updateResult={settings.updateResult}
+            updateStatusError={settings.updateStatusError}
             updateChecking={settings.updateChecking}
             onCheckUpdates={settings.checkUpdates}
         />

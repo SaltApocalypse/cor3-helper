@@ -1,52 +1,24 @@
 import { z } from 'zod';
 import type { Result } from '../../kernel/result.js';
 import { err, ok } from '../../kernel/result.js';
+import type { UpdateCheckError, UpdateCheckSuccess } from '../../contracts/update-check.js';
 
 /**
- * Update check for the SaltA fork.
- *
- * The fork publishes the 2.0 build metadata in the root `package.json` on the
- * `v2` branch. The repository default branch may be `main`; both are queried so
- * a branch rename does not break the check. The GitHub Releases API is also
- * queried because it is the authoritative release source.
+ * Single authoritative update source for the SaltA fork. GitHub Releases is
+ * the release source; package.json mirrors on branches/CDNs are deliberately
+ * not queried because they can be stale and previously caused misleading
+ * "up to date" results.
  */
-const REMOTE_URLS = [
-    'https://raw.githubusercontent.com/SaltApocalypse/cor3-helper/v2/package.json',
-    'https://raw.githubusercontent.com/SaltApocalypse/cor3-helper/main/package.json',
-    'https://cdn.jsdelivr.net/gh/SaltApocalypse/cor3-helper@latest/package.json',
-    'https://cdn.jsdelivr.net/gh/SaltApocalypse/cor3-helper@v2/package.json',
-    'https://cdn.jsdelivr.net/gh/SaltApocalypse/cor3-helper@main/package.json',
-    'https://github.com/SaltApocalypse/cor3-helper/raw/v2/package.json',
-    'https://github.com/SaltApocalypse/cor3-helper/raw/main/package.json',
-] as const;
-const RELEASE_API_URLS = [
-    'https://api.github.com/repos/SaltApocalypse/cor3-helper/releases/latest',
-] as const;
-/** 0 means no request timeout. */
-const DEFAULT_TIMEOUT_MS = 0;
-
-const remotePackageSchema = z.object({
-    version: z.string().min(1),
-    cor3Fork: z.object({
-        label: z.string().min(1).optional(),
-        releaseLabel: z.string().min(1).optional(),
-        build: z.number().int().nonnegative().optional(),
-    }).passthrough().optional(),
-}).passthrough();
+export const UPDATE_CHECK_URL = 'https://api.github.com/repos/SaltApocalypse/cor3-helper/releases/latest';
+/** A failed check must never leave the UI waiting indefinitely. */
+export const DEFAULT_UPDATE_CHECK_TIMEOUT_MS = 10_000;
 
 const remoteReleaseSchema = z.object({
     tag_name: z.string().min(1),
-    html_url: z.string().optional(),
+    html_url: z.string().min(1),
+    draft: z.boolean().optional(),
+    prerelease: z.boolean().optional(),
 }).passthrough();
-
-export interface UpdateCheckResult {
-    readonly current: string;
-    readonly latest: string;
-    readonly updateAvailable: boolean;
-    readonly releaseUrl: string;
-    readonly checkedAt: number;
-    readonly source: string;
-}
 
 interface ParsedVersion {
     readonly base: readonly number[];
@@ -54,8 +26,16 @@ interface ParsedVersion {
     readonly build: number | null;
 }
 
+function normalizeVersion(value: string): string {
+    return value.trim().replace(/^v/i, '');
+}
+
+function isValidVersion(value: string): boolean {
+    return /^\d+(?:\.\d+)*(?:-[A-Za-z0-9._-]+)*$/.test(normalizeVersion(value));
+}
+
 function parseVersion(value: string): ParsedVersion {
-    const cleaned = value.trim().replace(/^v/i, '');
+    const cleaned = normalizeVersion(value);
     const match = cleaned.match(/^(\d+(?:\.\d+)*)(?:-(.+))?$/);
     const base = match?.[1]?.split('.').map((part) => Number(part) || 0) ?? [0];
     const suffix = match?.[2] ?? '';
@@ -102,119 +82,120 @@ export function versionNameFromPackage(pkg: {
 }
 
 export interface UpdateCheckerOptions {
-    readonly urls?: readonly string[];
-    readonly apiUrls?: readonly string[];
+    readonly url?: string;
     readonly now?: () => number;
     readonly fetchImpl?: typeof fetch;
-    readonly releaseUrl?: string;
-    /** 0 disables the abort timer. */
     readonly timeoutMs?: number;
 }
 
-type Attempt = { readonly ok: true; readonly value: UpdateCheckResult } | { readonly ok: false; readonly error: string };
-
 export class UpdateChecker {
-    private readonly urls: readonly string[];
-    private readonly apiUrls: readonly string[];
+    private readonly url: string;
     private readonly now: () => number;
     private readonly fetchImpl: typeof fetch;
-    private readonly releaseUrl: string;
     private readonly timeoutMs: number;
 
     constructor(options: UpdateCheckerOptions = {}) {
-        this.urls = options.urls ?? REMOTE_URLS;
-        // A caller that injects custom package URLs (mostly tests) must opt in
-        // to API URLs explicitly; production uses the defaults.
-        this.apiUrls = options.apiUrls ?? (options.urls ? [] : RELEASE_API_URLS);
+        this.url = options.url ?? UPDATE_CHECK_URL;
         this.now = options.now ?? (() => Date.now());
-        this.fetchImpl = options.fetchImpl ?? fetch;
-        this.releaseUrl = options.releaseUrl ?? 'https://github.com/SaltApocalypse/cor3-helper/releases';
-        this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+        // Chrome's fetch requires the global (Window/WorkerGlobalScope) receiver.
+        // Storing the bare function and calling `this.fetchImpl(...)` would pass
+        // the checker as `this` and fail with "Illegal invocation" in a worker.
+        const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+        this.fetchImpl = (input, init) => fetchImpl.call(globalThis, input, init);
+        this.timeoutMs = options.timeoutMs ?? DEFAULT_UPDATE_CHECK_TIMEOUT_MS;
     }
 
-    async check(current: string): Promise<Result<UpdateCheckResult, { readonly code: string; readonly message: string }>> {
-        const errors: string[] = [];
-        // The releases API is authoritative and usually responds fastest.
-        for (const url of this.apiUrls) {
-            const attempt = await this.checkRelease(url, current);
-            if (attempt.ok) return ok(attempt.value);
-            errors.push(attempt.error);
-        }
-        // Fall back to the package metadata, v2 first and main second. The
-        // first successful endpoint wins so one blocked host cannot hold the
-        // whole check hostage.
-        for (const url of this.urls) {
-            const attempt = await this.checkPackage(url, current);
-            if (attempt.ok) return ok(attempt.value);
-            errors.push(attempt.error);
-        }
-        return err({
-            code: 'UPDATE_CHECK_FAILED',
-            message: errors[0] ?? 'Could not reach the update server',
-        });
-    }
-
-    private async checkPackage(url: string, current: string): Promise<Attempt> {
-        const controller = this.timeoutMs > 0 ? new AbortController() : null;
-        const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : null;
-        try {
-            const response = await this.fetchImpl(url, {
-                cache: 'no-store',
-                ...(controller ? { signal: controller.signal } : {}),
+    async check(currentVersion: string): Promise<Result<UpdateCheckSuccess, UpdateCheckError>> {
+        if (!isValidVersion(currentVersion)) {
+            return err({
+                code: 'INVALID_VERSION',
+                message: `Installed version is not valid: ${currentVersion}`,
             });
-            if (!response.ok) return { ok: false, error: `${url}: HTTP ${response.status}` };
-            const parsed = remotePackageSchema.safeParse(await response.json());
-            if (!parsed.success) return { ok: false, error: `${url}: invalid package metadata` };
-            const latest = versionNameFromPackage(parsed.data);
-            return {
-                ok: true,
-                value: {
-                    current,
-                    latest,
-                    updateAvailable: compareVersions(latest, current) > 0,
-                    releaseUrl: this.releaseUrl,
-                    checkedAt: this.now(),
-                    source: url,
-                },
-            };
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            return { ok: false, error: `${url}: ${message}` };
-        } finally {
-            if (timer !== null) clearTimeout(timer);
         }
-    }
 
-    private async checkRelease(url: string, current: string): Promise<Attempt> {
-        const controller = this.timeoutMs > 0 ? new AbortController() : null;
-        const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : null;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), Math.max(1, this.timeoutMs));
+        let response: Response;
+        let raw: unknown;
         try {
-            const response = await this.fetchImpl(url, {
+            response = await this.fetchImpl(this.url, {
                 cache: 'no-store',
                 headers: { Accept: 'application/vnd.github+json' },
-                ...(controller ? { signal: controller.signal } : {}),
+                signal: controller.signal,
             });
-            if (!response.ok) return { ok: false, error: `${url}: HTTP ${response.status}` };
-            const parsed = remoteReleaseSchema.safeParse(await response.json());
-            if (!parsed.success) return { ok: false, error: `${url}: invalid release metadata` };
-            const latest = parsed.data.tag_name.trim().replace(/^v/i, '');
-            if (!latest) return { ok: false, error: `${url}: empty release tag` };
-            return {
-                ok: true,
-                value: {
-                    current,
-                    latest,
-                    updateAvailable: compareVersions(latest, current) > 0,
-                    releaseUrl: parsed.data.html_url ?? this.releaseUrl,
-                    checkedAt: this.now(),
-                    source: url,
-                },
-            };
+            if (!response.ok) {
+                return err({
+                    code: 'HTTP_ERROR',
+                    message: `GitHub Releases API returned HTTP ${response.status}`,
+                    httpStatus: response.status,
+                });
+            }
+            try {
+                raw = await response.json();
+            } catch {
+                return err({
+                    code: 'JSON_ERROR',
+                    message: 'GitHub Releases API returned invalid JSON',
+                });
+            }
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            return { ok: false, error: `${url}: ${message}` };
+            const aborted = controller.signal.aborted;
+            return err({
+                code: aborted ? 'TIMEOUT' : 'NETWORK_ERROR',
+                message: aborted
+                    ? `Update check timed out after ${this.timeoutMs}ms`
+                    : (error instanceof Error ? error.message : String(error)),
+            });
         } finally {
-            if (timer !== null) clearTimeout(timer);
+            clearTimeout(timer);
         }
+
+        const parsed = remoteReleaseSchema.safeParse(raw);
+        if (!parsed.success) {
+            return err({
+                code: 'INVALID_RESPONSE',
+                message: 'GitHub Releases response is missing tag_name or html_url',
+            });
+        }
+        if (parsed.data.draft === true) {
+            return err({
+                code: 'INVALID_RESPONSE',
+                message: 'Latest release is a draft; draft releases are not update evidence',
+            });
+        }
+        if (parsed.data.prerelease === true) {
+            return err({
+                code: 'INVALID_RESPONSE',
+                message: 'Latest release is a prerelease; this fork publishes stable releases only',
+            });
+        }
+
+        const latestVersion = normalizeVersion(parsed.data.tag_name);
+        if (!isValidVersion(latestVersion)) {
+            return err({
+                code: 'INVALID_VERSION',
+                message: `GitHub release tag is not a valid version: ${parsed.data.tag_name}`,
+            });
+        }
+        let releaseUrl: string;
+        try {
+            const candidate = new URL(parsed.data.html_url);
+            if (candidate.protocol !== 'https:' && candidate.protocol !== 'http:') throw new Error('unsupported protocol');
+            releaseUrl = candidate.toString();
+        } catch {
+            return err({
+                code: 'INVALID_RESPONSE',
+                message: 'GitHub Releases response contains an invalid html_url',
+            });
+        }
+
+        return ok({
+            status: compareVersions(latestVersion, currentVersion) > 0 ? 'available' : 'latest',
+            currentVersion,
+            latestVersion,
+            releaseUrl,
+            checkedAt: this.now(),
+            source: this.url,
+        });
     }
 }

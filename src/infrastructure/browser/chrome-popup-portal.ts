@@ -3,7 +3,7 @@ import type { SettingsPatch } from '../../contracts/storage.js';
 import { authStatusSchema, settingsPatchSchema, settingsV1Schema } from '../../contracts/storage.js';
 import { networkMapSummarySchema } from '../../application/network/summary.js';
 import type { BridgeClient } from '../bridge/bridge-client.js';
-import { UpdateChecker } from '../update/update-checker.js';
+import { updateCheckResultSchema, type UpdateCheckResult } from '../../contracts/update-check.js';
 import type { AutoDailyStatus, AutoDroneStatus, AutoExpeditionStatus, AutoFinishRunResult, AutoFinishStatus, AutoJobsSnapshot, AutoJobsStatus, AutoMailStatus, BackgroundEvent, CachedMarketView, DailyHackResult, DebugLogLine, DismissFailedSummary, DroneAutoResult, InventoryFilterResult, InventoryItemSellResult, InventoryPreviewResult, InventorySortResult, InventoryView, JobAllMarketsResult, JobHistoryEntry, JobMarketSyncResult, JobQueueResult, JobQueueState, LoadoutApplyResult, LoadoutView, MailClaimResult, MarketOptionsView, ActivityState, NetworkDiagnostics, NetworkServerSummary, OverviewState, PopupPortal, ValuableReport, ValuableRunState, ValuableSaleResult, ValuableSearchResult } from '../../application/popup/portal.js';
 import type { NetworkOperationQueueStatus } from '../../application/network/operation-queue.js';
 import { gameReadinessSchema } from '../../application/game/readiness.js';
@@ -20,14 +20,6 @@ import { autoFinishLastRunSchema, autoFinishMarketSchema, autoFinishRunResultSch
 import { buildNumberFromVersionName } from '../../kernel/version.js';
 
 const pingSchema = z.object({ version: z.string(), phase: z.string() });
-const updateCheckSchema = z.object({
-    current: z.string(),
-    latest: z.string(),
-    updateAvailable: z.boolean(),
-    releaseUrl: z.string(),
-    checkedAt: z.number(),
-    source: z.string(),
-}).strict();
 const settingsExportSchema = z.object({
     format: z.literal('cor3-helper-v2-settings'),
     version: z.string(),
@@ -734,12 +726,14 @@ export class ChromePopupPortal implements PopupPortal {
         return this.client.request('system.ping', {}, pingSchema);
     }
 
-    async updateCheck() {
-        // v1 checked directly from the popup. Keep that path first: it avoids a
-        // service-worker/bridge timeout on slow or restricted networks.
-        const direct = await new UpdateChecker().check(this.versionInfo().versionName);
-        if (direct.ok) return direct;
-        return this.client.request('system.updateCheck', {}, updateCheckSchema, 120_000);
+    updateCheck(): Promise<{ ok: true; value: UpdateCheckResult } | { ok: false; error: { code: string; message: string } }> {
+        return this.client.request('system.updateCheck', {}, updateCheckResultSchema, 120_000) as
+            Promise<{ ok: true; value: UpdateCheckResult } | { ok: false; error: { code: string; message: string } }>;
+    }
+
+    updateStatus(): Promise<{ ok: true; value: UpdateCheckResult | null } | { ok: false; error: { code: string; message: string } }> {
+        return this.client.request('system.updateStatus', {}, updateCheckResultSchema.nullable(), 10_000) as
+            Promise<{ ok: true; value: UpdateCheckResult | null } | { ok: false; error: { code: string; message: string } }>;
     }
 
     getSettings() {

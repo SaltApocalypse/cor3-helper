@@ -20,6 +20,7 @@ import { registerSpecialistHandlers } from './handlers/specialists.js';
 import { registerValuableHandlers } from './handlers/valuable.js';
 import { registerAlarmRouter } from './alarms.js';
 import { registerMessaging } from './messaging.js';
+import { registerUpdateCheckLifecycle } from './update-check-lifecycle.js';
 import { startBackground } from './bootstrap.js';
 
 const core = createCoreRuntime();
@@ -46,6 +47,7 @@ registerValuableHandlers(core.server, { core, automation });
 
 registerAlarmRouter(automation, core.logger);
 registerMessaging(core, automation);
+registerUpdateCheckLifecycle({ runtime: chrome.runtime, service: core.updateCheck, logger: core.logger });
 
 core.transport.start((request) => core.server.handle(request));
 

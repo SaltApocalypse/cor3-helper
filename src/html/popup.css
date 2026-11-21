@@ -801,6 +801,48 @@ button.v2-icon-button:hover { color: var(--v2-accent); border-color: var(--v2-ac
 .v2-status-muted { color: var(--v2-muted); border-color: var(--v2-border); opacity: .75; }
 .v2-status-action { background: rgba(255, 107, 107, .08); cursor: pointer; font-family: inherit; }
 .v2-status-action:hover { color: var(--v2-text); border-color: var(--v2-accent); filter: none; }
+.v2-update-status {
+    display: grid;
+    gap: 8px;
+    margin: 2px 0;
+    padding: 10px;
+    background: var(--v2-bg);
+    border: 1px solid var(--v2-border);
+    border-radius: 9px;
+}
+.v2-update-status[data-state='available'] { border-color: rgba(229, 181, 103, .38); }
+.v2-update-status[data-state='latest'] { border-color: rgba(67, 209, 122, .32); }
+.v2-update-status[data-state='failed'] { border-color: rgba(255, 107, 107, .38); }
+
+.v2-update-head { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 10px; }
+.v2-update-heading { grid-area: 1 / 1; color: var(--v2-text); font-size: 10px; font-weight: 700; letter-spacing: .08em; line-height: 1.2; text-transform: uppercase; }
+.v2-update-checked { grid-area: 2 / 1 / 3 / 3; color: var(--v2-muted); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.v2-update-button { grid-area: 1 / 2; flex: 0 0 auto; margin: 0; padding: 5px 10px; border-radius: 6px; font-size: 11px; line-height: 1.2; }
+.v2-update-button:disabled { opacity: .6; }
+
+.v2-update-results { display: grid; gap: 6px; }
+.v2-update-results:empty { display: none; }
+
+.v2-update-state { --v2-state-color: var(--v2-muted); display: flex; align-items: flex-start; gap: 8px; padding: 8px 9px; border-radius: 7px; background: rgba(142, 160, 184, .08); }
+.v2-update-state--warn { --v2-state-color: #e5b567; background: rgba(229, 181, 103, .09); }
+.v2-update-state--ok { --v2-state-color: var(--v2-ok); background: rgba(67, 209, 122, .08); }
+.v2-update-state--error { --v2-state-color: var(--v2-error); background: rgba(255, 107, 107, .09); }
+.v2-update-dot { flex: 0 0 auto; width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; background: var(--v2-state-color); box-shadow: 0 0 0 3px rgba(255, 255, 255, .03); }
+.v2-update-state-body { display: grid; gap: 2px; min-width: 0; line-height: 1.45; }
+.v2-update-state-body strong { color: var(--v2-state-color); font-size: 11.5px; font-weight: 600; overflow-wrap: anywhere; }
+.v2-update-sub { color: var(--v2-muted); font-size: 10px; }
+
+.v2-update-foot { display: flex; justify-content: flex-end; }
+.v2-update-link { color: var(--v2-accent); font-size: 10px; text-decoration: none; }
+.v2-update-link:hover { text-decoration: underline; }
+.v2-update-link::after { content: ' ↗'; font-size: 9px; }
+
+.v2-update-detail { padding-top: 6px; border-top: 1px dashed var(--v2-border); color: var(--v2-muted); font-size: 10px; }
+.v2-update-detail summary { display: inline-flex; align-items: center; gap: 4px; list-style: none; cursor: pointer; }
+.v2-update-detail summary::-webkit-details-marker { display: none; }
+.v2-update-detail summary::before { content: '▸'; font-size: 9px; }
+.v2-update-detail[open] summary::before { content: '▾'; }
+.v2-update-detail p { margin: 5px 0 0; color: var(--v2-muted); font-size: 10px; line-height: 1.45; word-break: break-word; }
 .v2-decision-options { display:grid; gap:6px; margin-top:8px; }
 .v2-decision-option { display:flex; flex-direction:column; align-items:flex-start; gap:4px; width:100%; padding:8px 10px; text-align:left; color:var(--v2-text); background:var(--v2-bg); border:1px solid var(--v2-border); border-radius:8px; cursor:pointer; }
 .v2-decision-option:hover:not(:disabled) { border-color:var(--v2-accent); }
@@ -864,13 +906,6 @@ button.v2-icon-button:hover { color: var(--v2-accent); border-color: var(--v2-ac
     margin-right: 0;
 }
 .v2-card .v2-status-body ul.v2-valuable-report { padding-left: 0; padding-right: 0; }
-
-.v2-about-update { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:2px 0 4px; }
-.v2-about-update button { margin:0; padding:0; color:var(--v2-accent); background:none; border:0; font:inherit; font-size:10px; font-weight:400; cursor:pointer; }
-.v2-about-update button:hover { text-decoration:underline; filter:none; }
-.v2-about-update button:disabled { text-decoration:none; }
-.v2-about-update span { font-size:10px; }
-.v2-about-update a { color:var(--v2-accent); text-decoration:none; }
 
 /* Warehouse expansion service */
 .v2-expansion-card {

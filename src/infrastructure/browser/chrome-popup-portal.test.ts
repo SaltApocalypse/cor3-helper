@@ -523,3 +523,72 @@ describe('AutoFinish status health bridge contract', () => {
         expect(result.value.unknownJobs).toEqual([]);
     });
 });
+
+describe('Update check message bridge compatibility', () => {
+    const cached = {
+        status: 'available' as const,
+        currentVersion: '2.0.6-salta.310',
+        latestVersion: '2.0.7-salta',
+        releaseUrl: 'https://example.test/release',
+        checkedAt: 123,
+        lastSuccess: {
+            status: 'available' as const,
+            currentVersion: '2.0.6-salta.310',
+            latestVersion: '2.0.7-salta',
+            releaseUrl: 'https://example.test/release',
+            checkedAt: 123,
+            source: 'https://example.test/api',
+        },
+    };
+
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('M01/M03 reads updateStatus from the bridge without direct network fetch', async () => {
+        const request = vi.fn().mockResolvedValue({ ok: true, value: cached });
+        const portal = portalWithRequest(request);
+        const result = await portal.updateStatus();
+        expect(result).toEqual({ ok: true, value: cached });
+        expect(request).toHaveBeenCalledWith('system.updateStatus', {}, expect.anything(), 10_000);
+    });
+
+    it('M02 returns a null status when no cache exists', async () => {
+        const request = vi.fn().mockResolvedValue({ ok: true, value: null });
+        expect(await portalWithRequest(request).updateStatus()).toEqual({ ok: true, value: null });
+    });
+
+    it('M04/M07 returns the structured failed result from the bridge', async () => {
+        const request = vi.fn().mockResolvedValue({
+            ok: true,
+            value: {
+                status: 'failed',
+                currentVersion: '2.0.6-salta.310',
+                checkedAt: 123,
+                error: { code: 'NETWORK_ERROR', message: 'offline' },
+                lastSuccess: null,
+            },
+        });
+        const result = await portalWithRequest(request).updateCheck();
+        expect(result.ok).toBe(true);
+        if (result.ok) expect(result.value).toMatchObject({ status: 'failed', error: { code: 'NETWORK_ERROR' } });
+        expect(request).toHaveBeenCalledWith('system.updateCheck', {}, expect.anything(), 120_000);
+    });
+
+    it('M08 returns the UpdateCheckResult contract from the bridge', async () => {
+        const request = vi.fn().mockResolvedValue({ ok: true, value: cached });
+        const result = await portalWithRequest(request).updateCheck();
+        expect(result).toEqual({ ok: true, value: cached });
+    });
+
+    it('A01 updateCheck never performs a direct fetch', async () => {
+        vi.stubGlobal('chrome', {
+            runtime: { getManifest: () => ({ name: 'test', version: '2.0.6', version_name: '2.0.6-salta.310' }) },
+        });
+        const fetchImpl = vi.fn().mockRejectedValue(new Error('should not fetch'));
+        vi.stubGlobal('fetch', fetchImpl);
+        const request = vi.fn().mockResolvedValue({ ok: true, value: cached });
+        const result = await portalWithRequest(request).updateCheck();
+        expect(result.ok).toBe(true);
+        expect(request).toHaveBeenCalledWith('system.updateCheck', {}, expect.anything(), 120_000);
+        expect(fetchImpl).not.toHaveBeenCalled();
+    });
+});

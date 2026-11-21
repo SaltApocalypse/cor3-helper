@@ -112,6 +112,7 @@ const EXPECTED_BRIDGE_TYPES = [
     'system.diagnostics',
     'system.ping',
     'system.updateCheck',
+    'system.updateStatus',
     'valuable.cancel',
     'valuable.progress',
     'valuable.report',

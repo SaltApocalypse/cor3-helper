@@ -7,6 +7,8 @@ import { RunLogStore } from '../../../infrastructure/logging/run-log-store.js';
 import { ChromeTabAuthAdapter } from '../../../infrastructure/auth/chrome-tab-auth-adapter.js';
 import { ChromeTabsMessagePort } from '../../../infrastructure/auth/chrome-tabs-message-port.js';
 import { UpdateChecker } from '../../../infrastructure/update/update-checker.js';
+import { UpdateCheckStore } from '../../../infrastructure/storage/update-check-store.js';
+import { UpdateCheckService } from '../../../application/update/update-check-service.js';
 import { ChromeStorageArea } from '../../../infrastructure/storage/storage-area.js';
 import { SettingsRepository } from '../../../infrastructure/storage/settings-repository.js';
 import { AutoFinishStateStore } from '../../../infrastructure/storage/auto-finish-state-store.js';
@@ -66,6 +68,7 @@ export interface CoreRuntime {
     readonly tabs: ChromeTabsMessagePort;
     readonly auth: ChromeTabAuthAdapter;
     readonly updateChecker: UpdateChecker;
+    readonly updateCheck: UpdateCheckService;
     readonly networkOps: NetworkOperationQueue;
     readonly events: EventPublisher;
     readonly sessionLogArea: ChromeStorageArea | null;
@@ -209,6 +212,12 @@ export function createCoreRuntime(): CoreRuntime {
     const tabs = new ChromeTabsMessagePort();
     const auth = new ChromeTabAuthAdapter(tabs);
     const updateChecker = new UpdateChecker();
+    const updateCheck = new UpdateCheckService({
+        checker: updateChecker,
+        store: new UpdateCheckStore(storageArea),
+        currentVersion: () => VERSION,
+        now: () => Date.now(),
+    });
     const networkOps = new NetworkOperationQueue({
         onChange: (status) => events.publish('network.queue', status),
     });
@@ -254,6 +263,7 @@ export function createCoreRuntime(): CoreRuntime {
         tabs,
         auth,
         updateChecker,
+        updateCheck,
         networkOps,
         events,
         sessionLogArea,

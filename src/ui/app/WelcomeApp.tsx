@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import type { PopupPortal } from '../../application/popup/portal.js';
 import type { AuthStatus, SettingsV1 } from '../../contracts/storage.js';
+import type { UpdateCheckResult } from '../../contracts/update-check.js';
 import { BrandHeader } from '../components/BrandHeader.js';
 import { InfoTip } from '../components/InfoTip.js';
 import { Modal } from '../components/Modal.js';
 import { ToggleSwitch } from '../components/ToggleSwitch.js';
+import { UpdateStatus } from '../components/UpdateStatus.js';
 import { RELATED_LINKS } from './fork-info.js';
 import { detectBrowserLanguage, t, type UiLanguage } from '../i18n.js';
 import { LanguageProvider } from '../i18n-context.js';
@@ -21,21 +23,53 @@ export function WelcomeApp({ portal }: WelcomeAppProps) {
     const [auth, setAuth] = useState<AuthStatus | null>(null);
     const [settings, setSettings] = useState<SettingsV1 | null>(null);
     const [message, setMessage] = useState('');
+    const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+    const [updateStatusError, setUpdateStatusError] = useState<string | null>(null);
+    const [updateChecking, setUpdateChecking] = useState(false);
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [confirmText, setConfirmText] = useState('');
     const [confirmError, setConfirmError] = useState(false);
     const languageInitStarted = useRef(false);
+    const updateRequestId = useRef(0);
     const language: UiLanguage = settings?.uiLanguage ?? 'en';
     const helperMode = settings?.helperMode ?? false;
 
     const refresh = useCallback(async () => {
-        const [authResult, settingsResult] = await Promise.all([
+        const updateRequest = ++updateRequestId.current;
+        const [authResult, settingsResult, updateStatusResult] = await Promise.all([
             portal.authStatus(),
             portal.getSettings(),
+            portal.updateStatus(),
         ]);
         if (authResult.ok) setAuth(authResult.value);
         if (settingsResult.ok) setSettings(settingsResult.value);
+        if (updateRequest !== updateRequestId.current) return;
+        if (updateStatusResult.ok) {
+            setUpdateResult(updateStatusResult.value);
+            setUpdateStatusError(null);
+        } else {
+            setUpdateStatusError(updateStatusResult.error.message);
+        }
     }, [portal]);
+
+    const checkUpdates = useCallback(async () => {
+        if (updateChecking) return;
+        setUpdateChecking(true);
+        setUpdateStatusError(null);
+        const updateRequest = ++updateRequestId.current;
+        try {
+            const response = await portal.updateCheck();
+            if (updateRequest !== updateRequestId.current) return;
+            if (response.ok) {
+                setUpdateResult(response.value);
+                setUpdateStatusError(null);
+            } else {
+                setUpdateStatusError(response.error.message);
+            }
+        } finally {
+            setUpdateChecking(false);
+        }
+    }, [portal, updateChecking]);
 
     useEffect(() => {
         void refresh();
@@ -140,6 +174,16 @@ export function WelcomeApp({ portal }: WelcomeAppProps) {
                     />
                 </div>
                 <p class="v2-muted">{helperMode ? t(language, 'helper.onHint') : t(language, 'helper.offHint')}</p>
+            </section>
+
+            <section class="v2-card">
+                <UpdateStatus
+                    language={language}
+                    result={updateResult}
+                    statusError={updateStatusError}
+                    checking={updateChecking}
+                    onCheck={checkUpdates}
+                />
             </section>
 
             <section class="v2-card">

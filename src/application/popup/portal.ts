@@ -22,6 +22,7 @@ export type { LoadoutView } from '../loadout/view.js';
 import type { AutoFinishFailure, AutoFinishLastRun, AutoFinishMarketResult, AutoFinishRunResult, AutoFinishUnknownJob } from '../../contracts/auto-finish.js';
 import type { AutoJobsSnapshot } from '../../contracts/auto-jobs.js';
 import type { MarketCompletedJobsState } from '../../contracts/market-completed-jobs.js';
+import type { UpdateCheckResult } from '../../contracts/update-check.js';
 
 export type { AutoFinishFailure, AutoFinishLastRun, AutoFinishMarketResult, AutoFinishRunResult, AutoFinishUnknownJob, AutoJobsSnapshot, MarketCompletedJobsState };
 
@@ -532,15 +533,6 @@ export interface SettingsExportData {
     readonly settings: SettingsV1;
 }
 
-export interface UpdateCheckView {
-    readonly current: string;
-    readonly latest: string;
-    readonly updateAvailable: boolean;
-    readonly releaseUrl: string;
-    readonly checkedAt: number;
-    readonly source: string;
-}
-
 export interface PopupPortal {
     subscribeStorage(listener: (keys: readonly string[]) => void): () => void;
     subscribeEvents(listener: (event: BackgroundEvent) => void): () => void;
@@ -549,7 +541,8 @@ export interface PopupPortal {
     /** Opens the full workspace in a detached Chrome popup window. */
     openWindow(): Promise<boolean>;
     ping(): Promise<BridgeResult<{ readonly version: string; readonly phase: string }>>;
-    updateCheck(): Promise<BridgeResult<UpdateCheckView>>;
+    updateStatus(): Promise<BridgeResult<UpdateCheckResult | null>>;
+    updateCheck(): Promise<BridgeResult<UpdateCheckResult>>;
     getSettings(): Promise<BridgeResult<SettingsV1>>;
     updateSettings(patch: SettingsPatch): Promise<BridgeResult<SettingsV1>>;
     exportSettings(): Promise<BridgeResult<SettingsExportData>>;

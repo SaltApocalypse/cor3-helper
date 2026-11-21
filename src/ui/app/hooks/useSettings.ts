@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import type { Dispatch, StateUpdater } from 'preact/hooks';
-import type { PopupPortal, UpdateCheckView } from '../../../application/popup/portal.js';
+import type { PopupPortal } from '../../../application/popup/portal.js';
+import type { UpdateCheckResult } from '../../../contracts/update-check.js';
 import type { AuthStatus, SettingsPatch, SettingsV1 } from '../../../contracts/storage.js';
 import type { HackToggleKey } from '../../features/automation/HackingAutomationCard.js';
 import { detectBrowserLanguage, translate, type UiLanguage } from '../../i18n.js';
@@ -30,8 +31,8 @@ export interface SettingsState {
     readonly helperMode: boolean;
     readonly panelOpen: Readonly<Record<string, boolean>>;
     readonly updatePanelOpen: (key: string, open: boolean) => void;
-    readonly updateInfo: UpdateCheckView | null;
-    readonly updateError: string | null;
+    readonly updateResult: UpdateCheckResult | null;
+    readonly updateStatusError: string | null;
     readonly updateChecking: boolean;
     readonly checkUpdates: () => Promise<void>;
     readonly loadSettings: () => Promise<void>;
@@ -56,10 +57,11 @@ export function useSettings(portal: PopupPortal, deps: SettingsDeps): SettingsSt
     const languageInitStarted = useRef(false);
     const [panelOpen, setPanelOpen] = useState<Record<string, boolean>>({});
     const panelStateInitialized = useRef(false);
-    const [updateInfo, setUpdateInfo] = useState<UpdateCheckView | null>(null);
-    const [updateError, setUpdateError] = useState<string | null>(null);
+    const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+    const [updateStatusError, setUpdateStatusError] = useState<string | null>(null);
     const [updateChecking, setUpdateChecking] = useState(false);
-    const updateCheckStarted = useRef(false);
+    const updateRequestId = useRef(0);
+    const mountedRef = useRef(true);
 
     const language: UiLanguage = settings?.uiLanguage ?? 'en';
     const helperMode = settings?.helperMode ?? false;
@@ -99,28 +101,60 @@ export function useSettings(portal: PopupPortal, deps: SettingsDeps): SettingsSt
         void loadAuth();
     }, [loadSettings, loadAuth]);
 
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+            updateRequestId.current += 1;
+        };
+    }, []);
+
+    const loadUpdateStatus = useCallback(async () => {
+        const requestId = ++updateRequestId.current;
+        try {
+            const response = await portal.updateStatus();
+            if (!mountedRef.current || requestId !== updateRequestId.current) return;
+            if (response.ok) {
+                setUpdateResult(response.value);
+                setUpdateStatusError(null);
+            } else {
+                setUpdateStatusError(response.error.message);
+            }
+        } catch (error) {
+            if (!mountedRef.current || requestId !== updateRequestId.current) return;
+            setUpdateStatusError(error instanceof Error ? error.message : String(error));
+        }
+    }, [portal]);
+
     const checkUpdates = useCallback(async () => {
         if (updateChecking) return;
         setUpdateChecking(true);
-        setUpdateError(null);
+        setUpdateStatusError(null);
+        const requestId = ++updateRequestId.current;
         try {
             const response = await portal.updateCheck();
+            if (!mountedRef.current || requestId !== updateRequestId.current) return;
             if (response.ok) {
-                setUpdateInfo(response.value);
+                setUpdateResult(response.value);
+                setUpdateStatusError(null);
             } else {
-                setUpdateInfo(null);
-                setUpdateError(response.error.message);
+                setUpdateStatusError(response.error.message);
             }
+        } catch (error) {
+            if (!mountedRef.current || requestId !== updateRequestId.current) return;
+            setUpdateStatusError(error instanceof Error ? error.message : String(error));
         } finally {
-            setUpdateChecking(false);
+            if (mountedRef.current) setUpdateChecking(false);
         }
     }, [portal, updateChecking]);
 
     useEffect(() => {
-        if (activePage !== 'settings' || updateCheckStarted.current) return;
-        updateCheckStarted.current = true;
-        void checkUpdates();
-    }, [activePage, checkUpdates]);
+        if (activePage !== 'settings') {
+            updateRequestId.current += 1;
+            return;
+        }
+        void loadUpdateStatus();
+    }, [activePage, loadUpdateStatus]);
 
     const changeHelperMode = useCallback(async (enabled: boolean) => {
         const response = await portal.updateSettings(enabled
@@ -227,8 +261,8 @@ export function useSettings(portal: PopupPortal, deps: SettingsDeps): SettingsSt
         helperMode,
         panelOpen,
         updatePanelOpen,
-        updateInfo,
-        updateError,
+        updateResult,
+        updateStatusError,
         updateChecking,
         checkUpdates,
         loadSettings,
