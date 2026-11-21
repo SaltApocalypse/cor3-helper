@@ -6,6 +6,7 @@
  * cannot forget to suppress its alarm.
  */
 export const AUTO_JOBS_INFO_ALARM = 'v2-auto-jobs-info';
+export const AUTO_JOBS_INFO_REPAIR_ALARM = 'v2-auto-jobs-info-repair';
 export const AUTO_JOBS_LEGACY_ALARM = 'v2-auto-jobs';
 export const AUTO_FINISH_RETRY_ALARM = 'v2-auto-finish-retry';
 export const AUTO_REFRESH_ALARM = 'v2-auto-refresh';
@@ -19,6 +20,7 @@ export const AUTO_DAILY_HACK_ALARM = 'v2-auto-daily-hack';
 
 export const AUTOMATION_ALARM_IDS = {
     autoJobsInfo: AUTO_JOBS_INFO_ALARM,
+    autoJobsInfoRepair: AUTO_JOBS_INFO_REPAIR_ALARM,
     autoFinishRetry: AUTO_FINISH_RETRY_ALARM,
     autoRefresh: AUTO_REFRESH_ALARM,
     autoDrone: AUTO_DRONE_ALARM,

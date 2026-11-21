@@ -8,6 +8,7 @@ import {
     AUTO_EXPEDITION_RETRY_ALARM,
     AUTO_FINISH_RETRY_ALARM,
     AUTO_JOBS_INFO_ALARM,
+    AUTO_JOBS_INFO_REPAIR_ALARM,
     AUTO_MAIL_ALARM,
     AUTO_MAIL_RETRY_ALARM,
     AUTO_REFRESH_ALARM,
@@ -39,6 +40,18 @@ export function alarmRoutes(automation: AutomationRuntime, logger: AutomationLog
                     await automation.autoJobs.ensureInfo('scheduled', true);
                 } catch (error) {
                     logger.error('auto-jobs', 'Scheduled Auto Jobs cycle failed', { message: errorText(error) });
+                }
+            },
+        },
+        {
+            id: 'auto-jobs-info-repair',
+            alarm: AUTO_JOBS_INFO_REPAIR_ALARM,
+            scope: 'auto-jobs',
+            run: async () => {
+                try {
+                    await automation.autoJobs.repairSchedule();
+                } catch (error) {
+                    logger.error('auto-jobs', 'Auto Jobs repair alarm failed', { message: errorText(error) });
                 }
             },
         },

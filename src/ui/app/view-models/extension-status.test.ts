@@ -39,6 +39,8 @@ function overview(overrides: Partial<OverviewState> = {}): OverviewState {
         autoJobs: {
             nextRefreshAt: null,
             refreshReason: 'interval',
+            scheduleState: 'disabled',
+            repairAt: null,
             lastRefreshAt: NOW - 1_000,
             lastError: null,
             lastSkipReason: null,

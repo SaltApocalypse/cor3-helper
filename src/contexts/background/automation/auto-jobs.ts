@@ -11,13 +11,14 @@ import type { MarketCompletedJobsState } from '../../../contracts/market-complet
 import type { NetworkOperationQueue } from '../../../application/network/operation-queue.js';
 import type { AutomationLogger, EventPublisher, RunLogSink, SchedulerPort, SettingsPort } from '../../../application/automation/ports.js';
 import type { AutoJobsSnapshotStore } from '../../../infrastructure/storage/auto-jobs-snapshot-store.js';
-import { AUTO_JOBS_INFO_ALARM } from './alarm-ids.js';
+import { AUTO_JOBS_INFO_ALARM, AUTO_JOBS_INFO_REPAIR_ALARM } from './alarm-ids.js';
 import type { DismissFailedJobsSummary, FailedJobDismisser } from './dismiss-failed.js';
 import type { JobLockRegistry } from './job-locks.js';
 import type { JobMarketSync, JobMarketSyncEntry } from './job-market-sync.js';
 import type { TabRequestPort } from './job-routing.js';
 
 export type AutoJobsRefreshReason = 'interval' | 'reset' | 'fallback';
+export type AutoJobsScheduleState = 'scheduled' | 'repair-pending' | 'repairing' | 'schedule-unavailable' | 'disabled';
 
 export type AutoReadyOutcome =
     | { readonly mode: 'info'; readonly jobs: number; readonly done: number; readonly failed: number }
@@ -61,6 +62,8 @@ export interface AutoJobsStatus {
     readonly stage: string;
     readonly nextRefreshAt: number | null;
     readonly refreshReason: AutoJobsRefreshReason;
+    readonly scheduleState: AutoJobsScheduleState;
+    readonly repairAt: number | null;
     readonly lastRefreshAt: number | null;
     readonly snapshotAt: number | null;
     /** Active minigame locks: job id -> expiry. */
@@ -79,6 +82,38 @@ const AUTO_JOBS_RESET_GRACE_MS = 30_000;
 const AUTO_JOBS_FALLBACK_REFRESH_MS = 2 * 60 * 60 * 1000;
 /** When every known reset time is already past, poll sooner than the full interval. */
 const AUTO_JOBS_STALE_RESET_MAX_WAIT_MS = 10 * 60_000;
+/** Bounded recovery backoff for past/missing/invalid/stale markets. */
+const AUTO_JOBS_RECOVERY_BASE_MS = 60_000;
+const AUTO_JOBS_RECOVERY_MAX_MS = AUTO_JOBS_STALE_RESET_MAX_WAIT_MS;
+const AUTO_JOBS_REPAIR_DELAYS_MS = [30_000, 60_000, 2 * 60_000, 5 * 60_000, 10 * 60_000] as const;
+
+function repairDelayMs(attempts: number): number {
+    return AUTO_JOBS_REPAIR_DELAYS_MS[Math.min(Math.max(attempts, 0), AUTO_JOBS_REPAIR_DELAYS_MS.length - 1)]!;
+}
+
+type MarketResetState = 'future' | 'past' | 'missing' | 'invalid' | 'stale' | 'unavailable';
+
+function resetSignature(snapshot: AutoJobsSnapshot | null): string {
+    return JSON.stringify((snapshot?.markets ?? [])
+        .map((market) => [market.marketKey, market.ok, market.stale === true, market.resetAt ?? null])
+        .sort((left, right) => String(left[0]).localeCompare(String(right[0]))));
+}
+
+function recoveryDelayMs(attempts: number): number {
+    return Math.min(AUTO_JOBS_RECOVERY_MAX_MS, AUTO_JOBS_RECOVERY_BASE_MS * 2 ** Math.min(Math.max(attempts - 1, 0), 4));
+}
+
+function classifyMarketReset(
+    entry: AutoJobsMarket | undefined,
+    now: number,
+): MarketResetState {
+    if (!entry || !entry.ok) return 'unavailable';
+    if (entry.stale === true) return 'stale';
+    if (entry.resetAt === null || entry.resetAt === undefined || entry.resetAt.length === 0) return 'missing';
+    const at = Date.parse(entry.resetAt);
+    if (!Number.isFinite(at)) return 'invalid';
+    return at > now ? 'future' : 'past';
+}
 
 function marketTtlMs(market: AutoJobsMarket, now: number): number {
     const reset = market.resetAt ? Date.parse(market.resetAt) : Number.NaN;
@@ -93,6 +128,9 @@ export class AutoJobsCoordinator {
     private stage = 'idle';
     private nextRefreshAt: number | null = null;
     private refreshReason: AutoJobsRefreshReason = 'interval';
+    private scheduleState: AutoJobsScheduleState = 'disabled';
+    private repairAt: number | null = null;
+    private repairAttempts = 0;
     private lastError: string | null = null;
     private lastSkipReason: string | null = null;
     private bootstrapAt = 0;
@@ -100,6 +138,9 @@ export class AutoJobsCoordinator {
     private pendingEnsure: { readonly reason: string; readonly tabIdHint?: number } | null = null;
     private autoFinish: AutoFinishPort | null = null;
     private dismisser: FailedJobDismisser | null = null;
+    private readonly recoveryByMarket = new Map<string, { attempts: number; lastAttemptAt: number }>();
+    private scheduleGeneration = 0;
+    private scheduleQueue: Promise<void> = Promise.resolve();
 
     constructor(private readonly deps: AutoJobsDeps) {}
 
@@ -151,6 +192,14 @@ export class AutoJobsCoordinator {
         return this.refreshReason;
     }
 
+    scheduleStateValue(): AutoJobsScheduleState {
+        return this.scheduleState;
+    }
+
+    repairAtValue(): number | null {
+        return this.repairAt;
+    }
+
     async status(): Promise<AutoJobsStatus> {
         const current = await this.deps.settings.get();
         return {
@@ -160,6 +209,8 @@ export class AutoJobsCoordinator {
             stage: this.stage,
             nextRefreshAt: this.nextRefreshAt,
             refreshReason: this.refreshReason,
+            scheduleState: this.scheduleState,
+            repairAt: this.repairAt,
             lastRefreshAt: this.snapshot?.at ?? null,
             snapshotAt: this.snapshot?.at ?? null,
             locks: this.deps.locks.locksSnapshot(),
@@ -219,12 +270,22 @@ export class AutoJobsCoordinator {
     }
 
     publishSnapshot(update: AutoJobsSnapshot): void {
+        const previousResetSignature = resetSignature(this.snapshot);
         const snapshot = mergeAutoJobsSnapshot(this.snapshot, update);
         this.snapshot = snapshot;
         this.deps.events.publish('auto.jobs.snapshot', snapshot);
         void this.deps.store.set(snapshot).catch((error: unknown) => {
             this.deps.logger.warn('auto-jobs', 'Failed to persist Auto Jobs snapshot', { message: error instanceof Error ? error.message : String(error) });
         });
+        // Only reset-relevant changes should rebuild the alarm. Ordinary job
+        // updates must not churn the scheduler.
+        if (previousResetSignature !== resetSignature(snapshot)) {
+            const now = this.deps.clock.now();
+            for (const market of snapshot.markets) {
+                if (classifyMarketReset(market, now) === 'future') this.recoveryByMarket.delete(market.marketKey);
+            }
+            void this.scheduleNextRefresh();
+        }
     }
 
     applyMarketCacheSnapshot(marketId: string, snapshot: RawMarketSnapshot): void {
@@ -380,7 +441,7 @@ export class AutoJobsCoordinator {
             if (reason === 'scheduled') await this.scheduleNextRefresh();
             return;
         }
-        if (!manual && this.snapshot && now - this.lastAttemptAt < AUTO_JOBS_MIN_INTERVAL_MS) {
+        if (!manual && reason !== 'scheduled' && this.snapshot && now - this.lastAttemptAt < AUTO_JOBS_MIN_INTERVAL_MS) {
             this.lastSkipReason = 'recently-refreshed';
             if (reason === 'scheduled') await this.scheduleNextRefresh();
             return;
@@ -404,6 +465,7 @@ export class AutoJobsCoordinator {
             );
             this.lastAttemptAt = this.deps.clock.now();
             this.lastError = result.ok ? null : `${result.error.code}: ${result.error.message}`;
+            this.noteRefreshAttempts(targets ?? JOB_MARKETS, this.deps.clock.now());
             await this.scheduleNextRefresh();
         } finally {
             const pending = this.pendingEnsure;
@@ -426,88 +488,314 @@ export class AutoJobsCoordinator {
         if (!snapshot) return [...JOB_MARKETS];
         return JOB_MARKETS.filter((market) => {
             const entry = snapshot.markets.find((candidate) => candidate.marketKey === market.key);
-            if (!entry || !entry.ok || entry.updatedAt === undefined) return true;
-            return now - entry.updatedAt >= marketTtlMs(entry, now);
+            const state = classifyMarketReset(entry, now);
+            if (state === 'future') {
+                return entry === undefined || entry.updatedAt === undefined || now - entry.updatedAt >= marketTtlMs(entry, now);
+            }
+            return this.recoveryDue(market.key, entry, now);
         });
     }
 
+    private recoveryDue(marketKey: string, entry: AutoJobsMarket | undefined, now: number): boolean {
+        const state = this.recoveryByMarket.get(marketKey);
+        const attempts = state?.attempts ?? 0;
+        const anchor = state?.lastAttemptAt ?? entry?.updatedAt ?? 0;
+        if (anchor <= 0) return true;
+        return now >= anchor + recoveryDelayMs(attempts);
+    }
+
+    private noteRefreshAttempts(markets: readonly JobMarketDefinition[], now: number): void {
+        for (const market of markets) {
+            const entry = this.snapshot?.markets.find((candidate) => candidate.marketKey === market.key);
+            const state = classifyMarketReset(entry, now);
+            if (state === 'future' && entry?.stale !== true) {
+                this.recoveryByMarket.delete(market.key);
+                continue;
+            }
+            const previous = this.recoveryByMarket.get(market.key);
+            this.recoveryByMarket.set(market.key, {
+                attempts: (previous?.attempts ?? 0) + 1,
+                lastAttemptAt: now,
+            });
+        }
+    }
+
+    private recoveryAt(marketKey: string, now: number): number {
+        const state = this.recoveryByMarket.get(marketKey);
+        const attempts = state?.attempts ?? 0;
+        const anchor = state?.lastAttemptAt ?? 0;
+        return anchor > 0 ? anchor + recoveryDelayMs(attempts) : now + recoveryDelayMs(0);
+    }
+
     async scheduleNextRefresh(): Promise<void> {
-        const current = await this.deps.settings.get();
-        await this.deps.scheduler.clear(AUTO_JOBS_INFO_ALARM);
-        const now = this.deps.clock.now();
-        if (current.helperMode || !current.autoJobsEnabled) {
-            this.nextRefreshAt = null;
-            this.refreshReason = 'interval';
-            this.deps.events.publish('auto.jobs.schedule', { nextRefreshAt: null, reason: this.refreshReason });
-            return;
-        }
-        const resetTimes = (this.snapshot?.markets ?? [])
-            .filter((market) => market.ok && market.resetAt)
-            .map((market) => new Date(market.resetAt!).getTime())
-            .filter((value) => Number.isFinite(value) && value > now);
-        if (current.autoFinishEnabled && this.allMarketsCompletedForCurrentReset()) {
-            if (resetTimes.length > 0) {
-                this.refreshReason = 'reset';
-                this.nextRefreshAt = Math.min(...resetTimes) + AUTO_JOBS_RESET_GRACE_MS;
-                this.deps.scheduler.create(AUTO_JOBS_INFO_ALARM, { when: this.nextRefreshAt });
-            } else {
-                this.refreshReason = 'fallback';
-                this.nextRefreshAt = now + AUTO_JOBS_FALLBACK_REFRESH_MS;
-                this.deps.scheduler.create(AUTO_JOBS_INFO_ALARM, { when: this.nextRefreshAt });
-            }
-            this.deps.events.publish('auto.jobs.schedule', { nextRefreshAt: this.nextRefreshAt, reason: this.refreshReason });
-            return;
-        }
-        if (resetTimes.length > 0) {
-            // Wake when the earliest market reset countdown reaches zero, but
-            // never later than the normal polling interval.
-            const intervalAt = now + current.autoJobsIntervalMinutes * 60_000;
-            const resetAt = Math.min(...resetTimes) + AUTO_JOBS_RESET_GRACE_MS;
-            this.refreshReason = resetAt <= intervalAt ? 'reset' : 'interval';
-            this.nextRefreshAt = Math.min(resetAt, intervalAt);
-            if (this.refreshReason === 'interval') {
-                this.deps.scheduler.create(AUTO_JOBS_INFO_ALARM, {
-                    delayInMinutes: current.autoJobsIntervalMinutes,
-                    periodInMinutes: current.autoJobsIntervalMinutes,
-                });
-            } else {
-                this.deps.scheduler.create(AUTO_JOBS_INFO_ALARM, { when: this.nextRefreshAt });
-            }
-            this.deps.events.publish('auto.jobs.schedule', { nextRefreshAt: this.nextRefreshAt, reason: this.refreshReason });
-            return;
-        }
-        const resetMarkets = (this.snapshot?.markets ?? []).filter((market) => market.ok && market.resetAt);
-        const staleResets = resetMarkets.length > 0 && resetMarkets.every((market) => {
-            const at = Date.parse(market.resetAt!);
-            return Number.isFinite(at) && at <= now;
+        const generation = ++this.scheduleGeneration;
+        const run = this.scheduleQueue.then(
+            () => this.applySchedule(generation),
+            () => this.applySchedule(generation),
+        );
+        this.scheduleQueue = run.catch(() => undefined);
+        await run;
+    }
+
+    private computeSchedule(current: SettingsV1, now: number): {
+        readonly nextAt: number;
+        readonly reason: AutoJobsRefreshReason;
+        readonly when?: number;
+        readonly delayInMinutes?: number;
+        readonly periodInMinutes?: number;
+        readonly markets: Readonly<Record<string, MarketResetState>>;
+    } {
+        const entries = JOB_MARKETS.map((market) => {
+            const entry = this.snapshot?.markets.find((candidate) => candidate.marketKey === market.key);
+            return { market, entry, state: classifyMarketReset(entry, now) };
         });
-        if (staleResets) {
-            // The game has not published the next reset time yet. Waiting the
-            // full (often 60-minute) interval leaves new jobs invisible after a
-            // reset; poll at a bounded short interval until a future reset or
-            // new job appears.
-            const waitMs = Math.min(current.autoJobsIntervalMinutes * 60_000, AUTO_JOBS_STALE_RESET_MAX_WAIT_MS);
-            this.refreshReason = 'fallback';
-            this.nextRefreshAt = now + waitMs;
-            this.deps.scheduler.create(AUTO_JOBS_INFO_ALARM, { when: this.nextRefreshAt });
-            this.deps.events.publish('auto.jobs.schedule', { nextRefreshAt: this.nextRefreshAt, reason: this.refreshReason });
-            return;
+        const futureResetTimes = entries
+            .filter(({ entry, state }) => state === 'future' && entry?.stale !== true)
+            .map(({ entry }) => Date.parse(entry!.resetAt!))
+            .filter((value) => Number.isFinite(value) && value > now);
+        const recovery = entries.filter(({ state }) => state !== 'future');
+        const intervalAt = now + current.autoJobsIntervalMinutes * 60_000;
+        const futureResetAt = futureResetTimes.length > 0
+            ? Math.min(...futureResetTimes) + AUTO_JOBS_RESET_GRACE_MS
+            : null;
+        const recoveryAt = recovery.length > 0
+            ? Math.max(now + 1_000, Math.min(...recovery.map(({ market }) => this.recoveryAt(market.key, now))))
+            : null;
+        const marketStates = Object.fromEntries(entries.map(({ market, state }) => [market.key, state]));
+
+        if (current.autoFinishEnabled && this.allMarketsCompletedForCurrentReset()) {
+            return futureResetAt !== null
+                ? { nextAt: futureResetAt, reason: 'reset', when: futureResetAt, markets: marketStates }
+                : { nextAt: now + AUTO_JOBS_FALLBACK_REFRESH_MS, reason: 'fallback', when: now + AUTO_JOBS_FALLBACK_REFRESH_MS, markets: marketStates };
         }
-        this.refreshReason = 'interval';
-        this.nextRefreshAt = now + current.autoJobsIntervalMinutes * 60_000;
-        this.deps.scheduler.create(AUTO_JOBS_INFO_ALARM, {
+
+        if (futureResetAt !== null && (recoveryAt === null || futureResetAt <= recoveryAt)) {
+            if (futureResetAt <= intervalAt) {
+                return { nextAt: futureResetAt, reason: 'reset', when: futureResetAt, markets: marketStates };
+            }
+            return {
+                nextAt: intervalAt,
+                reason: 'interval',
+                delayInMinutes: current.autoJobsIntervalMinutes,
+                periodInMinutes: current.autoJobsIntervalMinutes,
+                markets: marketStates,
+            };
+        }
+        if (recoveryAt !== null) {
+            if (recoveryAt <= intervalAt) {
+                return { nextAt: recoveryAt, reason: 'fallback', when: recoveryAt, markets: marketStates };
+            }
+            return {
+                nextAt: intervalAt,
+                reason: 'interval',
+                delayInMinutes: current.autoJobsIntervalMinutes,
+                periodInMinutes: current.autoJobsIntervalMinutes,
+                markets: marketStates,
+            };
+        }
+        return {
+            nextAt: intervalAt,
+            reason: 'interval',
             delayInMinutes: current.autoJobsIntervalMinutes,
             periodInMinutes: current.autoJobsIntervalMinutes,
+            markets: marketStates,
+        };
+    }
+
+    private async clearRepairAlarm(generation?: number): Promise<void> {
+        if (generation !== undefined && generation !== this.scheduleGeneration) return;
+        try {
+            await this.deps.scheduler.clear(AUTO_JOBS_INFO_REPAIR_ALARM);
+        } catch (error) {
+            this.deps.logger.warn('auto-jobs', 'Failed to clear Auto Jobs repair alarm', {
+                generation,
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    private async scheduleRepairAlarm(generation: number): Promise<void> {
+        if (generation !== this.scheduleGeneration) return;
+        const now = this.deps.clock.now();
+        const delay = repairDelayMs(this.repairAttempts);
+        const repairAt = now + delay;
+        this.nextRefreshAt = null;
+        this.repairAt = repairAt;
+        this.scheduleState = 'repair-pending';
+        try {
+            this.deps.scheduler.create(AUTO_JOBS_INFO_REPAIR_ALARM, { when: repairAt });
+        } catch (error) {
+            this.scheduleState = 'schedule-unavailable';
+            this.repairAt = null;
+            this.deps.logger.error('auto-jobs', 'Failed to create Auto Jobs repair alarm', {
+                generation,
+                attempt: this.repairAttempts + 1,
+                repairAt,
+                message: error instanceof Error ? error.message : String(error),
+            });
+            this.deps.events.publish('auto.jobs.schedule', {
+                nextRefreshAt: null,
+                reason: 'fallback',
+                scheduleState: this.scheduleState,
+                repairAt: null,
+                generation,
+            });
+            return;
+        }
+        let confirmed = true;
+        try {
+            confirmed = (await this.deps.scheduler.get(AUTO_JOBS_INFO_REPAIR_ALARM)) !== null;
+        } catch (error) {
+            confirmed = false;
+            this.deps.logger.warn('auto-jobs', 'Failed to confirm Auto Jobs repair alarm', {
+                generation,
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }
+        if (!confirmed) {
+            if (generation !== this.scheduleGeneration) return;
+            this.scheduleState = 'schedule-unavailable';
+            this.repairAt = null;
+            this.deps.logger.error('auto-jobs', 'Auto Jobs repair alarm was not confirmed', { generation, repairAt });
+            this.deps.events.publish('auto.jobs.schedule', {
+                nextRefreshAt: null,
+                reason: 'fallback',
+                scheduleState: this.scheduleState,
+                repairAt: null,
+                generation,
+            });
+            return;
+        }
+        if (generation !== this.scheduleGeneration) return;
+        this.repairAttempts += 1;
+        this.deps.logger.warn('auto-jobs', 'Auto Jobs alarm repair scheduled', {
+            generation,
+            attempt: this.repairAttempts,
+            repairAt,
+            delayMs: delay,
         });
-        this.deps.events.publish('auto.jobs.schedule', { nextRefreshAt: this.nextRefreshAt, reason: this.refreshReason });
+        this.deps.events.publish('auto.jobs.schedule', {
+            nextRefreshAt: null,
+            reason: 'fallback',
+            scheduleState: this.scheduleState,
+            repairAt,
+            generation,
+        });
+    }
+
+    async repairSchedule(): Promise<void> {
+        if (this.scheduleState === 'scheduled') {
+            await this.clearRepairAlarm();
+            return;
+        }
+        this.scheduleState = 'repairing';
+        this.repairAt = null;
+        await this.scheduleNextRefresh();
+    }
+
+    private async applySchedule(generation: number): Promise<void> {
+        try {
+            const current = await this.deps.settings.get();
+            if (generation !== this.scheduleGeneration) return;
+            const now = this.deps.clock.now();
+            if (current.helperMode || !current.autoJobsEnabled) {
+                try {
+                    await this.deps.scheduler.clear(AUTO_JOBS_INFO_ALARM);
+                } catch (error) {
+                    this.deps.logger.warn('auto-jobs', 'Failed to clear Auto Jobs alarm', {
+                        message: error instanceof Error ? error.message : String(error),
+                    });
+                }
+                if (generation !== this.scheduleGeneration) return;
+                await this.clearRepairAlarm(undefined);
+                this.nextRefreshAt = null;
+                this.refreshReason = 'interval';
+                this.scheduleState = 'disabled';
+                this.repairAt = null;
+                this.repairAttempts = 0;
+                this.deps.events.publish('auto.jobs.schedule', { nextRefreshAt: null, reason: this.refreshReason, scheduleState: this.scheduleState, generation });
+                return;
+            }
+            const plan = this.computeSchedule(current, now);
+            if (generation !== this.scheduleGeneration) return;
+            try {
+                await this.deps.scheduler.clear(AUTO_JOBS_INFO_ALARM);
+            } catch (error) {
+                this.deps.logger.warn('auto-jobs', 'Failed to clear Auto Jobs alarm', {
+                    generation,
+                    message: error instanceof Error ? error.message : String(error),
+                });
+            }
+            if (generation !== this.scheduleGeneration) return;
+            const timing = plan.when !== undefined
+                ? { when: plan.when }
+                : { delayInMinutes: plan.delayInMinutes!, periodInMinutes: plan.periodInMinutes! };
+            let created = false;
+            for (let attempt = 1; attempt <= 2 && !created; attempt++) {
+                if (generation !== this.scheduleGeneration) return;
+                try {
+                    this.deps.scheduler.create(AUTO_JOBS_INFO_ALARM, timing);
+                    created = true;
+                } catch (error) {
+                    const level = attempt === 2 ? 'error' : 'warn';
+                    this.deps.logger[level]('auto-jobs', 'Failed to create Auto Jobs alarm', {
+                        generation,
+                        attempt,
+                        nextRefreshAt: plan.nextAt,
+                        reason: plan.reason,
+                        message: error instanceof Error ? error.message : String(error),
+                    });
+                }
+            }
+            if (!created) {
+                await this.scheduleRepairAlarm(generation);
+                return;
+            }
+            let confirmed = true;
+            try {
+                confirmed = (await this.deps.scheduler.get(AUTO_JOBS_INFO_ALARM)) !== null;
+            } catch (error) {
+                confirmed = false;
+                this.deps.logger.warn('auto-jobs', 'Failed to confirm Auto Jobs alarm', {
+                    generation,
+                    message: error instanceof Error ? error.message : String(error),
+                });
+            }
+            if (!confirmed) {
+                this.deps.logger.error('auto-jobs', 'Auto Jobs alarm was not confirmed', { generation, nextRefreshAt: plan.nextAt });
+                await this.scheduleRepairAlarm(generation);
+                return;
+            }
+            await this.clearRepairAlarm(generation);
+            if (generation !== this.scheduleGeneration) return;
+            this.nextRefreshAt = plan.nextAt;
+            this.refreshReason = plan.reason;
+            this.scheduleState = 'scheduled';
+            this.repairAt = null;
+            this.repairAttempts = 0;
+            this.deps.events.publish('auto.jobs.schedule', {
+                nextRefreshAt: this.nextRefreshAt,
+                reason: this.refreshReason,
+                scheduleState: this.scheduleState,
+                generation,
+                markets: plan.markets,
+            });
+        } catch (error) {
+            this.deps.logger.error('auto-jobs', 'Failed to schedule Auto Jobs refresh', {
+                generation,
+                message: error instanceof Error ? error.message : String(error),
+            });
+            this.nextRefreshAt = null;
+            await this.scheduleRepairAlarm(generation);
+        }
     }
 
     allMarketsCompletedForCurrentReset(): boolean {
         const now = this.deps.clock.now();
         const snapshot = this.snapshot;
-        if (!snapshot || snapshot.markets.length === 0) return false;
+        if (!snapshot || snapshot.markets.length !== JOB_MARKETS.length) return false;
         const active = snapshot.markets.filter((market) =>
-            market.ok && market.resetAt !== null && market.resetAt !== undefined
+            market.ok && market.stale !== true && market.resetAt !== null && market.resetAt !== undefined
             && new Date(market.resetAt).getTime() > now,
         );
         if (active.length !== snapshot.markets.length) return false;

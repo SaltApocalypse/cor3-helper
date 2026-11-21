@@ -333,6 +333,8 @@ export interface AutoJobsStatus {
     readonly stage: string;
     readonly nextRefreshAt: number | null;
     readonly refreshReason: 'interval' | 'reset' | 'fallback';
+    readonly scheduleState: 'scheduled' | 'repair-pending' | 'repairing' | 'schedule-unavailable' | 'disabled';
+    readonly repairAt: number | null;
     readonly lastRefreshAt: number | null;
     readonly snapshotAt: number | null;
     /** Active minigame locks: job id -> expiry. */
@@ -448,6 +450,8 @@ export interface OverviewAutomation {
 export interface OverviewAutoJobs {
     readonly nextRefreshAt: number | null;
     readonly refreshReason: 'interval' | 'reset' | 'fallback';
+    readonly scheduleState: 'scheduled' | 'repair-pending' | 'repairing' | 'schedule-unavailable' | 'disabled';
+    readonly repairAt: number | null;
     readonly lastRefreshAt: number | null;
     readonly lastError: string | null;
     readonly lastSkipReason: string | null;

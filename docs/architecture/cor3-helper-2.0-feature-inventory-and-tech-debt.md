@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-21 against build `2.0.6-salta.306`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (111 files / 719 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-21 against build `2.0.6-salta.308`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (111 files / 736 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.6-salta.306`)
+## Current completion snapshot (build `2.0.6-salta.308`)
 
 | Metric | Value |
 |---|---|
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 111 files / 719 tests pass
-- `npm run build` — pass, `2.0.6-salta.306`
+- `npm test` — 111 files / 736 tests pass
+- `npm run build` — pass, `2.0.6-salta.308`
 
 ---
 
@@ -1395,3 +1395,26 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 - The handler returns the identity error before sending Complete, so no Sidecar, barrier clear or Job State mutation occurs.
 - Terminal completed/expired/failed/blocked records do not participate in identity selection.
 - Tests cover zero/one/multiple same/multiple different/known+unknown/terminal/store-failure cases and handler no-Complete behavior.
+
+---
+
+# Part 67 — Phase B2.1: Reset-aware refresh scheduling (2.0.6-salta.307)
+
+- Every market is classified as future/past/missing/invalid/stale/unavailable; a future market no longer hides another market's recovery need.
+- Past/missing/invalid/stale/unavailable markets get bounded recovery wakes: 60s, 2m, 4m, 8m, capped at 10m. A valid future reset clears the recovery state.
+- Scheduled triggers bypass only the 15s min interval; per-market TTL remains active for unrelated future markets. Manual enable remains an explicit full refresh.
+- `scheduleNextRefresh()` is serialized and generation-guarded; stale computations cannot overwrite newer decisions. Clear/create failures are logged; create has a bounded retry.
+- Reset-relevant snapshot changes (market ok/stale/resetAt) trigger recomputation through a single publish hook; ordinary job/UI snapshot updates do not.
+- Alarm status/log events include generation and per-market reset classifications.
+
+---
+
+# Part 68 — Phase B2.1.2: Alarm failure recovery (2.0.6-salta.308)
+
+- Added `AUTO_JOBS_INFO_REPAIR_ALARM` with a dedicated alarm route. Repair never runs the market refresh itself; it asks the coordinator to recompute the latest normal schedule.
+- Normal alarm create is confirmed via `Scheduler.get`; failure creates a repair alarm with 30s/60s/2m/5m/10m backoff.
+- Repair attempts reset on normal schedule success. Repair creation/confirmation failure is logged and reported as `schedule-unavailable`.
+- `AutoJobsStatus` now exposes `scheduleState` and `repairAt`: scheduled, repair-pending, repairing, schedule-unavailable, disabled.
+- Normal success clears any repair alarm. disable/helper mode clears both normal and repair alarms and cannot reactivate an Alarm.
+- Repair scheduling uses the same generation/queue checks as normal scheduling; stale generations cannot publish or overwrite the latest decision.
+- Tests cover normal create failures, clear+create failures, repair creation failure, repair backoff, repair recovery, and the existing scheduling/concurrency suite.

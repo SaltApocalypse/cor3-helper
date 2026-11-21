@@ -204,6 +204,8 @@ export function registerSystemHandlers(server: CoreRuntime['server'], deps: Syst
             autoJobs: {
                 nextRefreshAt: autoJobsStatus.nextRefreshAt,
                 refreshReason: autoJobsStatus.refreshReason,
+                scheduleState: autoJobsStatus.scheduleState,
+                repairAt: autoJobsStatus.repairAt,
                 lastRefreshAt: autoJobsStatus.lastRefreshAt,
                 lastError: automation.autoJobs.lastErrorText(),
                 lastSkipReason: automation.autoJobs.lastSkipReasonText(),

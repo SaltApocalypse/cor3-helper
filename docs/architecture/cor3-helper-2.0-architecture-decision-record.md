@@ -1,9 +1,9 @@
 # cor3-helper 2.0 — Architecture Decision Record
 
-- **Status:** Accepted; implementation ongoing on `v2` (build `2.0.6-salta.306`)
+- **Status:** Accepted; implementation ongoing on `v2` (build `2.0.6-salta.308`)
 - **Date:** 2026-11-08
 - **Last status update:** 2026-11-15
-- **Current verification:** typecheck, lint, Vitest (111 files / 719 tests) and build pass at this build.
+- **Current verification:** typecheck, lint, Vitest (111 files / 736 tests) and build pass at this build.
 - **Baseline:** `experimental` at `c7b69c7` (`v1.8.6-salta-exp.2`)
 - **Related audit:** [`cor3-helper-2.0-architecture-audit.md`](./cor3-helper-2.0-architecture-audit.md)
 - **Scope:** architecture, technology selection, security, repository strategy, UI, loadout data, release identity
@@ -650,7 +650,7 @@ Status: **2.0 rewrite implemented on `v2`; H9 is complete and H10 is partially a
 
 - Source was promoted from the transitional `v2/` workspace to the repository root `src/`.
 - v1 source was removed from the working tree; it remains in git history as the behavior reference.
-- Build output is `dist/`; current build is `2.0.6-salta.306`.
+- Build output is `dist/`; current build is `2.0.6-salta.308`.
 - Background split (H8): 54-line composition root, 103 bridge commands across 17 handler modules, and port-driven automation coordinators.
 - Side panel split: per-domain hooks, pure view models and page panels.
 - H1 release workflow fixed: typecheck/lint/test/build, zip `dist/`, generated release notes.
@@ -658,6 +658,8 @@ Status: **2.0 rewrite implemented on `v2`; H9 is complete and H10 is partially a
 - H10 integration/UI tests are partially addressed (decrypt pipeline, storage migrations and architecture boundaries) but background/content/portal orchestration and UI rendering remain deferred.
 - **Loadout/auto-decryption:** the Loadout page and automatic File Decryption share `LoadoutService.ensure()` + `optimizeLoadout()`. File Decryption takes the job first, routes/accesses the target, then uses exact-target planning and an adaptive hardware order before decrypting, and reports plan/step diagnostics.
 - **Job lifecycle state (Phase 3A):** a sharded, versioned `JobStateStore` records local lifecycle transitions for later reconciliation. It is observational only: game `recentJobs`/`canComplete`, `completedJobs`, retry budgets, locks and endpoint state remain authoritative for automation decisions.
+- **Alarm failure recovery (Phase B2.1.2):** a dedicated Auto Jobs repair alarm is used after normal alarm creation/confirmation failures, with 30s/60s/2m/5m/10m backoff. Alarm state distinguishes scheduled, repair-pending, repairing, schedule-unavailable and disabled. Normal alarm success is confirmed via Scheduler.get, repair is generation-guarded, and disable/helper mode clears both alarms.
+- **Reset-aware refresh scheduling (Phase B2.1):** reset scheduling now classifies every market (future/past/missing/invalid/stale/unavailable), gives non-future markets a bounded exponential recovery wake-up, lets scheduled triggers bypass only the 15s min interval (not per-market TTL), serializes alarm mutation with generation checks, logs clear/create failures/retries, and recomputes the alarm when reset-relevant snapshot data changes.
 - **Direct Complete identity ambiguity (Phase B1.9.1):** direct completion no longer selects the newest active Job State record. Zero active records use a validated current snapshot reset; one or more active records must agree on one parseable known reset. Multiple resets, unknown resets or Store failure return an explicit identity error before any Complete command.
 - **Reset identity preservation and direct Complete (Phase B1.9):** the execution reset is captured once before session creation and passed into the recorder and completion path; a reset advance during the task cannot relabel completion. Direct `job.complete` resolves an active Job State reset first, checks the shared barrier, writes the authoritative sidecar after ACK, and persists a fallback barrier on ambiguous results or sidecar failure. Clear Local State remains explicit destructive semantics.
 - **Unknown barrier final safety audit (Phase B1.8):** session-creation failure now writes the completion sidecar when a reset can be resolved, and otherwise writes a durable unknown fallback barrier; unconfirmed Complete writes fallback directly when no Job State session exists. Barrier clearing is reset-exact: Reset A completion clears only Reset A barriers; unknown barriers are never auto-cleared by a known completion. Direct `job.complete` bridge entries check the same barrier. Clear Local State still clears sidecars/fallbacks by explicit destructive semantics.
