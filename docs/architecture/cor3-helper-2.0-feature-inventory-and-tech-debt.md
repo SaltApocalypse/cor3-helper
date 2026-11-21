@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-21 against build `2.0.6-salta.309`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (117 files / 908 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-21 against build `2.0.6-salta.310`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (117 files / 917 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.6-salta.309`)
+## Current completion snapshot (build `2.0.6-salta.310`)
 
 | Metric | Value |
 |---|---|
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 117 files / 908 tests pass
-- `npm run build` — pass, `2.0.6-salta.309`
+- `npm test` — 117 files / 917 tests pass
+- `npm run build` — pass, `2.0.6-salta.310`
 
 ---
 

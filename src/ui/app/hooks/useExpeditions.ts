@@ -24,6 +24,7 @@ export interface ExpeditionsState {
     readonly autoExpedition: AutoExpeditionStatus | null;
     readonly loadExpeditions: () => Promise<void>;
     readonly loadAutoExpedition: () => Promise<void>;
+    readonly respondDecision: (expeditionId: string, messageId: string, optionId: string) => Promise<string | null>;
     readonly toggleAutoExpedition: () => Promise<string | null>;
     readonly cancelMercPreparation: () => Promise<void>;
     readonly updateAutomationSettings: (patch: SettingsPatch) => Promise<{ readonly ok: boolean; readonly error?: string }>;
@@ -75,6 +76,18 @@ export function useExpeditions(portal: PopupPortal, deps: ExpeditionsDeps): Expe
         await loadAutoExpedition();
     }, [portal, loadAutoExpedition, reportDetail]);
 
+    const respondDecision = useCallback(async (expeditionId: string, messageId: string, optionId: string): Promise<string | null> => {
+        setExpeditionBusy(true);
+        const response = await portal.respondExpeditionDecision(expeditionId, messageId, optionId);
+        setExpeditionBusy(false);
+        if (!response.ok) {
+            reportDetail(response.error.message);
+            return response.error.message;
+        }
+        await Promise.all([loadExpeditions(), loadAutoExpedition()]);
+        return null;
+    }, [portal, reportDetail, loadExpeditions, loadAutoExpedition]);
+
     const updateAutomationSettings = useCallback(async (patch: SettingsPatch): Promise<{ readonly ok: boolean; readonly error?: string }> => {
         const response = await portal.updateSettings(patch);
         if (!response.ok) {
@@ -102,6 +115,7 @@ export function useExpeditions(portal: PopupPortal, deps: ExpeditionsDeps): Expe
         autoExpedition,
         loadExpeditions,
         loadAutoExpedition,
+        respondDecision,
         toggleAutoExpedition,
         cancelMercPreparation,
         updateAutomationSettings,

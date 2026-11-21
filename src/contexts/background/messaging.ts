@@ -27,6 +27,14 @@ export function registerMessaging(core: CoreRuntime, automation: AutomationRunti
             if (typeof marketId === 'string' && parsed.success) automation.autoJobs.applyMarketCacheSnapshot(marketId, parsed.data);
             return false;
         }
+        if (type === 'V2_EXPEDITION_DECISIONS') {
+            const decisions = (message as { decisions?: unknown }).decisions;
+            if (Array.isArray(decisions) && decisions.length > 0) {
+                core.logger.debug('auto-expedition', 'Expedition decision event received', { decisions: decisions.length });
+                void automation.expedition.run();
+            }
+            return false;
+        }
         if (type === 'V2_WS_NOTICE') {
             const level = (message as { level?: unknown }).level;
             const text = (message as { message?: unknown }).message;

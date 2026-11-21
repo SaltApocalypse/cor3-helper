@@ -131,6 +131,7 @@ export function AutomationPanel({
                 onRunDrone={drone.autoRunDrone}
                 onCancelMercPreparation={expeditions.cancelMercPreparation}
                 onLoadMerc={expeditions.loadExpeditions}
+                onRespondDecision={expeditions.respondDecision}
                 onLoadDrone={async () => { await drone.loadDrone(); }}
                 onUpdateSettings={expeditions.updateAutomationSettings}
                 now={now}

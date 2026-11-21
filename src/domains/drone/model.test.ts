@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bestDroneMission, chooseDroneEventOption, droneNextAvailableSeconds, droneRefreshDelayMs, type DroneMission, type DroneMissionEvent, type DroneState } from './model.js';
+import { bestDroneMission, chooseDroneEventOption, chooseScoredDroneEventOption, droneEventScore, droneNextAvailableSeconds, droneRefreshDelayMs, type DroneMission, type DroneMissionEvent, type DroneState } from './model.js';
 
 const missions: readonly DroneMission[] = [
     {
@@ -40,6 +40,7 @@ const event: DroneMissionEvent = {
     missionId: 'm1',
     eventId: 'e1',
     type: 'HAZARD',
+    riskScore: 0,
     options: [
         { id: 'fast', label: 'Fast', lootDelta: 2, riskDelta: 2, requiredModuleId: null },
         { id: 'safe', label: 'Safe', lootDelta: -1, riskDelta: -2, requiredModuleId: null },
@@ -56,6 +57,20 @@ describe('drone decisions', () => {
         expect(chooseDroneEventOption(event, 'veterans')?.id).toBe('fast');
         expect(chooseDroneEventOption(event, 'loot')?.id).toBe('loot');
         expect(chooseDroneEventOption(event, 'risk')?.id).toBe('safe');
+    });
+
+    it('scores drone options with the v1 loot/risk defaults and keeps the first tie', () => {
+        const weights = { loot: 3, risk: -2 };
+        expect(droneEventScore(event.options[0]!, event.riskScore, weights)).toBe(5);
+        expect(chooseScoredDroneEventOption(event, weights)?.id).toBe('loot');
+        const tied: DroneMissionEvent = {
+            ...event,
+            options: [
+                { id: 'first', label: 'First', lootDelta: 1, riskDelta: 1, requiredModuleId: null },
+                { id: 'second', label: 'Second', lootDelta: 1, riskDelta: 1, requiredModuleId: null },
+            ],
+        };
+        expect(chooseScoredDroneEventOption(tied, weights)?.id).toBe('first');
     });
 
     it('filters missions by configured location and goal', () => {

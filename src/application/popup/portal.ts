@@ -12,6 +12,7 @@ import type { MarketReputation, MarketView } from '../../domains/markets/model.j
 import type { DailyOpsState } from '../../domains/daily-ops/model.js';
 import type { SpecialistPurchase, SpecialistState } from '../../domains/specialists/model.js';
 import type { ExpeditionOverview } from '../../domains/expeditions/model.js';
+import type { ExpeditionDecisionOption } from '../../domains/expeditions/model.js';
 
 import type { DroneState } from '../../domains/drone/model.js';
 import type { LoadoutView } from '../loadout/view.js';
@@ -192,7 +193,27 @@ export interface ExpeditionPreparation {
     readonly totalCost: number;
     readonly riskScore: number;
     readonly insurance: boolean;
+    readonly insuranceCost: number | null;
     readonly locationName: string;
+}
+
+export interface ExpeditionDecisionView {
+    readonly id: string;
+    readonly expeditionId: string;
+    readonly message: string;
+    readonly riskScore: number | null;
+    readonly lootScore: number | null;
+    readonly deadline: string | null;
+    readonly firstSeenAt: number;
+    readonly autoRespondAt: number | null;
+    readonly options: readonly ExpeditionDecisionOption[];
+    readonly mode: 'simple' | 'score';
+    readonly policy: string;
+    readonly lootWeight: number;
+    readonly riskWeight: number;
+    readonly chosenOptionId: string | null;
+    readonly resolvedAt: number | null;
+    readonly resolvedBy: 'manual' | 'auto' | null;
 }
 
 export interface AutoExpeditionStatus {
@@ -202,6 +223,7 @@ export interface AutoExpeditionStatus {
     readonly available: boolean;
     readonly dataStale: boolean;
     readonly preparation: ExpeditionPreparation | null;
+    readonly decision: ExpeditionDecisionView | null;
     readonly last: {
         readonly at: number;
         readonly decisions: number;
@@ -549,6 +571,7 @@ export interface PopupPortal {
     marketOptions(market: JobMarketDefinition): Promise<BridgeResult<MarketOptionsView>>;
     activityState(): Promise<BridgeResult<ActivityState>>;
     expeditionView(): Promise<BridgeResult<ExpeditionOverview>>;
+    respondExpeditionDecision(expeditionId: string, messageId: string, optionId: string): Promise<BridgeResult<void>>;
     autoExpeditionStatus(): Promise<BridgeResult<AutoExpeditionStatus>>;
     cancelExpeditionPreparation(): Promise<BridgeResult<void>>;
     enableAutoExpedition(intervalMinutes: number): Promise<BridgeResult<unknown>>;

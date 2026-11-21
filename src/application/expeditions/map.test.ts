@@ -88,3 +88,25 @@ describe('expedition mapping', () => {
         expect(overview.decisions[0]?.options[0]).toMatchObject({ id: 'opt-1', label: 'Go' });
     });
 });
+
+describe('expedition decision score baselines', () => {
+    it('derives missing initial loot/risk from absolute option values', () => {
+        const overview = mapExpeditionOverview({
+            expeditions: [],
+            decisions: [{
+                id: 'decision-1',
+                expeditionId: 'exp-1',
+                content: 'Pick',
+                decisionOptions: [{
+                    id: 'option-1',
+                    label: 'Option',
+                    risk: 45,
+                    riskModifier: 5,
+                    loot: 30,
+                    lootModifier: 2,
+                }],
+            }],
+        }, {}, {}, {});
+        expect(overview.decisions[0]).toMatchObject({ riskScore: 40, lootScore: 28 });
+    });
+});

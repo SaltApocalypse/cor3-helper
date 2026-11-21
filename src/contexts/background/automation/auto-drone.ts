@@ -133,6 +133,8 @@ export class AutoDroneCoordinator {
                 repairThreshold: current.droneRepairThreshold,
                 repairOnCharge: current.droneRepairOnCharge,
                 decisionPolicy: current.droneDecisionPolicy,
+                decisionMode: current.droneDecisionMode,
+                decisionWeights: { loot: current.droneDecisionScoreLoot, risk: current.droneDecisionScoreRisk },
                 locationId: current.droneLocationId,
                 goalId: current.droneGoalId,
                 targetLocationConfigId: DRONE_EXPEDITION_PROFILE.locationConfigId,

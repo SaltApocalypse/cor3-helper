@@ -1122,6 +1122,14 @@ export class GameSocketHub {
         }
     }
 
+    private notifyExpeditionDecisions(decisions: readonly unknown[]): void {
+        try {
+            window.postMessage({ version: 2, type: 'V2_EXPEDITION_DECISIONS', decisions }, '*');
+        } catch {
+            // The page may be tearing down.
+        }
+    }
+
     activeSocketUrl(): string | null {
         return sanitizeSocketUrl(this.active ? this.sockets.get(this.active)?.url ?? null : null);
     }
@@ -1592,6 +1600,10 @@ export class GameSocketHub {
             && action !== 'get.active'
             && payload.data !== undefined) {
             this.rememberExpeditionData(payload.data);
+        }
+        if (eventName === 'expeditions' && payload.data !== undefined && (action === undefined || action === 'update')) {
+            const decisions = collectDecisionObjects(payload.data);
+            if (decisions.length > 0) this.notifyExpeditionDecisions(decisions);
         }
         if (eventName === 'expeditions' && this.pendingExpeditions) {
             const isExplicitActiveResponse = action === 'get.active';

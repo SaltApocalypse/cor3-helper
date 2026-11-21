@@ -63,7 +63,7 @@ describe('portal response schemas', () => {
         const result = expeditionOverviewSchema.safeParse({
             active: [{
                 id: 'exp-1', status: 'IN_PROGRESS', locationName: 'Skylift Remains',
-                mercenaryName: 'Nova', totalCost: 100, riskScore: 20, hasInsurance: false, endsAt: null,
+                mercenaryName: 'Nova', totalCost: 100, riskScore: 20, lootScore: 30, hasInsurance: false, endsAt: null,
             }],
             archived: [],
             mercenaries: [{
@@ -72,8 +72,8 @@ describe('portal response schemas', () => {
             }],
             locations: [],
             decisions: [{
-                id: 'msg-1', expeditionId: 'exp-1', message: 'Pick',
-                options: [{ id: 'a', label: 'A', successChance: 0.5, risk: 2, lootModifier: 1, riskModifier: 2, requiredModuleId: null }],
+                id: 'msg-1', expeditionId: 'exp-1', message: 'Pick', riskScore: 20, lootScore: 30, deadline: null,
+                options: [{ id: 'a', label: 'A', successChance: 0.5, risk: 2, loot: 3, lootModifier: 1, riskModifier: 2, requiredModuleId: null }],
             }],
         });
         expect(result.success).toBe(true);

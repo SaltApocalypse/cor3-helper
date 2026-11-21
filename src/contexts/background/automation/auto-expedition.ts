@@ -3,7 +3,7 @@ import type { AutomationState } from '../../../infrastructure/storage/automation
 import type { Result } from '../../../kernel/result.js';
 import { AUTO_EXPEDITION_ALARM, AUTO_EXPEDITION_RETRY_ALARM } from './alarm-ids.js';
 import { ExpeditionCycle } from './expedition-cycle.js';
-import type { AutoExpeditionDeps, AutoExpeditionLast, ExpeditionPreparation, ExpeditionRunState } from './expedition-types.js';
+import type { AutoExpeditionDeps, AutoExpeditionLast, ExpeditionDecisionState, ExpeditionPreparation, ExpeditionRunState } from './expedition-types.js';
 
 export type { AutoExpeditionLast, ExpeditionPreparation } from './expedition-types.js';
 
@@ -14,6 +14,7 @@ export class AutoExpeditionCoordinator {
         preparation: null,
         preparationCancelled: false,
         lastViewAt: 0,
+        lastDecision: null,
     };
     private readonly cycle: ExpeditionCycle;
 
@@ -57,6 +58,13 @@ export class AutoExpeditionCoordinator {
                 };
             }
         }
+        const storedDecision = state.payload.decision;
+        if (storedDecision && typeof storedDecision === 'object') {
+            const entry = storedDecision as Partial<ExpeditionDecisionState>;
+            if (typeof entry.id === 'string' && typeof entry.expeditionId === 'string' && Array.isArray(entry.options)) {
+                this.state.lastDecision = entry as ExpeditionDecisionState;
+            }
+        }
         if (state.phase === 'preparing'
             && state.nextActionAt !== null
             && state.nextActionAt > this.deps.clock.now()) {
@@ -71,6 +79,7 @@ export class AutoExpeditionCoordinator {
                 totalCost: typeof payload.totalCost === 'number' ? payload.totalCost : 0,
                 riskScore: typeof payload.riskScore === 'number' ? payload.riskScore : 0,
                 insurance: payload.insurance === true,
+                insuranceCost: typeof payload.insuranceCost === 'number' ? payload.insuranceCost : null,
                 locationName: typeof payload.locationName === 'string' ? payload.locationName : 'Unknown location',
             };
         }
@@ -85,20 +94,11 @@ export class AutoExpeditionCoordinator {
             dataStale: this.state.lastViewAt === 0 || this.deps.clock.now() - this.state.lastViewAt > 5 * 60_000,
             preparation: this.state.preparation,
             last: this.state.last,
+            decision: this.state.lastDecision,
         };
     }
 
     async enable(intervalMinutes?: number): Promise<Result<SettingsV1, { readonly code: string; readonly message: string }>> {
-        const current = await this.deps.settings.get();
-        if (!current.mercAutoSelectEnabled) {
-            return {
-                ok: false,
-                error: {
-                    code: 'MERC_AUTO_SELECT_REQUIRED',
-                    message: 'Enable automatic mercenary selection before starting Auto Expedition',
-                },
-            };
-        }
         const next = await this.deps.settings.update({
             autoExpeditionEnabled: true,
             ...(intervalMinutes !== undefined ? { autoExpeditionIntervalMinutes: intervalMinutes } : {}),
@@ -131,5 +131,27 @@ export class AutoExpeditionCoordinator {
 
     async run(): Promise<void> {
         await this.cycle.run();
+    }
+
+    async respondDecision(expeditionId: string, messageId: string, optionId: string): Promise<Result<void, { readonly code: string; readonly message: string }>> {
+        const result = await this.deps.service.respond(expeditionId, messageId, optionId);
+        if (!result.ok) return result;
+        const decision = this.state.lastDecision;
+        if (decision && decision.id === messageId && decision.expeditionId === expeditionId) {
+            this.state.lastDecision = {
+                ...decision,
+                chosenOptionId: optionId,
+                resolvedAt: this.deps.clock.now(),
+                resolvedBy: 'manual',
+                autoRespondAt: null,
+            };
+            await this.deps.scheduler.clear(AUTO_EXPEDITION_RETRY_ALARM);
+            await this.deps.state.set('auto-expedition', {
+                phase: 'running',
+                nextActionAt: null,
+                payload: { last: this.state.last, decision: this.state.lastDecision },
+            });
+        }
+        return result;
     }
 }

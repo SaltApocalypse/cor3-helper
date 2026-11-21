@@ -2,6 +2,7 @@ import type { AutomationStateStore } from '../../../infrastructure/storage/autom
 import type { ExpeditionConfigCacheStore } from '../../../infrastructure/storage/expedition-config-cache-store.js';
 import type { MarketCacheStore } from '../../../infrastructure/storage/market-cache-store.js';
 import type { ExpeditionService } from '../../../application/expeditions/service.js';
+import type { ExpeditionDecisionOption } from '../../../domains/expeditions/model.js';
 import type { NetworkSnapshotService } from '../../../application/network/snapshot-service.js';
 import type { AutomationLogger, EventPublisher, SchedulerPort, SettingsPort } from '../../../application/automation/ports.js';
 import type { JobMarketSync } from './job-market-sync.js';
@@ -28,7 +29,27 @@ export interface ExpeditionPreparation {
     readonly totalCost: number;
     readonly riskScore: number;
     readonly insurance: boolean;
+    readonly insuranceCost: number | null;
     readonly locationName: string;
+}
+
+export interface ExpeditionDecisionState {
+    readonly id: string;
+    readonly expeditionId: string;
+    readonly message: string;
+    readonly riskScore: number | null;
+    readonly lootScore: number | null;
+    readonly deadline: string | null;
+    readonly firstSeenAt: number;
+    readonly autoRespondAt: number | null;
+    readonly options: readonly ExpeditionDecisionOption[];
+    readonly mode: 'simple' | 'score';
+    readonly policy: string;
+    readonly lootWeight: number;
+    readonly riskWeight: number;
+    readonly chosenOptionId: string | null;
+    readonly resolvedAt: number | null;
+    readonly resolvedBy: 'manual' | 'auto' | null;
 }
 
 /** Mutable run state owned by AutoExpeditionCoordinator and shared with its runner. */
@@ -38,6 +59,7 @@ export interface ExpeditionRunState {
     preparation: ExpeditionPreparation | null;
     preparationCancelled: boolean;
     lastViewAt: number;
+    lastDecision: ExpeditionDecisionState | null;
 }
 
 export interface AutoExpeditionDeps {
@@ -48,7 +70,7 @@ export interface AutoExpeditionDeps {
     readonly events: EventPublisher;
     readonly state: AutomationStateStore;
     readonly snapshots: Pick<NetworkSnapshotService, 'get'>;
-    readonly service: Pick<ExpeditionService, 'autoRespond' | 'payout' | 'overview' | 'locations' | 'candidates' | 'configure' | 'launch'>;
+    readonly service: Pick<ExpeditionService, 'autoRespond' | 'respond' | 'payout' | 'overview' | 'locations' | 'candidates' | 'configure' | 'launch'>;
     readonly configCache: ExpeditionConfigCacheStore;
     readonly marketCache: Pick<MarketCacheStore, 'get'>;
     readonly marketSync: Pick<JobMarketSync, 'fetchOptionsView'>;

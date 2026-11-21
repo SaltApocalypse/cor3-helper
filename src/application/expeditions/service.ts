@@ -7,8 +7,10 @@ import type { ExpeditionLocation } from '../../domains/expeditions/model.js';
 import {
     chooseDecisionOption,
     chooseExpeditionMercenary,
+    chooseScoredDecisionOption,
     isExpeditionReady,
     type ActiveExpedition,
+    type DecisionMode,
     type DecisionPolicy,
 } from '../../domains/expeditions/model.js';
 import type { MercenaryCandidate, MercMarketKey } from '../../domains/expeditions/selection.js';
@@ -33,8 +35,7 @@ export interface ExpeditionLaunchConfig {
     readonly hasInsurance: boolean;
 }
 
-function numberFrom(value: unknown, keys: readonly string[]): number | null {
-    if (!value || typeof value !== 'object') return null;
+function numberFrom(value: unknown, keys: readonly string[]): number | null {    if (!value || typeof value !== 'object') return null;
     const queue: unknown[] = [value];
     const seen = new Set<unknown>();
     while (queue.length > 0) {
@@ -48,6 +49,15 @@ function numberFrom(value: unknown, keys: readonly string[]): number | null {
         for (const nested of Object.values(current)) {
             if (nested && typeof nested === 'object') queue.push(nested);
         }
+    }
+    return null;
+}
+
+function booleanFrom(value: unknown, keys: readonly string[]): boolean | null {
+    if (!value || typeof value !== 'object') return null;
+    for (const key of keys) {
+        const candidate = (value as Record<string, unknown>)[key];
+        if (typeof candidate === 'boolean') return candidate;
     }
     return null;
 }
@@ -97,8 +107,13 @@ export class ExpeditionService {
         return this.expeditions.respond(expeditionId, messageId, optionId);
     }
 
-    async autoRespond(marketId: string, policy: DecisionPolicy = 'loot'): Promise<Result<number, { readonly code: string; readonly message: string }>> {
-        if (policy === 'off') return ok(0);
+    async autoRespond(
+        marketId: string,
+        policy: DecisionPolicy = 'loot',
+        mode: DecisionMode = 'simple',
+        weights: { readonly loot: number; readonly risk: number } = { loot: 1, risk: -5 },
+    ): Promise<Result<number, { readonly code: string; readonly message: string }>> {
+        if (policy === 'off' && mode !== 'score') return ok(0);
         const overview = await this.overview(marketId, { includeMercenaries: false, includeConfig: false });
         if (!overview.ok) return overview;
         let responded = 0;
@@ -106,9 +121,13 @@ export class ExpeditionService {
             decisions: overview.value.decisions.length,
             active: overview.value.active.length,
             policy,
+            mode,
+            weights,
         });
         for (const decision of overview.value.decisions) {
-            const option = chooseDecisionOption(decision.options, policy);
+            const option = mode === 'score'
+                ? chooseScoredDecisionOption(decision.options, decision.riskScore, weights)
+                : chooseDecisionOption(decision.options, policy);
             const optionSummary = decision.options.length === 0
                 ? 'no options'
                 : decision.options.map((entry) =>
@@ -120,9 +139,12 @@ export class ExpeditionService {
                     expeditionId: decision.expeditionId,
                     decisionId: decision.id,
                     message: decision.message,
+                    riskScore: decision.riskScore,
                     options: decision.options,
                     chosen: option?.id ?? null,
                     policy,
+                    mode,
+                    weights,
                 },
             );
             this.trace?.('Expedition decision evaluated', {
@@ -184,6 +206,7 @@ export class ExpeditionService {
             let totalCost = merc.totalCost;
             let costEstimated = false;
             let riskScore = merc.riskScore ?? 0;
+            let insuranceCost: number | null = null;
             if (location && zone && goal) {
                 const configured = await this.expeditions.configure({
                     mercenaryId: merc.id,
@@ -200,6 +223,16 @@ export class ExpeditionService {
                         costEstimated = !cost.explicit;
                     }
                     riskScore = numberFrom(configured.value, ['riskScore', 'risk']) ?? riskScore;
+                    insuranceCost = numberFrom(configured.value, ['insuranceCost', 'insurancePrice', 'insuranceFee']);
+                    this.trace?.('Mercenary candidate configured', {
+                        mercenaryId: merc.id,
+                        requestedInsurance: request.hasInsurance,
+                        reportedInsurance: booleanFrom(configured.value, ['hasInsurance', 'insurance']),
+                        totalCost: cost.total,
+                        totalCostExplicit: cost.explicit,
+                        insuranceCost,
+                        riskScore,
+                    });
                 }
             }
             if (totalCost === null) {
@@ -207,7 +240,7 @@ export class ExpeditionService {
                 costEstimated = true;
             }
             const marketKey: MercMarketKey = request.marketKey === 'usol' && merc.elite ? 'usol-elite' : request.marketKey;
-            candidates.push({ mercenary: merc, marketKey, totalCost, riskScore, costEstimated });
+            candidates.push({ mercenary: merc, marketKey, totalCost, riskScore, insurance: request.hasInsurance, insuranceCost, costEstimated });
         }
         return ok(candidates);
     }

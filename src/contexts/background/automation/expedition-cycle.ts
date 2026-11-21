@@ -1,14 +1,22 @@
 import { jobMarketByKey, type JobMarketDefinition } from '../../../domains/jobs/markets.js';
 import { selectMercenary } from '../../../domains/expeditions/selection.js';
 import { MERC_EXPEDITION_PROFILES, mercProfileKeyForMarket, mercProfileMatchesLocations } from '../../../domains/expeditions/profiles.js';
-import { isExpeditionReady } from '../../../domains/expeditions/model.js';
+import {
+    chooseDecisionOption,
+    chooseScoredDecisionOption,
+    isExpeditionReady,
+    type ExpeditionDecision,
+    type DecisionPolicy,
+} from '../../../domains/expeditions/model.js';
+import type { SettingsV1 } from '../../../contracts/storage.js';
 import { AUTO_EXPEDITION_ALARM, AUTO_EXPEDITION_RETRY_ALARM } from './alarm-ids.js';
 import { readWithRetry } from './delay.js';
 import { launchExpedition } from './expedition-launch.js';
-import type { AutoExpeditionDeps, ExpeditionRunState } from './expedition-types.js';
+import type { AutoExpeditionDeps, ExpeditionDecisionState, ExpeditionRunState } from './expedition-types.js';
 
 const AUTO_EXPEDITION_CONNECTION_RETRY_MS = 30_000;
 const AUTO_EXPEDITION_ACTIVE_RETRY_MS = 60_000;
+const AUTO_EXPEDITION_CANDIDATE_RETRY_MS = 5 * 60_000;
 
 export function expeditionConnectionError(message: string | null | undefined): boolean {
     return !!message && /Could not establish connection|Receiving end does not exist|NO_COR3_TAB|No game WebSocket|GAME_NO_SOCKET|AUTH_REQUIRED|AUTH_EXPIRED/i.test(message);
@@ -53,19 +61,8 @@ export class ExpeditionCycle {
                 });
                 this.deps.events.publish('expeditions.auto.preparing', null);
             }
-            if (!current.mercAutoSelectEnabled) {
-                this.state.last = {
-                    at: this.deps.clock.now(),
-                    decisions: 0,
-                    launched: false,
-                    error: 'Auto select mercenary is disabled',
-                    message: 'Enable automatic mercenary selection before starting Auto Expedition.',
-                };
-                await this.disable('automatic mercenary selection is disabled');
-                return;
-            }
             this.deps.logger.info('auto-expedition', 'Auto Expedition run started', {
-                autoSelect: current.mercAutoSelectEnabled,
+                autoSelect: true,
                 mode: current.mercSelectionMode,
                 maxPrice: current.mercMaxPriceEnabled ? current.mercMaxPrice : null,
                 insurance: current.mercInsuranceEnabled,
@@ -79,18 +76,6 @@ export class ExpeditionCycle {
             }
 
             let decisions = 0;
-            if (current.mercDecisionPolicy !== 'off') {
-                const responded = await this.deps.service.autoRespond(home.marketId, current.mercDecisionPolicy);
-                if (!responded.ok) {
-                    this.state.last = { at: this.deps.clock.now(), decisions: 0, launched: false, error: responded.error.message };
-                    if (/maintenance|unreachable|no route|ROUTE_FAILED/i.test(responded.error.message)) {
-                        await this.scheduleMaintenanceRetry(AUTO_EXPEDITION_RETRY_ALARM);
-                    }
-                    return;
-                }
-                decisions = responded.value;
-                this.deps.logger.info('auto-expedition', 'Expedition decisions processed', { responded: decisions });
-            }
 
             let paid = 0;
             if (current.mercAutoPayEnabled) {
@@ -198,6 +183,9 @@ export class ExpeditionCycle {
                 return;
             }
             this.state.lastViewAt = this.deps.clock.now();
+            const decisionHandling = await this.handleDecisionState(home.marketId, overview.value.decisions, current);
+            if (decisionHandling.waiting) return;
+            decisions = decisionHandling.responded;
             const active = [...overview.value.active, ...overview.value.archived].filter((entry) => {
                 const status = entry.status.toUpperCase();
                 return !isExpeditionReady(entry) && !status.includes('FAILED') && !status.includes('EXPIRED');
@@ -208,6 +196,7 @@ export class ExpeditionCycle {
             const decisionActiveIds = overview.value.decisions
                 .map((decision) => decision.expeditionId)
                 .filter((id): id is string => id.length > 0);
+            if (active.length === 0 && decisionActiveIds.length === 0) this.state.lastDecision = null;
             if (active.length > 0 || decisionActiveIds.length > 0) {
                 this.state.last = {
                     at: this.deps.clock.now(),
@@ -225,6 +214,7 @@ export class ExpeditionCycle {
                     payload: {
                         activeIds: [...new Set([...active.map((entry) => entry.id), ...decisionActiveIds])],
                         last: this.state.last,
+                        ...(this.state.lastDecision ? { decision: this.state.lastDecision } : {}),
                     },
                 });
                 this.deps.scheduler.create(AUTO_EXPEDITION_RETRY_ALARM, { when: this.deps.clock.now() + AUTO_EXPEDITION_ACTIVE_RETRY_MS });
@@ -332,8 +322,25 @@ export class ExpeditionCycle {
                         totalCost: candidate.totalCost,
                         costEstimated: candidate.costEstimated === true,
                         riskScore: candidate.riskScore,
+                        insurance: candidate.insurance,
                     })),
                 });
+                const restReadyAt = candidates
+                    .map((candidate) => candidate.mercenary.restUntil)
+                    .filter((value): value is string => typeof value === 'string')
+                    .map((value) => Date.parse(value))
+                    .filter((value) => Number.isFinite(value) && value > this.deps.clock.now())
+                    .sort((left, right) => left - right)[0];
+                const retryAt = restReadyAt !== undefined
+                    ? Math.max(this.deps.clock.now() + 5_000, restReadyAt + 5_000)
+                    : this.deps.clock.now() + AUTO_EXPEDITION_CANDIDATE_RETRY_MS;
+                await this.deps.state.set('auto-expedition', {
+                    phase: 'waiting',
+                    nextActionAt: retryAt,
+                    lastError: this.state.last.error,
+                    payload: { last: this.state.last },
+                });
+                this.deps.scheduler.create(AUTO_EXPEDITION_RETRY_ALARM, { when: retryAt });
                 return;
             }
 
@@ -356,6 +363,90 @@ export class ExpeditionCycle {
                 this.deps.scheduler.create(AUTO_EXPEDITION_RETRY_ALARM, { when: this.deps.clock.now() + AUTO_EXPEDITION_CONNECTION_RETRY_MS });
             }
         }
+    }
+
+    private async handleDecisionState(
+        _marketId: string,
+        decisions: readonly ExpeditionDecision[],
+        current: SettingsV1,
+    ): Promise<{ readonly waiting: boolean; readonly responded: number }> {
+        const decision = decisions[0];
+        if (!decision) return { waiting: false, responded: 0 };
+        const now = this.deps.clock.now();
+        const existing = this.state.lastDecision;
+        const sameDecision = existing?.id === decision.id && existing.expeditionId === decision.expeditionId;
+        const firstSeenAt = sameDecision ? existing!.firstSeenAt : now;
+        const deadlineMs = decision.deadline ? Date.parse(decision.deadline) : Number.NaN;
+        const autoEnabled = current.mercDecisionMode === 'score' || current.mercDecisionPolicy !== 'off';
+        const autoRespondAt = autoEnabled
+            ? Math.max(now, Number.isFinite(deadlineMs) ? Math.min(deadlineMs - 30_000, firstSeenAt + 30_000) : firstSeenAt + 30_000)
+            : null;
+        const next: ExpeditionDecisionState = {
+            id: decision.id,
+            expeditionId: decision.expeditionId,
+            message: decision.message,
+            riskScore: decision.riskScore,
+            lootScore: decision.lootScore,
+            deadline: decision.deadline,
+            firstSeenAt,
+            autoRespondAt,
+            options: decision.options,
+            mode: current.mercDecisionMode,
+            policy: current.mercDecisionPolicy,
+            lootWeight: current.mercDecisionScoreLoot,
+            riskWeight: current.mercDecisionScoreRisk,
+            chosenOptionId: sameDecision ? existing!.chosenOptionId : null,
+            resolvedAt: sameDecision ? existing!.resolvedAt : null,
+            resolvedBy: sameDecision ? existing!.resolvedBy : null,
+        };
+        this.state.lastDecision = next;
+        if (!autoEnabled || next.chosenOptionId !== null) return { waiting: false, responded: 0 };
+        if (now < (autoRespondAt ?? now)) {
+            this.deps.scheduler.create(AUTO_EXPEDITION_RETRY_ALARM, { when: autoRespondAt ?? now });
+            await this.deps.state.set('auto-expedition', {
+                phase: 'running',
+                nextActionAt: autoRespondAt ?? now,
+                payload: { last: this.state.last, decision: next },
+            });
+            this.deps.logger.info('auto-expedition', 'Decision waiting for manual window', {
+                decisionId: decision.id,
+                autoRespondAt,
+                remainingMs: (autoRespondAt ?? now) - now,
+            });
+            return { waiting: true, responded: 0 };
+        }
+        const option = next.mode === 'score'
+            ? chooseScoredDecisionOption(decision.options, decision.riskScore, { loot: next.lootWeight, risk: next.riskWeight })
+            : chooseDecisionOption(decision.options, next.policy as DecisionPolicy);
+        if (!option) return { waiting: false, responded: 0 };
+        const result = await this.deps.service.respond(decision.expeditionId, decision.id, option.id);
+        if (!result.ok) {
+            this.deps.logger.warn('auto-expedition', 'Automatic decision response failed', {
+                decisionId: decision.id,
+                optionId: option.id,
+                message: result.error.message,
+            });
+            this.deps.scheduler.create(AUTO_EXPEDITION_RETRY_ALARM, { when: now + 30_000 });
+            return { waiting: true, responded: 0 };
+        }
+        this.state.lastDecision = {
+            ...next,
+            chosenOptionId: option.id,
+            resolvedAt: now,
+            resolvedBy: 'auto',
+            autoRespondAt: null,
+        };
+        await this.deps.state.set('auto-expedition', {
+            phase: 'running',
+            nextActionAt: null,
+            payload: { last: this.state.last, decision: this.state.lastDecision },
+        });
+        this.deps.logger.info('auto-expedition', 'Expedition decision auto-resolved', {
+            decisionId: decision.id,
+            optionId: option.id,
+            mode: next.mode,
+        });
+        return { waiting: false, responded: 1 };
     }
 
     private async readHomeCredits(marketId: string): Promise<number | null> {

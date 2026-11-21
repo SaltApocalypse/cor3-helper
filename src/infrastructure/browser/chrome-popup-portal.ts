@@ -47,16 +47,21 @@ const expeditionLocationSchema = z.object({ id: z.string(), name: z.string(), zo
 const expeditionMercenarySchema = z.object({
     id: z.string(), name: z.string(), level: z.number(), rarity: z.string(), price: z.number(),
     totalCost: z.number().nullable(), riskScore: z.number().nullable(), status: z.string(), faction: z.string(), elite: z.boolean(),
+    restUntil: z.string().nullable().optional(),
 }).strict();
 const expeditionDecisionSchema = z.object({
     id: z.string(),
     expeditionId: z.string(),
     message: z.string(),
+    riskScore: z.number().nullable(),
+    lootScore: z.number().nullable(),
+    deadline: z.string().nullable(),
     options: z.array(z.object({
         id: z.string(),
         label: z.string(),
         successChance: z.number().nullable(),
         risk: z.number().nullable(),
+        loot: z.number().nullable(),
         lootModifier: z.number(),
         riskModifier: z.number(),
         requiredModuleId: z.string().nullable(),
@@ -65,7 +70,7 @@ const expeditionDecisionSchema = z.object({
 const activeExpeditionSchema = z.object({
     id: z.string(), status: z.string(), locationName: z.string(),
     mercenaryName: z.string().nullable(), totalCost: z.number().nullable(), riskScore: z.number().nullable(),
-    hasInsurance: z.boolean().nullable(), endsAt: z.string().nullable(),
+    lootScore: z.number().nullable(), hasInsurance: z.boolean().nullable(), endsAt: z.string().nullable(),
 }).strict();
 export const expeditionOverviewSchema = z.object({
     active: z.array(activeExpeditionSchema),
@@ -110,7 +115,26 @@ const expeditionPreparationSchema = z.object({
     totalCost: z.number(),
     riskScore: z.number(),
     insurance: z.boolean(),
+    insuranceCost: z.number().nullable(),
     locationName: z.string(),
+}).strict();
+const autoExpeditionDecisionSchema = z.object({
+    id: z.string(),
+    expeditionId: z.string(),
+    message: z.string(),
+    riskScore: z.number().nullable(),
+    lootScore: z.number().nullable(),
+    deadline: z.string().nullable(),
+    firstSeenAt: z.number(),
+    autoRespondAt: z.number().nullable(),
+    options: expeditionDecisionSchema.shape.options,
+    mode: z.enum(['simple', 'score']),
+    policy: z.string(),
+    lootWeight: z.number(),
+    riskWeight: z.number(),
+    chosenOptionId: z.string().nullable(),
+    resolvedAt: z.number().nullable(),
+    resolvedBy: z.enum(['manual', 'auto']).nullable(),
 }).strict();
 const autoExpeditionStatusSchema = z.object({
     enabled: z.boolean(),
@@ -119,6 +143,7 @@ const autoExpeditionStatusSchema = z.object({
     available: z.boolean(),
     dataStale: z.boolean(),
     preparation: expeditionPreparationSchema.nullable(),
+    decision: autoExpeditionDecisionSchema.nullable().optional(),
     last: z.object({
         at: z.number(),
         decisions: z.number(),
@@ -843,6 +868,10 @@ export class ChromePopupPortal implements PopupPortal {
 
     expeditionView(): Promise<{ ok: true; value: ExpeditionOverview } | { ok: false; error: { code: string; message: string } }> {
         return this.client.request('expeditions.view', {}, expeditionOverviewSchema, 90000) as Promise<{ ok: true; value: ExpeditionOverview } | { ok: false; error: { code: string; message: string } }>;
+    }
+
+    respondExpeditionDecision(expeditionId: string, messageId: string, optionId: string): Promise<{ ok: true; value: void } | { ok: false; error: { code: string; message: string } }> {
+        return this.client.request('expeditions.respond', { expeditionId, messageId, optionId }, z.undefined(), 20000) as Promise<{ ok: true; value: void } | { ok: false; error: { code: string; message: string } }>;
     }
 
     droneView(): Promise<{ ok: true; value: DroneState } | { ok: false; error: { code: string; message: string } }> {

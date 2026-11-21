@@ -56,6 +56,8 @@ export const rawDroneEventOptionSchema = z.object({
     label: z.string().optional(),
     lootDelta: z.number().optional(),
     riskDelta: z.number().optional(),
+    /** Absolute risk displayed by some game builds. */
+    risk: z.number().optional(),
     effect: z.object({ lootDelta: z.number().optional(), riskDelta: z.number().optional() }).passthrough().optional(),
     requiredModuleId: z.string().optional(),
 }).passthrough();
@@ -64,12 +66,16 @@ export const rawDroneEventSchema = z.object({
     missionId: z.string().optional(),
     eventId: z.string().optional(),
     type: z.string().optional(),
+    riskScore: z.number().optional(),
+    risk: z.number().optional(),
     event: z.object({
         eventId: z.string().optional(),
         missionId: z.string().optional(),
         type: z.string().optional(),
         isResolvable: z.boolean().optional(),
         isResolved: z.boolean().optional(),
+        riskScore: z.number().optional(),
+        risk: z.number().optional(),
         options: z.array(rawDroneEventOptionSchema).optional(),
     }).passthrough().optional(),
     options: z.array(rawDroneEventOptionSchema).optional(),

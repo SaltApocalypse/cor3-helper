@@ -17,19 +17,33 @@ type RawDecision = import('zod').infer<typeof rawDecisionSchema>;
 
 function mapDecision(raw: RawDecision): ExpeditionDecision | null {
     if (raw.isResolved === true) return null;
+    const options = (raw.options ?? raw.decisionOptions ?? []).map((option) => ({
+        id: option.id ?? option.value ?? option.key ?? option.optionId ?? '',
+        label: option.label ?? option.id ?? option.value ?? 'Option',
+        successChance: option.successChance ?? null,
+        risk: option.risk ?? null,
+        loot: option.loot ?? option.lootScore ?? option.lootValue ?? null,
+        lootModifier: option.lootModifier ?? option.lootDelta ?? option.effect?.lootDelta ?? 0,
+        riskModifier: option.riskModifier ?? option.riskDelta ?? option.effect?.riskDelta ?? 0,
+        requiredModuleId: option.requiredModuleId ?? option.requiredModule ?? null,
+    })).filter((option) => option.id.length > 0);
+    // Some game payloads expose only absolute option totals. Recover the
+    // expedition baseline from an option so the score formula and UI can show
+    // the initial risk/loot values even when the root fields are absent.
+    const derivedRisk = options
+        .map((option) => option.risk !== null ? option.risk - option.riskModifier : null)
+        .find((value): value is number => value !== null);
+    const derivedLoot = options
+        .map((option) => option.loot !== null ? option.loot - option.lootModifier : null)
+        .find((value): value is number => value !== null);
     return {
         id: raw.id ?? raw.messageId ?? '',
         expeditionId: raw.expeditionId ?? '',
         message: raw.message ?? raw.title ?? raw.content ?? 'Decision',
-        options: (raw.options ?? raw.decisionOptions ?? []).map((option) => ({
-            id: option.id ?? option.value ?? option.key ?? option.optionId ?? '',
-            label: option.label ?? option.id ?? option.value ?? 'Option',
-            successChance: option.successChance ?? null,
-            risk: option.risk ?? null,
-            lootModifier: option.lootModifier ?? option.lootDelta ?? option.effect?.lootDelta ?? 0,
-            riskModifier: option.riskModifier ?? option.riskDelta ?? option.effect?.riskDelta ?? 0,
-            requiredModuleId: option.requiredModuleId ?? option.requiredModule ?? null,
-        })).filter((option) => option.id.length > 0),
+        riskScore: raw.riskScore ?? derivedRisk ?? null,
+        lootScore: raw.lootScore ?? raw.loot ?? raw.lootValue ?? derivedLoot ?? null,
+        deadline: raw.decisionDeadline ?? null,
+        options,
     };
 }
 
@@ -51,6 +65,7 @@ function mapExpedition(raw: unknown): ActiveExpedition | null {
         mercenaryName,
         totalCost: typeof entry.totalCost === 'number' ? entry.totalCost : null,
         riskScore: typeof entry.riskScore === 'number' ? entry.riskScore : null,
+        lootScore: typeof entry.lootScore === 'number' ? entry.lootScore : typeof entry.lootValue === 'number' ? entry.lootValue : null,
         hasInsurance: typeof entry.hasInsurance === 'boolean' ? entry.hasInsurance : null,
         endsAt: typeof entry.endsAt === 'string'
             ? entry.endsAt
@@ -94,6 +109,7 @@ export function mapMercenaries(raw: unknown): ExpeditionMercenary[] {
             totalCost: merc.totalCost ?? null,
             riskScore: merc.riskScore ?? null,
             status: merc.status ?? 'UNKNOWN',
+            restUntil: merc.restUntil ?? null,
             faction: merc.faction?.label ?? merc.faction?.key ?? 'UNKNOWN',
             elite,
         }));
@@ -151,7 +167,7 @@ function decisionsFromMessages(expeditions: readonly unknown[]): RawDecision[] {
     const result: RawDecision[] = [];
     for (const raw of expeditions) {
         if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
-        const entry = raw as { id?: unknown; messages?: unknown };
+        const entry = raw as { id?: unknown; messages?: unknown; riskScore?: unknown };
         if (!Array.isArray(entry.messages)) continue;
         for (const rawMessage of entry.messages) {
             const message = rawDecisionSchema.safeParse(rawMessage);
@@ -165,6 +181,7 @@ function decisionsFromMessages(expeditions: readonly unknown[]): RawDecision[] {
             result.push({
                 ...message.data,
                 expeditionId: typeof entry.id === 'string' ? entry.id : undefined,
+                riskScore: message.data.riskScore ?? (typeof entry.riskScore === 'number' ? entry.riskScore : undefined),
                 message: message.data.content ?? message.data.message,
             });
         }
@@ -211,6 +228,7 @@ export function mapExpeditionOverview(
             mercenaryName: null,
             totalCost: null,
             riskScore: null,
+            lootScore: null,
             hasInsurance: null,
             endsAt: null,
         });

@@ -4,8 +4,10 @@ import {
     bestDroneMission,
     canLaunch,
     chooseDroneEventOption,
+    chooseScoredDroneEventOption,
     isDroneRateLimited,
     type DroneDecisionPolicy,
+    type DroneDecisionWeights,
     type DroneMission,
 } from '../../domains/drone/model.js';
 import type { DroneService } from './service.js';
@@ -15,6 +17,8 @@ export interface DroneAutomationSettings {
     readonly repairThreshold: number;
     readonly repairOnCharge: boolean;
     readonly decisionPolicy: DroneDecisionPolicy;
+    readonly decisionMode?: 'simple' | 'score';
+    readonly decisionWeights?: DroneDecisionWeights;
     readonly locationId: string | null;
     readonly goalId: string | null;
     readonly targetLocationConfigId?: string | null;
@@ -28,6 +32,8 @@ export const DEFAULT_DRONE_AUTOMATION_SETTINGS: DroneAutomationSettings = {
     repairThreshold: 60,
     repairOnCharge: false,
     decisionPolicy: 'off',
+    decisionMode: 'simple',
+    decisionWeights: { loot: 3, risk: -2 },
     locationId: null,
     goalId: null,
     targetLocationConfigId: null,
@@ -71,7 +77,9 @@ export class DroneAutoService {
             policy: settings.decisionPolicy,
         });
         if (event.ok && event.value && !settings.processedEventIds?.has(event.value.eventId)) {
-            const option = chooseDroneEventOption(event.value, settings.decisionPolicy);
+            const option = (settings.decisionMode ?? 'simple') === 'score'
+                ? chooseScoredDroneEventOption(event.value, settings.decisionWeights ?? { loot: 3, risk: -2 })
+                : chooseDroneEventOption(event.value, settings.decisionPolicy);
             this.trace?.('Drone event option selected', { eventId: event.value.eventId, option: option?.id ?? null, label: option?.label ?? null });
             if (option) {
                 let missionId = event.value.missionId;

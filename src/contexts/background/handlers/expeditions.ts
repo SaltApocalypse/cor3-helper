@@ -109,7 +109,7 @@ export function registerExpeditionHandlers(server: CoreRuntime['server'], deps: 
         messageId: z.string().min(1),
         optionId: z.string().min(1),
     }).strict(), async ({ expeditionId, messageId, optionId }) => {
-        const result = await game.expeditionService.respond(expeditionId, messageId, optionId);
+        const result = await automation.expedition.respondDecision(expeditionId, messageId, optionId);
         return result.ok ? ok(undefined) : { ok: false, error: { code: result.error.code, message: result.error.message } };
     });
     server.register('expeditions.autoStatus', z.object({}).strict(), async () => {

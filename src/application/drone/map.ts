@@ -89,6 +89,17 @@ export function mapDroneEvent(raw: unknown): DroneMissionEvent | null {
     const options = event?.options ?? parsed.data.options ?? [];
     if (event && event.isResolvable === false) return null;
     if (event && event.isResolved === true) return null;
+    const mappedOptions = options.map((option) => ({
+        id: option.id ?? '',
+        label: option.label ?? option.id ?? 'Option',
+        lootDelta: option.lootDelta ?? option.effect?.lootDelta ?? 0,
+        riskDelta: option.riskDelta ?? option.effect?.riskDelta ?? 0,
+        risk: option.risk ?? null,
+        requiredModuleId: option.requiredModuleId ?? null,
+    })).filter((option) => option.id.length > 0);
+    const derivedRisk = mappedOptions
+        .map((option) => option.risk !== null ? option.risk - option.riskDelta : null)
+        .find((value): value is number => value !== null);
     return {
         missionId: parsed.data.missionId
             ?? event?.missionId
@@ -97,13 +108,8 @@ export function mapDroneEvent(raw: unknown): DroneMissionEvent | null {
             ?? '',
         eventId: event?.eventId ?? parsed.data.eventId ?? '',
         type: event?.type ?? parsed.data.type ?? 'EVENT',
-        options: options.map((option) => ({
-            id: option.id ?? '',
-            label: option.label ?? option.id ?? 'Option',
-            lootDelta: option.lootDelta ?? option.effect?.lootDelta ?? 0,
-            riskDelta: option.riskDelta ?? option.effect?.riskDelta ?? 0,
-            requiredModuleId: option.requiredModuleId ?? null,
-        })).filter((option) => option.id.length > 0),
+        riskScore: parsed.data.riskScore ?? parsed.data.risk ?? event?.riskScore ?? event?.risk ?? derivedRisk ?? null,
+        options: mappedOptions,
     };
 }
 

@@ -580,6 +580,11 @@ html::-webkit-scrollbar, body::-webkit-scrollbar,
 .v2-expedition-fold-title { flex: 1; text-align: left; }
 .v2-loadout-section-head.v2-expedition-fold-title { width: 100%; }
 .v2-expedition-fold-title > span { margin-left: auto; }
+.v2-expedition-fold-head { display:flex; align-items:center; gap:4px; }
+.v2-expedition-fold-head > .v2-loadout-section-head { flex:1 1 auto; width:auto; }
+.v2-expedition-setting-block { display:grid; gap:6px; margin-top:8px; }
+.v2-decision-weights { align-items:flex-end; }
+.v2-decision-weight-input { width:72px; min-width:0; }
 .v2-loadout-section-head[data-open="true"]::before { content: '▼'; }
 .v2-loadout-section-head > .v2-expedition-fold-title { margin-left: 0; }
 button.v2-loadout-section-head { width: 100%; margin: 0; border: 0; border-radius: 0; }
@@ -796,6 +801,14 @@ button.v2-icon-button:hover { color: var(--v2-accent); border-color: var(--v2-ac
 .v2-status-muted { color: var(--v2-muted); border-color: var(--v2-border); opacity: .75; }
 .v2-status-action { background: rgba(255, 107, 107, .08); cursor: pointer; font-family: inherit; }
 .v2-status-action:hover { color: var(--v2-text); border-color: var(--v2-accent); filter: none; }
+.v2-decision-options { display:grid; gap:6px; margin-top:8px; }
+.v2-decision-option { display:flex; flex-direction:column; align-items:flex-start; gap:4px; width:100%; padding:8px 10px; text-align:left; color:var(--v2-text); background:var(--v2-bg); border:1px solid var(--v2-border); border-radius:8px; cursor:pointer; }
+.v2-decision-option:hover:not(:disabled) { border-color:var(--v2-accent); }
+.v2-decision-option.is-selected { border-color:var(--v2-ok); background:rgba(67,209,122,.08); }
+.v2-decision-option:disabled { cursor:default; opacity:.8; }
+.v2-decision-option-label { font-size:11px; font-weight:700; }
+.v2-decision-option-stats { display:flex; flex-wrap:wrap; gap:8px; color:var(--v2-muted); font-size:10px; }
+.v2-decision-option-stats strong { color:var(--v2-text); }
 
 /* Settings / developer rows */
 .v2-page-intro { margin: 0 0 10px; }

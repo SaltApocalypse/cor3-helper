@@ -8,6 +8,10 @@ export interface MercenaryCandidate {
     readonly marketKey: MercMarketKey;
     readonly totalCost: number;
     readonly riskScore: number;
+    /** Insurance choice used when this candidate was configured and launched. */
+    readonly insurance: boolean;
+    /** Separate insurance premium when the game reports one. */
+    readonly insuranceCost: number | null;
     /** True when totalCost fell back to the initial price and was not configured. */
     readonly costEstimated?: boolean;
 }

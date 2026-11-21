@@ -1,9 +1,10 @@
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
-import type { AutoDroneStatus, AutoExpeditionStatus } from '../../../application/popup/portal.js';
+import type { AutoDroneStatus, AutoExpeditionStatus, ExpeditionDecisionView } from '../../../application/popup/portal.js';
 import type { SettingsPatch, SettingsV1 } from '../../../contracts/storage.js';
 import type { DroneState } from '../../../domains/drone/model.js';
 import type { ExpeditionOverview } from '../../../domains/expeditions/model.js';
+import { decisionScore } from '../../../domains/expeditions/model.js';
 import { DRONE_EXPEDITION_PROFILE, MERC_EXPEDITION_PROFILES, buildDroneCardState, mercProfileKeyForMarket, partitionExpeditions } from '../../../application/expeditions/view.js';
 import { AutomationCard } from '../../components/AutomationCard.js';
 import { InfoTip } from '../../components/InfoTip.js';
@@ -28,6 +29,7 @@ export interface AutoExpeditionCardProps {
     readonly onRunDrone: () => Promise<void>;
     readonly onCancelMercPreparation: () => Promise<void>;
     readonly onLoadMerc: () => Promise<void>;
+    readonly onRespondDecision: (expeditionId: string, messageId: string, optionId: string) => Promise<string | null>;
     readonly onLoadDrone: () => Promise<void>;
     readonly onUpdateSettings: (patch: SettingsPatch) => Promise<{ readonly ok: boolean; readonly error?: string }>;
     readonly now: number;
@@ -43,7 +45,7 @@ const MERC_MARKET_LABEL: Record<string, string> = {
 
 const MERC_DECISION_OPTIONS = [
     { value: 'off', label: 'Off (let the system decide)' },
-    { value: 'veterans', label: 'Veterans first (highest risk)' },
+    { value: 'veterans', label: 'Get rid of veterans (highest risk)' },
     { value: 'loot', label: 'Highest loot first' },
     { value: 'risk', label: 'Lowest risk first' },
 ] as const;
@@ -83,6 +85,37 @@ function expeditionMessage(message: string, tr: TranslateSource): string {
     const launched = message.match(/^Launched with (.+) \((.+)\)$/);
     if (launched) return tr('Launched with {name} ({market})', { name: launched[1] ?? '', market: launched[2] ?? '' });
     return tr(message);
+}
+
+function expeditionStatusLabel(status: string, tr: TranslateSource): string {
+    const normalized = status.trim().toUpperCase().replace(/[\s-]+/g, '_');
+    switch (normalized) {
+        case 'RUNNING':
+        case 'RUNNING_EVENT':
+        case 'IN_PROGRESS':
+            return tr('Running');
+        case 'COMPLETED':
+            return tr('Completed');
+        case 'FAILED':
+        case 'FAILURE':
+            return tr('Failed');
+        case 'EXPIRED':
+            return tr('Expired');
+        case 'DECISION_PENDING':
+            return tr('Decision pending');
+        case 'IDLE':
+            return tr('Idle');
+        default:
+            return status;
+    }
+}
+
+function decisionOptionScore(
+    option: ExpeditionDecisionView['options'][number],
+    decision: Pick<ExpeditionDecisionView, 'riskScore' | 'mode' | 'lootWeight' | 'riskWeight'>,
+): number | null {
+    if (decision.mode !== 'score') return null;
+    return decisionScore(option, decision.riskScore, { loot: decision.lootWeight, risk: decision.riskWeight });
 }
 
 function StatBar({ label, value, max }: {
@@ -126,17 +159,21 @@ function Switch({ checked, disabled, label, onClick }: {
     );
 }
 
-function Fold({ title, open, onToggle, children }: {
+function Fold({ title, titleExtra, open, onToggle, children }: {
     readonly title: string;
+    readonly titleExtra?: ComponentChildren;
     readonly open: boolean;
     readonly onToggle: () => void;
     readonly children: ComponentChildren;
 }) {
     return (
         <div class="v2-loadout-section">
-            <button type="button" class="v2-loadout-section-head" data-open={open ? 'true' : 'false'} aria-expanded={open} onClick={onToggle}>
-                <span class="v2-expedition-fold-title">{title}</span>
-            </button>
+            <div class="v2-expedition-fold-head">
+                <button type="button" class="v2-loadout-section-head" data-open={open ? 'true' : 'false'} aria-expanded={open} onClick={onToggle}>
+                    <span class="v2-expedition-fold-title">{title}</span>
+                </button>
+                {titleExtra ?? null}
+            </div>
             {open ? <div class="v2-loadout-section-body">{children}</div> : null}
         </div>
     );
@@ -159,6 +196,7 @@ export function AutoExpeditionCard({
     onRunDrone,
     onCancelMercPreparation,
     onLoadMerc,
+    onRespondDecision,
     onLoadDrone,
     onUpdateSettings,
     now,
@@ -169,6 +207,9 @@ export function AutoExpeditionCard({
     const [droneError, setDroneError] = useState<string | null>(null);
 
     const mercOptionsOpen = panelOpen['auto-expedition.merc.options'] ?? true;
+    const mercSelectionOpen = panelOpen['auto-expedition.merc.selection'] ?? true;
+    const mercDecisionOpen = panelOpen['auto-expedition.merc.decision'] ?? true;
+    const droneDecisionOpen = panelOpen['auto-expedition.drone.decision'] ?? true;
     const droneOptionsOpen = panelOpen['auto-expedition.drone.options'] ?? true;
 
     const updateSettings = async (patch: SettingsPatch, scope: 'merc' | 'drone' = tab): Promise<boolean> => {
@@ -182,11 +223,16 @@ export function AutoExpeditionCard({
         return true;
     };
 
-    const mercAutoSelect = settings?.mercAutoSelectEnabled ?? false;
     const mercGlobalMode = settings?.mercSelectionMode === 'global';
     const mercMaxPrice = settings?.mercMaxPrice ?? null;
     const mercMinCredits = settings?.mercMinCredits ?? 50000;
     const mercOrder = settings?.mercMarketOrder ?? ['core', 'usol', 'usol-elite'];
+    const decisionMode = settings?.mercDecisionMode ?? 'simple';
+    const decisionLoot = settings?.mercDecisionScoreLoot ?? 1;
+    const decisionRisk = settings?.mercDecisionScoreRisk ?? -5;
+    const droneDecisionMode = settings?.droneDecisionMode ?? 'simple';
+    const droneDecisionLoot = settings?.droneDecisionScoreLoot ?? 3;
+    const droneDecisionRisk = settings?.droneDecisionScoreRisk ?? -2;
 
     const moveMarket = (index: number, direction: -1 | 1) => {
         const next = [...mercOrder];
@@ -210,6 +256,33 @@ export function AutoExpeditionCard({
     );
     const mercProfile = MERC_EXPEDITION_PROFILES[mercMarketKey];
     const { active: activeExpeditions, completed: completedExpeditions } = partitionExpeditions(expeditions);
+    const autoDecisionEnabled = decisionMode === 'score' || (settings?.mercDecisionPolicy ?? 'off') !== 'off';
+    const overviewDecision = expeditions?.decisions[0] ?? null;
+    const overviewDecisionDeadline = overviewDecision?.deadline ? Date.parse(overviewDecision.deadline) : Number.NaN;
+    const overviewDecisionAutoAt = autoDecisionEnabled
+        ? Math.max(now, Number.isFinite(overviewDecisionDeadline) ? Math.min(overviewDecisionDeadline - 30_000, now + 30_000) : now + 30_000)
+        : null;
+    const decisionView: ExpeditionDecisionView | null = mercStatus?.decision ?? (overviewDecision ? {
+        id: overviewDecision.id,
+        expeditionId: overviewDecision.expeditionId,
+        message: overviewDecision.message,
+        riskScore: overviewDecision.riskScore,
+        lootScore: overviewDecision.lootScore,
+        deadline: overviewDecision.deadline,
+        firstSeenAt: now,
+        autoRespondAt: overviewDecisionAutoAt,
+        options: overviewDecision.options,
+        mode: decisionMode,
+        policy: settings?.mercDecisionPolicy ?? 'off',
+        lootWeight: decisionLoot,
+        riskWeight: decisionRisk,
+        chosenOptionId: null,
+        resolvedAt: null,
+        resolvedBy: null,
+    } : null);
+    const decisionAutoSeconds = decisionView?.autoRespondAt != null
+        ? Math.max(0, Math.ceil((decisionView.autoRespondAt - now) / 1000))
+        : null;
     const droneView = buildDroneCardState(drone, now);
     const activeDroneMission = droneView.activeMission;
     const droneTargetMission = droneView.targetMission;
@@ -278,6 +351,12 @@ export function AutoExpeditionCard({
                                         <span>{tr('Cost')} <strong>💰 {preparation.totalCost}</strong></span>
                                         <span>{tr('Risk')} <strong>⚠ {preparation.riskScore}</strong></span>
                                         <span>{tr('Insurance')} <strong>{preparation.insurance ? tr('on') : tr('off')}</strong></span>
+                                        {preparation.insurance ? (
+                                            <span>
+                                                {tr('Insurance cost')}{' '}
+                                                <strong>{preparation.insuranceCost != null ? `💰 ${preparation.insuranceCost}` : tr('Included in total')}</strong>
+                                            </span>
+                                        ) : null}
                                     </div>
                                     <div class="v2-stage-actions">
                                         <button type="button" class="v2-danger" onClick={() => void onCancelMercPreparation()}>{tr('Cancel')}</button>
@@ -288,12 +367,15 @@ export function AutoExpeditionCard({
                                 <article class="v2-stage-card is-warn" key={expedition.id}>
                                     <div class="v2-stage-head">
                                         <span class="v2-stage-title">{tr('📍 {location} — {name}', { location: expedition.locationName, name: expedition.mercenaryName ?? tr('Mercenary') })}</span>
-                                        <span class="v2-tag v2-tag-warn">{expedition.status}</span>
+                                        <span class="v2-tag v2-tag-warn">{expeditionStatusLabel(expedition.status, tr)}</span>
                                     </div>
                                     <div class="v2-stage-stats">
                                         {expedition.endsAt ? <span>{tr('ETA')} <strong>{formatRemaining(expedition.endsAt, now)}</strong></span> : null}
                                         {expedition.totalCost !== null ? <span>{tr('Cost')} <strong>💰 {expedition.totalCost}</strong></span> : null}
-                                        {expedition.riskScore !== null ? <span>{tr('Risk')} <strong>⚠ {expedition.riskScore}</strong></span> : null}
+                                    </div>
+                                    <div class="v2-stage-stats">
+                                        <span>{tr('Loot')} <strong>{expedition.lootScore ?? decisionView?.lootScore ?? '--'}</strong></span>
+                                        <span>{tr('Risk')} <strong>⚠ {expedition.riskScore ?? decisionView?.riskScore ?? '--'}</strong></span>
                                     </div>
                                 </article>
                             ))}
@@ -301,7 +383,7 @@ export function AutoExpeditionCard({
                                 <article class="v2-stage-card is-ok" key={`ready-${expedition.id}`}>
                                     <div class="v2-stage-head">
                                         <span class="v2-stage-title">{tr('✅ {location} — {name}', { location: expedition.locationName, name: expedition.mercenaryName ?? tr('Mercenary') })}</span>
-                                        <span class="v2-tag v2-tag-ok">{expedition.status}</span>
+                                        <span class="v2-tag v2-tag-ok">{expeditionStatusLabel(expedition.status, tr)}</span>
                                     </div>
                                     <div class="v2-stage-stats">
                                         {expedition.totalCost !== null ? <span>{tr('Cost')} <strong>💰 {expedition.totalCost}</strong></span> : null}
@@ -309,16 +391,55 @@ export function AutoExpeditionCard({
                                     </div>
                                 </article>
                             ))}
-                            {expeditions?.decisions.length ? (
+                            {decisionView ? (
                                 <article class="v2-stage-card is-warn">
                                     <div class="v2-stage-head">
                                         <span class="v2-stage-title">{tr('Pending decision')}</span>
-                                        <span class="v2-tag v2-tag-warn">{tr('Decision')}</span>
+                                        <span class="v2-tag v2-tag-warn">
+                                            {decisionView.resolvedAt !== null ? tr('Resolved') : tr('Decision')}
+                                        </span>
                                     </div>
-                                    <p class="v2-stage-note">{expeditions.decisions[0]?.message}</p>
+                                    <p class="v2-stage-note">{decisionView.message}</p>
+                                    {decisionAutoSeconds !== null && decisionView.resolvedAt === null ? (
+                                        <p class="v2-stage-note v2-text-warn">
+                                            {tr('Auto decision in {seconds}s', { seconds: decisionAutoSeconds })}
+                                        </p>
+                                    ) : null}
+                                    <div class="v2-decision-options">
+                                        {decisionView.options.map((option) => {
+                                            const score = decisionOptionScore(option, decisionView);
+                                            const chosen = decisionView.chosenOptionId === option.id;
+                                            return (
+                                                <button
+                                                    type="button"
+                                                    key={option.id}
+                                                    class={`v2-decision-option${chosen ? ' is-selected' : ''}`}
+                                                    disabled={mercBusy || decisionView.resolvedAt !== null}
+                                                    onClick={() => {
+                                                        setMercError(null);
+                                                        void onRespondDecision(decisionView.expeditionId, decisionView.id, option.id).then((error) => {
+                                                            if (error) setMercError(error);
+                                                        });
+                                                    }}
+                                                >
+                                                    <span class="v2-decision-option-label">
+                                                        {chosen ? '✓ ' : ''}{option.label}
+                                                    </span>
+                                                    <span class="v2-decision-option-stats">
+                                                        <span>{tr('Loot: {value}', { value: `${option.lootModifier >= 0 ? '+' : ''}${option.lootModifier}` })}</span>
+                                                        <span>{tr('Risk: {value}', { value: `${option.riskModifier >= 0 ? '+' : ''}${option.riskModifier}` })}</span>
+                                                        {score !== null ? <strong>{tr('Score: {value}', { value: `${score >= 0 ? '+' : ''}${score}` })}</strong> : null}
+                                                    </span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    {decisionView.options.some((option) => option.requiredModuleId !== null) ? (
+                                        <p class="v2-stage-note v2-muted">{tr('Options requiring a missing module cannot be auto-selected.')}</p>
+                                    ) : null}
                                 </article>
                             ) : null}
-                            {!preparation && activeExpeditions.length === 0 && completedExpeditions.length === 0 && !expeditions?.decisions.length ? (
+                            {!preparation && activeExpeditions.length === 0 && completedExpeditions.length === 0 && !decisionView ? (
                                 <article class="v2-stage-card">
                                     <div class="v2-stage-head">
                                         <span class="v2-stage-title">{tr('Mercenary expedition')}</span>
@@ -359,26 +480,15 @@ export function AutoExpeditionCard({
                         </div>
                         {mercError ? <p class="v2-muted v2-text-error">{mercError}</p> : null}
 
-                        <div class="v2-expedition-setting-row">
-                            <div>
-                                <strong>
-                                    {tr('Auto select mercenary')}
-                                    <InfoTip text={tr('Mercenary auto-selection must be enabled before Auto start mercenary expedition can be enabled.')} />
-                                </strong>
-                                <p class="v2-muted">{tr('Choose the cheapest available mercenary under the rules below.')}</p>
-                            </div>
-                            <Switch
-                                checked={mercAutoSelect}
-                                label={tr('Auto select mercenary')}
-                                onClick={() => void updateSettings({ mercAutoSelectEnabled: !mercAutoSelect })}
-                            />
-                        </div>
-
-                        <div class={`v2-expedition-subsettings${mercAutoSelect ? '' : ' v2-expedition-disabled'}`}>
+                        <Fold
+                            title={tr('Mercenary selection rules')}
+                            open={mercSelectionOpen}
+                            onToggle={() => updatePanelOpen('auto-expedition.merc.selection', !mercSelectionOpen)}
+                        >
                             <div class="v2-expedition-setting-row">
                                 <div>
                                     <strong>{tr('Maximum mercenary price')}</strong>
-                                    <p class="v2-muted">{tr('Do not hire mercenaries above this total cost.')}</p>
+                                    <p class="v2-muted">{tr('Do not hire mercenaries above this total cost (including insurance).')}</p>
                                 </div>
                                 <div class="v2-expedition-inline">
                                     <input
@@ -410,7 +520,6 @@ export function AutoExpeditionCard({
                                 <span>{tr('Cheapest mercenary strategy')}</span>
                                 <select
                                     value={settings?.mercSelectionMode ?? 'market'}
-                                    disabled={!mercAutoSelect}
                                     onInput={(event) => void updateSettings({ mercSelectionMode: (event.currentTarget as HTMLSelectElement).value as 'market' | 'global' })}
                                 >
                                     <option value="market">{tr('Lowest price within market order')}</option>
@@ -418,6 +527,7 @@ export function AutoExpeditionCard({
                                 </select>
                             </label>
 
+                            {!mercGlobalMode ? (
                             <div class="v2-expedition-order">
                                 <div class="v2-expedition-order-head">
                                     <strong>{tr('Mercenary market order')}</strong>
@@ -428,14 +538,14 @@ export function AutoExpeditionCard({
                                         <span>{MERC_MARKET_LABEL[key] ?? key}</span>
                                         <button
                                             type="button"
-                                            disabled={!mercAutoSelect || mercGlobalMode || index === 0}
+                                            disabled={index === 0}
                                             onClick={() => moveMarket(index, -1)}
                                         >
                                             ↑
                                         </button>
                                         <button
                                             type="button"
-                                            disabled={!mercAutoSelect || mercGlobalMode || index === mercOrder.length - 1}
+                                            disabled={index === mercOrder.length - 1}
                                             onClick={() => moveMarket(index, 1)}
                                         >
                                             ↓
@@ -443,6 +553,7 @@ export function AutoExpeditionCard({
                                     </div>
                                 ))}
                             </div>
+                            ) : null}
 
                             <div class="v2-expedition-setting-row">
                                 <div>
@@ -455,7 +566,7 @@ export function AutoExpeditionCard({
                                     onClick={() => void updateSettings({ mercInsuranceEnabled: !settings?.mercInsuranceEnabled })}
                                 />
                             </div>
-                        </div>
+                        </Fold>
 
                         <div class="v2-expedition-setting-row">
                             <div>
@@ -498,17 +609,76 @@ export function AutoExpeditionCard({
                         </label>
                     </div>
 
-                    <div class="v2-expedition-plain-section">
+                    <Fold
+                        title={tr('In-mission decisions')}
+                        titleExtra={<InfoTip text={tr('Simple: choose from preset policies. Score: compare options by loot and risk weights; the highest score wins and ties keep the first option.')} />}
+                        open={mercDecisionOpen}
+                        onToggle={() => updatePanelOpen('auto-expedition.merc.decision', !mercDecisionOpen)}
+                    >
                         <label class="v2-field">
-                            <span>{tr('In-mission decisions')}</span>
+                            <span>{tr('Decision mode')}</span>
                             <select
-                                value={settings?.mercDecisionPolicy ?? 'off'}
-                                onInput={(event) => void updateSettings({ mercDecisionPolicy: (event.currentTarget as HTMLSelectElement).value as SettingsV1['mercDecisionPolicy'] })}
+                                value={decisionMode}
+                                onInput={(event) => void updateSettings({ mercDecisionMode: (event.currentTarget as HTMLSelectElement).value as SettingsV1['mercDecisionMode'] })}
                             >
-                                {MERC_DECISION_OPTIONS.map((option) => <option key={option.value} value={option.value}>{tr(option.label)}</option>)}
+                                <option value="simple">{tr('Simple decision')}</option>
+                                <option value="score">{tr('Score decision')}</option>
                             </select>
                         </label>
-                    </div>
+                        {decisionMode === 'simple' ? (
+                            <label class="v2-field">
+                                <span>{tr('Simple decision policy')}</span>
+                                <select
+                                    value={settings?.mercDecisionPolicy ?? 'off'}
+                                    onInput={(event) => void updateSettings({ mercDecisionPolicy: (event.currentTarget as HTMLSelectElement).value as SettingsV1['mercDecisionPolicy'] })}
+                                >
+                                    {MERC_DECISION_OPTIONS.map((option) => <option key={option.value} value={option.value}>{tr(option.label)}</option>)}
+                                </select>
+                            </label>
+                        ) : (
+                            <div class="v2-expedition-setting-block">
+                                <div>
+                                    <strong>{tr('Score weights')}</strong>
+                                    <p class="v2-muted">{tr('Loot and risk weights used to score each decision option.')}</p>
+                                </div>
+                                <div class="v2-expedition-inline v2-decision-weights">
+                                    <label class="v2-field">
+                                        <span>{tr('Loot weight')}</span>
+                                        <input
+                                            class="v2-decision-weight-input"
+                                            type="number"
+                                            min={-100}
+                                            max={100}
+                                            step={1}
+                                            value={decisionLoot}
+                                            onInput={(event) => void updateSettings({ mercDecisionScoreLoot: Math.max(-100, Math.min(100, Math.floor(Number((event.currentTarget as HTMLInputElement).value) || 0))) })}
+                                        />
+                                    </label>
+                                    <label class="v2-field">
+                                        <span>{tr('Risk weight')}</span>
+                                        <input
+                                            class="v2-decision-weight-input"
+                                            type="number"
+                                            min={-100}
+                                            max={100}
+                                            step={1}
+                                            value={decisionRisk}
+                                            onInput={(event) => void updateSettings({ mercDecisionScoreRisk: Math.max(-100, Math.min(100, Math.floor(Number((event.currentTarget as HTMLInputElement).value) || 0))) })}
+                                        />
+                                    </label>
+                                    <button
+                                        type="button"
+                                        class="v2-icon-button"
+                                        aria-label={tr('Reset')}
+                                        title={tr('Reset')}
+                                        onClick={() => void updateSettings({ mercDecisionScoreLoot: 1, mercDecisionScoreRisk: -5 })}
+                                    >
+                                        ↺
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </Fold>
 
                     <div class="v2-expedition-setting-row">
                         <div>
@@ -673,17 +843,76 @@ export function AutoExpeditionCard({
                         </label>
                     </div>
 
-                    <div class="v2-expedition-plain-section">
+                    <Fold
+                        title={tr('In-mission decisions')}
+                        titleExtra={<InfoTip text={tr('Simple: choose from preset policies. Score: compare options by loot and risk weights; the highest score wins and ties keep the first option.')} />}
+                        open={droneDecisionOpen}
+                        onToggle={() => updatePanelOpen('auto-expedition.drone.decision', !droneDecisionOpen)}
+                    >
                         <label class="v2-field">
-                            <span>{tr('In-mission decisions')}</span>
+                            <span>{tr('Decision mode')}</span>
                             <select
-                                value={settings?.droneDecisionPolicy === 'veterans' ? 'loot' : settings?.droneDecisionPolicy ?? 'off'}
-                                onInput={(event) => void updateSettings({ droneDecisionPolicy: (event.currentTarget as HTMLSelectElement).value as SettingsV1['droneDecisionPolicy'] })}
+                                value={droneDecisionMode}
+                                onInput={(event) => void updateSettings({ droneDecisionMode: (event.currentTarget as HTMLSelectElement).value as SettingsV1['droneDecisionMode'] })}
                             >
-                                {DRONE_DECISION_OPTIONS.map((option) => <option key={option.value} value={option.value}>{tr(option.label)}</option>)}
+                                <option value="simple">{tr('Simple decision')}</option>
+                                <option value="score">{tr('Score decision')}</option>
                             </select>
                         </label>
-                    </div>
+                        {droneDecisionMode === 'simple' ? (
+                            <label class="v2-field">
+                                <span>{tr('Simple decision policy')}</span>
+                                <select
+                                    value={settings?.droneDecisionPolicy === 'veterans' ? 'loot' : settings?.droneDecisionPolicy ?? 'off'}
+                                    onInput={(event) => void updateSettings({ droneDecisionPolicy: (event.currentTarget as HTMLSelectElement).value as SettingsV1['droneDecisionPolicy'] })}
+                                >
+                                    {DRONE_DECISION_OPTIONS.map((option) => <option key={option.value} value={option.value}>{tr(option.label)}</option>)}
+                                </select>
+                            </label>
+                        ) : (
+                            <div class="v2-expedition-setting-block">
+                                <div>
+                                    <strong>{tr('Score weights')}</strong>
+                                    <p class="v2-muted">{tr('Loot and risk weights used to score each decision option.')}</p>
+                                </div>
+                                <div class="v2-expedition-inline v2-decision-weights">
+                                    <label class="v2-field">
+                                        <span>{tr('Loot weight')}</span>
+                                        <input
+                                            class="v2-decision-weight-input"
+                                            type="number"
+                                            min={-100}
+                                            max={100}
+                                            step={1}
+                                            value={droneDecisionLoot}
+                                            onInput={(event) => void updateSettings({ droneDecisionScoreLoot: Math.max(-100, Math.min(100, Math.floor(Number((event.currentTarget as HTMLInputElement).value) || 0))) })}
+                                        />
+                                    </label>
+                                    <label class="v2-field">
+                                        <span>{tr('Risk weight')}</span>
+                                        <input
+                                            class="v2-decision-weight-input"
+                                            type="number"
+                                            min={-100}
+                                            max={100}
+                                            step={1}
+                                            value={droneDecisionRisk}
+                                            onInput={(event) => void updateSettings({ droneDecisionScoreRisk: Math.max(-100, Math.min(100, Math.floor(Number((event.currentTarget as HTMLInputElement).value) || 0))) })}
+                                        />
+                                    </label>
+                                    <button
+                                        type="button"
+                                        class="v2-icon-button"
+                                        aria-label={tr('Reset')}
+                                        title={tr('Reset')}
+                                        onClick={() => void updateSettings({ droneDecisionScoreLoot: 3, droneDecisionScoreRisk: -2 })}
+                                    >
+                                        ↺
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </Fold>
 
                     <div class="v2-expedition-setting-row">
                         <div>

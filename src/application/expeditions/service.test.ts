@@ -77,3 +77,63 @@ describe('ExpeditionService candidates', () => {
         if (result.ok) expect(result.value[0]).toMatchObject({ totalCost: 5179, costEstimated: false });
     });
 });
+
+describe('ExpeditionService auto decisions', () => {
+    function decisionPort(respond: ReturnType<typeof vi.fn>): ExpeditionPort {
+        return {
+            getActive: async () => ({
+                ok: true,
+                value: {
+                    expeditions: [],
+                    decisions: [{
+                        id: 'decision-1',
+                        expeditionId: 'exp-1',
+                        content: 'Pick',
+                        riskScore: 20,
+                        decisionDeadline: new Date(Date.now() + 60_000).toISOString(),
+                        decisionOptions: [
+                            { id: 'safe', label: 'Safe', lootModifier: 1, riskModifier: -5 },
+                            { id: 'loot', label: 'Loot', lootModifier: 5, riskModifier: 3 },
+                        ],
+                    }],
+                },
+            }),
+            getArchived: async () => ({ ok: true, value: {} }),
+            getMercenaries: async () => ({ ok: true, value: {} }),
+            getConfig: async () => ({ ok: true, value: {} }),
+            respond,
+            configure: async () => ({ ok: true, value: {} }),
+            launch: async () => ({ ok: true, value: undefined }),
+            openContainer: async () => ({ ok: true, value: undefined }),
+        };
+    }
+
+    it('uses score mode and responds with the highest-scoring option', async () => {
+        const respond = vi.fn(async () => ({ ok: true as const, value: undefined }));
+        const service = new ExpeditionService(decisionPort(respond), async () => undefined);
+        const result = await service.autoRespond('home', 'off', 'score', { loot: 1, risk: -5 });
+
+        expect(result.ok).toBe(true);
+        expect(respond).toHaveBeenCalledWith('exp-1', 'decision-1', 'safe');
+    });
+});
+
+describe('ExpeditionService insurance candidates', () => {
+    it('carries the requested insurance into configure and the selected candidate', async () => {
+        const configure = vi.fn().mockResolvedValue({ ok: true, value: { totalCost: 250, hasInsurance: true } });
+        const service = new ExpeditionService(port(configure), async () => undefined);
+        const result = await service.candidates({
+            marketId: 'home',
+            marketKey: 'core',
+            hasInsurance: true,
+            locations,
+            locationConfigId: 'loc-a',
+            zoneConfigId: 'zone-a',
+            goalId: 'goal-b',
+        });
+
+        expect(configure).toHaveBeenCalledWith(expect.objectContaining({ hasInsurance: true }));
+        expect(result.ok).toBe(true);
+        if (result.ok) expect(result.value[0]).toMatchObject({ insurance: true, totalCost: 250 });
+    });
+});

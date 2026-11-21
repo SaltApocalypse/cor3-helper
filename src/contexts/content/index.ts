@@ -45,10 +45,17 @@ function publishMarketCache(value: unknown, marketId: unknown): void {
 
 window.addEventListener('message', (event) => {
     if (event.source !== window) return;
-    const data = event.data as { version?: unknown; type?: unknown; readiness?: unknown; marketId?: unknown; snapshot?: unknown; level?: unknown; message?: unknown; data?: unknown } | null;
+    const data = event.data as { version?: unknown; type?: unknown; readiness?: unknown; marketId?: unknown; snapshot?: unknown; level?: unknown; message?: unknown; data?: unknown; decisions?: unknown } | null;
     if (data?.version !== undefined && data.version !== 2) return;
     if (data?.type === 'V2_GAME_READINESS_CHANGED') publishReadiness(data.readiness);
     if (data?.type === 'V2_MARKET_CACHE_UPDATED') publishMarketCache(data.snapshot, data.marketId);
+    if (data?.type === 'V2_EXPEDITION_DECISIONS' && Array.isArray(data.decisions)) {
+        try {
+            sendToBackground({ type: 'V2_EXPEDITION_DECISIONS', decisions: data.decisions });
+        } catch {
+            // The content script may outlive an extension reload.
+        }
+    }
     if (data?.type === 'V2_WS_NOTICE' && typeof data.message === 'string') {
         try {
             sendToBackground({

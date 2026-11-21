@@ -69,25 +69,6 @@ async function applySettingsPatch(deps: SettingsHandlerDeps, patch: SettingsPatc
             helperMode: false,
             helperModeSaved: null,
         };
-        const mercAutoSelect = effective.mercAutoSelectEnabled ?? current.mercAutoSelectEnabled;
-        if (effective.autoExpeditionEnabled === true && !mercAutoSelect) {
-            effective = { ...effective, autoExpeditionEnabled: false };
-        }
-    }
-    // Auto Expedition cannot run without its mercenary selector.
-    if (patch.mercAutoSelectEnabled === false && current.autoExpeditionEnabled) {
-        effective = { ...effective, autoExpeditionEnabled: false };
-    }
-    const mercAutoSelect = effective.mercAutoSelectEnabled ?? current.mercAutoSelectEnabled;
-    const autoExpeditionEnabled = effective.autoExpeditionEnabled ?? current.autoExpeditionEnabled;
-    if (autoExpeditionEnabled && !mercAutoSelect) {
-        return {
-            ok: false,
-            error: {
-                code: 'MERC_AUTO_SELECT_REQUIRED',
-                message: 'Enable automatic mercenary selection before starting Auto Expedition',
-            },
-        };
     }
     const maxPrice = effective.mercMaxPrice !== undefined ? effective.mercMaxPrice : current.mercMaxPrice;
     const maxPriceEnabled = effective.mercMaxPriceEnabled ?? current.mercMaxPriceEnabled;

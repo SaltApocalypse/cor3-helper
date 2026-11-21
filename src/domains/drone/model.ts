@@ -135,6 +135,8 @@ export interface DroneEventOption {
     readonly label: string;
     readonly lootDelta: number;
     readonly riskDelta: number;
+    /** Absolute risk when the game exposes it; used to derive the event baseline. */
+    readonly risk?: number | null;
     readonly requiredModuleId: string | null;
 }
 
@@ -142,6 +144,7 @@ export interface DroneMissionEvent {
     readonly missionId: string;
     readonly eventId: string;
     readonly type: string;
+    readonly riskScore: number | null;
     readonly options: readonly DroneEventOption[];
 }
 
@@ -162,6 +165,41 @@ export function chooseDroneEventOption(
         return right.lootDelta - left.lootDelta || left.riskDelta - right.riskDelta;
     });
     return pool[0] ?? null;
+}
+
+export interface DroneDecisionWeights {
+    readonly loot: number;
+    readonly risk: number;
+}
+
+export function droneEventScore(
+    option: Pick<DroneEventOption, 'lootDelta' | 'riskDelta'>,
+    riskScore: number | null,
+    weights: DroneDecisionWeights,
+): number {
+    const baseRisk = riskScore ?? 0;
+    return Math.round(
+        (option.lootDelta * weights.loot)
+        + (option.riskDelta * weights.risk * (((baseRisk + Math.abs(option.riskDelta)) / 10) || 1)),
+    );
+}
+
+export function chooseScoredDroneEventOption(
+    event: DroneMissionEvent,
+    weights: DroneDecisionWeights,
+): DroneEventOption | null {
+    const usable = event.options.filter((option) => option.requiredModuleId === null);
+    const pool = usable.length > 0 ? usable : event.options;
+    let best: DroneEventOption | null = null;
+    let bestScore = -Infinity;
+    for (const option of pool) {
+        const score = droneEventScore(option, event.riskScore, weights);
+        if (score > bestScore) {
+            best = option;
+            bestScore = score;
+        }
+    }
+    return best;
 }
 
 export interface DroneCompletedMission {

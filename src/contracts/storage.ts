@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { JOB_TYPES } from '../kernel/job-types.js';
 
 export const DECISION_POLICIES = ['off', 'veterans', 'loot', 'risk'] as const;
+export const MERC_DECISION_MODES = ['simple', 'score'] as const;
 export const MERC_SELECTION_MODES = ['market', 'global'] as const;
 export const MERC_MARKET_KEYS = ['core', 'usol', 'usol-elite'] as const;
 
@@ -63,6 +64,10 @@ export const settingsV1Schema = z.object({
     droneRepairThreshold: z.number().int().min(0).max(100).default(60),
     droneRepairOnCharge: z.boolean().default(false),
     droneDecisionPolicy: z.enum(DECISION_POLICIES).default('off'),
+    droneDecisionMode: z.enum(MERC_DECISION_MODES).default('simple'),
+    /** v1 drone auto-decide defaults: loot 3, risk -2. */
+    droneDecisionScoreLoot: z.number().int().min(-100).max(100).default(3),
+    droneDecisionScoreRisk: z.number().int().min(-100).max(100).default(-2),
     droneLocationId: z.string().nullable().default(null),
     droneGoalId: z.string().nullable().default(null),
     droneAutoSendEnabled: z.boolean().default(true),
@@ -77,6 +82,10 @@ export const settingsV1Schema = z.object({
     mercMarketOrder: z.array(z.enum(MERC_MARKET_KEYS)).default(['core', 'usol', 'usol-elite']),
     mercInsuranceEnabled: z.boolean().default(false),
     mercDecisionPolicy: z.enum(DECISION_POLICIES).default('off'),
+    mercDecisionMode: z.enum(MERC_DECISION_MODES).default('simple'),
+    /** v1 auto-choose defaults: loot 1, risk -5. */
+    mercDecisionScoreLoot: z.number().int().min(-100).max(100).default(1),
+    mercDecisionScoreRisk: z.number().int().min(-100).max(100).default(-5),
     mercAutoPayEnabled: z.boolean().default(true),
     mercLocationId: z.string().nullable().default(null),
     mercGoalId: z.string().nullable().default(null),
