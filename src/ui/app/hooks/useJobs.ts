@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { jobMarketByKey, type JobOffer } from '../../../application/popup/catalog.js';
 import type { AutoJobsMarket } from '../../../contracts/auto-jobs.js';
+import { jobIdentityKey } from '../../../contracts/jobs.js';
 import type { JobHistoryEntry, JobQueueProgress, PopupPortal } from '../../../application/popup/portal.js';
 import type { TranslateSource } from '../../i18n-context.js';
 import type { PopupPage } from '../AppShell.js';
-import { groupJobsByMarket, resetAtByMarket, type JobRunStatus, type UiJobReport } from '../view-models/job-report.js';
+import { groupJobsByMarket, isJobSelected, resetAtByMarket, toggleJobSelection, type JobRunStatus, type UiJobReport } from '../view-models/job-report.js';
 import { usePolling } from './usePolling.js';
 
 /**
@@ -46,7 +47,7 @@ export interface JobsState {
     readonly syncJobs: (allMarkets: boolean) => Promise<void>;
     readonly loadJobHistory: () => Promise<void>;
     readonly loadAutoJobsSnapshot: () => Promise<void>;
-    readonly toggleJob: (jobId: string) => void;
+    readonly toggleJob: (marketKey: string, jobId: string) => void;
     readonly toggleSelectMarket: (marketJobs: readonly JobOffer[]) => void;
 }
 
@@ -68,7 +69,7 @@ export function useJobs(portal: PopupPortal, deps: JobsDeps): JobsState {
     const [jobRunStatusById, setJobRunStatusById] = useState<Readonly<Record<string, JobRunStatus>>>({});
     const [jobProgress, setJobProgress] = useState<JobQueueProgress | null>(null);
 
-    const currentMarketSelectedCount = (jobsByMarket[marketKey] ?? []).filter((job) => selectedJobs.has(job.id)).length;
+    const currentMarketSelectedCount = (jobsByMarket[marketKey] ?? []).filter((job) => isJobSelected(selectedJobs, marketKey, job.id)).length;
 
     const syncJobs = useCallback(async (allMarkets: boolean) => {
         setJobBusy(true);
@@ -80,7 +81,7 @@ export function useJobs(portal: PopupPortal, deps: JobsDeps): JobsState {
                 setJobsByMarket(groupJobsByMarket(response.value.jobs));
                 setJobResetByMarket(resetAtByMarket(response.value.markets));
                 setJobRunStatusById({});
-                setSelectedJobs(new Set(response.value.jobs.map((job) => job.id)));
+                setSelectedJobs(new Set(response.value.jobs.map((job) => jobIdentityKey(job.marketKey, job.id))));
                 setMarketReport(response.value.markets);
                 setJobStatus(tt('Synced {jobs} job(s) across {markets} market(s)', { jobs: response.value.jobs.length, markets: response.value.markets.length }));
             } else {
@@ -99,7 +100,7 @@ export function useJobs(portal: PopupPortal, deps: JobsDeps): JobsState {
                 setJobsByMarket((current) => ({ ...current, [marketKey]: response.value.jobs }));
                 setJobResetByMarket((current) => ({ ...current, [marketKey]: response.value.resetAt }));
                 setJobRunStatusById({});
-                setSelectedJobs(new Set(response.value.jobs.map((job) => job.id)));
+                setSelectedJobs(new Set(response.value.jobs.map((job) => jobIdentityKey(job.marketKey, job.id))));
                 setMarketReport(null);
                 setJobStatus(tt('Synced {jobs} job(s) from {market}; skipped {skipped}', { jobs: response.value.jobs.length, market: market.label, skipped: response.value.skipped }));
             } else {
@@ -131,9 +132,9 @@ export function useJobs(portal: PopupPortal, deps: JobsDeps): JobsState {
         setSelectedJobs((current) => {
             if (!jobsSelectionInitialized.current) {
                 jobsSelectionInitialized.current = true;
-                return new Set(snapshot.jobs.map((job) => job.id));
+                return new Set(snapshot.jobs.map((job) => jobIdentityKey(job.marketKey, job.id)));
             }
-            const available = new Set(snapshot.jobs.map((job) => job.id));
+            const available = new Set(snapshot.jobs.map((job) => jobIdentityKey(job.marketKey, job.id)));
             return new Set([...current].filter((id) => available.has(id)));
         });
         setJobStatus((current) => current === tt('No market synced yet')
@@ -141,22 +142,18 @@ export function useJobs(portal: PopupPortal, deps: JobsDeps): JobsState {
             : current);
     }, [portal, jobRunId, tt]);
 
-    const toggleJob = useCallback((jobId: string) => {
-        setSelectedJobs((current) => {
-            const next = new Set(current);
-            if (next.has(jobId)) next.delete(jobId);
-            else next.add(jobId);
-            return next;
-        });
+    const toggleJob = useCallback((marketKey: string, jobId: string) => {
+        setSelectedJobs((current) => toggleJobSelection(current, marketKey, jobId));
     }, []);
 
     const toggleSelectMarket = useCallback((marketJobs: readonly JobOffer[]) => {
         setSelectedJobs((current) => {
             const next = new Set(current);
-            const allSelected = marketJobs.length > 0 && marketJobs.every((job) => next.has(job.id));
+            const allSelected = marketJobs.length > 0 && marketJobs.every((job) => next.has(jobIdentityKey(job.marketKey, job.id)));
             for (const job of marketJobs) {
-                if (allSelected) next.delete(job.id);
-                else next.add(job.id);
+                const key = jobIdentityKey(job.marketKey, job.id);
+                if (allSelected) next.delete(key);
+                else next.add(key);
             }
             return next;
         });

@@ -1,4 +1,5 @@
 import type { AutoJobsMarket, AutoJobsSnapshot } from '../../contracts/auto-jobs.js';
+import { jobIdentityKey } from '../../contracts/jobs.js';
 
 /**
  * Merges an Auto Jobs snapshot update into the previous snapshot.
@@ -17,10 +18,10 @@ export function mergeAutoJobsSnapshot(
     const failedMarkets = new Set(update.markets.filter((market) => !market.ok).map((market) => market.marketKey));
 
     const refreshedJobs = update.jobs.filter((job) => !failedMarkets.has(job.marketKey));
-    const seenJobIds = new Set(refreshedJobs.map((job) => job.id));
+    const seenJobKeys = new Set(refreshedJobs.map((job) => jobIdentityKey(job.marketKey, job.id)));
     const keptJobs = (previous?.jobs ?? []).filter((job) =>
         (!updatedMarkets.has(job.marketKey) || failedMarkets.has(job.marketKey))
-        && !seenJobIds.has(job.id),
+        && !seenJobKeys.has(jobIdentityKey(job.marketKey, job.id)),
     );
 
     const markets: AutoJobsMarket[] = update.markets.map((market) => {

@@ -9,7 +9,7 @@ import { JobStateRecorder } from '../../../application/auto-job/job-state-record
 import { JobStateReconciler } from '../../../application/auto-job/job-state-reconciler.js';
 import { JobStateStore } from '../../../infrastructure/storage/job-state-store.js';
 import { MarketCompletedJobsStore } from '../../../infrastructure/storage/market-completed-jobs-store.js';
-import { MemoryStorageArea } from '../../../infrastructure/storage/storage-area.js';
+import { MemoryStorageArea, type StorageArea, type StorageKey } from '../../../infrastructure/storage/storage-area.js';
 import type { JobActionPort } from '../../../application/auto-job/job-actions.js';
 import type { JobOffer } from '../../../domains/jobs/model.js';
 import { settingsV1Schema } from '../../../contracts/storage.js';
@@ -62,6 +62,8 @@ function makeHarness(options: {
     readonly complete: (job: JobOffer) => { ok: true; value: { credits: number; reputation: number; renown: number } } | { ok: false; error: { code: string; message: string } };
     readonly completions?: MarketCompletionStorePort;
     readonly failJobStateUnconfirmed?: boolean;
+    readonly jobStateArea?: StorageArea;
+    readonly completionArea?: StorageArea;
 }) {
     const calls: string[] = [];
     const actions: JobActionPort = {
@@ -85,7 +87,8 @@ function makeHarness(options: {
         getFileAnalysis: async () => ({ ok: true as const, value: { canDecrypt: true, decryptPower: 1, tags: [], source: null } }),
         decryptFile: async () => ({ ok: true as const, value: undefined }),
     };
-    const jobStore = new JobStateStore(new MemoryStorageArea(), { now: () => 1 });
+    const jobStateArea = options.jobStateArea ?? new MemoryStorageArea();
+    const jobStore = new JobStateStore(jobStateArea, { now: () => 1 });
     if (options.failJobStateUnconfirmed) {
         const originalUpsert = jobStore.upsert.bind(jobStore);
         jobStore.upsert = async (record) => {
@@ -93,7 +96,8 @@ function makeHarness(options: {
             return originalUpsert(record);
         };
     }
-    const completionStore = options.completions ?? new MarketCompletedJobsStore(new MemoryStorageArea(), { now: () => 1 });
+    const completionArea = options.completionArea ?? new MemoryStorageArea();
+    const completionStore = options.completions ?? new MarketCompletedJobsStore(completionArea, { now: () => 1 });
     const log = logger();
     const recorder = new JobStateRecorder({ store: jobStore, logger: log, now: () => 1, resetAtForMarket: () => resetAt });
     const execution = new JobExecutionService(
@@ -139,7 +143,7 @@ function makeHarness(options: {
         snapshotView: () => null,
         dismissFailedJobs: async () => ({ dismissed: 0, failed: 0, markets: [], errors: [] }),
     });
-    return { calls, actions, jobStore, completionStore, recorder, execution, queue, queueRun, deps, coordinator };
+    return { calls, actions, jobStore, completionStore, recorder, execution, queue, queueRun, deps, coordinator, jobStateArea, completionArea };
 }
 
 function prefetched(jobs: readonly JobOffer[], markets: readonly { marketKey: string; label: string; ok: true; skipped: number; resetAt: string }[]) {
@@ -451,5 +455,136 @@ describe('Complete unknown retry barrier', () => {
         expect(made.calls).toContain('complete:shared');
         expect((await made.jobStore.get({ marketKey: 'home', jobId: 'shared', resetAt }))?.status).toBe('unknown');
         expect((await made.jobStore.get({ marketKey: 'dark', jobId: 'shared', resetAt }))?.status).toBe('completed');
+    });
+});
+
+class SelectiveRejectingArea implements StorageArea {
+    constructor(
+        private readonly base: StorageArea,
+        private readonly reject: (key: string) => boolean,
+    ) {}
+
+    async get(keys: StorageKey): Promise<Record<string, unknown>> {
+        const list = typeof keys === 'string' ? [keys] : keys;
+        if (list.some((key) => this.reject(key))) throw new Error('storage unavailable');
+        return this.base.get(keys);
+    }
+
+    set(items: Record<string, unknown>): Promise<void> {
+        return this.base.set(items);
+    }
+
+    remove(keys: StorageKey): Promise<void> {
+        return this.base.remove(keys);
+    }
+}
+
+async function corruptJobStateShard(area: StorageArea, index: number): Promise<void> {
+    await area.set({
+        [`v2.job.state.${index}`]: {
+            schemaVersion: 1,
+            writtenAt: 1,
+            data: { records: { broken: { status: 'not-a-status' } } },
+        },
+    });
+}
+
+const successCompletion = () => ({ ok: true as const, value: { credits: 1, reputation: 1, renown: 0 } });
+
+describe('AutoFinish completion barrier storage health', () => {
+    it('T23 keeps the normal empty-store behavior when every shard reads cleanly', async () => {
+        const home = job('home', 'home-market');
+        const market = { marketKey: 'home', label: 'HOME', ok: true as const, skipped: 0, resetAt };
+        const made = makeHarness({ jobs: [home], markets: [market], complete: successCompletion });
+
+        await made.coordinator.run('owner', {}, prefetched([home], [market]));
+
+        expect(made.calls.filter((call) => call === 'complete:shared')).toHaveLength(1);
+        expect(made.queueRun).toHaveBeenCalledTimes(1);
+    });
+
+    it('T24 fails closed when one Job State shard is corrupt', async () => {
+        const home = job('home', 'home-market');
+        const market = { marketKey: 'home', label: 'HOME', ok: true as const, skipped: 0, resetAt };
+        const area = new MemoryStorageArea();
+        await corruptJobStateShard(area, 0);
+        const made = makeHarness({ jobs: [home], markets: [market], complete: successCompletion, jobStateArea: area });
+
+        await expect(made.coordinator.run('owner', {}, prefetched([home], [market])))
+            .rejects.toThrow('Job state barrier unavailable');
+
+        expect(made.queueRun).not.toHaveBeenCalled();
+        expect(made.calls).toEqual([]);
+    });
+
+    it('T25 fails closed when one Job State shard is unavailable', async () => {
+        const home = job('home', 'home-market');
+        const market = { marketKey: 'home', label: 'HOME', ok: true as const, skipped: 0, resetAt };
+        const area = new SelectiveRejectingArea(new MemoryStorageArea(), (key) => key === 'v2.job.state.1');
+        const made = makeHarness({ jobs: [home], markets: [market], complete: successCompletion, jobStateArea: area });
+
+        await expect(made.coordinator.run('owner', {}, prefetched([home], [market])))
+            .rejects.toThrow('Job state barrier unavailable');
+
+        expect(made.queueRun).not.toHaveBeenCalled();
+        expect(made.calls).toEqual([]);
+    });
+
+    it('T26 fails closed when the Completion Store is corrupt', async () => {
+        const home = job('home', 'home-market');
+        const market = { marketKey: 'home', label: 'HOME', ok: true as const, skipped: 0, resetAt };
+        const area = new MemoryStorageArea();
+        await area.set({
+            'v2.auto-finish.completedJobs': {
+                schemaVersion: 1,
+                writtenAt: 1,
+                data: { byMarket: 'not-a-map' },
+            },
+        });
+        const made = makeHarness({ jobs: [home], markets: [market], complete: successCompletion, completionArea: area });
+
+        await expect(made.coordinator.run('owner', {}, prefetched([home], [market])))
+            .rejects.toThrow('unavailable');
+
+        expect(made.queueRun).not.toHaveBeenCalled();
+        expect(made.calls).toEqual([]);
+    });
+
+    it('T27 fails closed when the Completion Store is unavailable', async () => {
+        const home = job('home', 'home-market');
+        const market = { marketKey: 'home', label: 'HOME', ok: true as const, skipped: 0, resetAt };
+        const area = new SelectiveRejectingArea(new MemoryStorageArea(), (key) => key === 'v2.auto-finish.completedJobs');
+        const made = makeHarness({ jobs: [home], markets: [market], complete: successCompletion, completionArea: area });
+
+        await expect(made.coordinator.isCompletionBlocked('home', 'shared', resetAt))
+            .rejects.toThrow('Completion barrier unavailable');
+        await expect(made.coordinator.run('owner', {}, prefetched([home], [market]))).rejects.toThrow();
+
+        expect(made.queueRun).not.toHaveBeenCalled();
+        expect(made.calls).toEqual([]);
+    });
+
+    it('T28 treats Job State and Completion Store missing keys as normal empty data', async () => {
+        const home = job('home', 'home-market');
+        const market = { marketKey: 'home', label: 'HOME', ok: true as const, skipped: 0, resetAt };
+        const made = makeHarness({ jobs: [home], markets: [market], complete: successCompletion });
+
+        expect(await made.coordinator.isCompletionBlocked('home', 'shared', resetAt)).toBe(false);
+        await made.coordinator.run('owner', {}, prefetched([home], [market]));
+
+        expect(made.calls.filter((call) => call === 'complete:shared')).toHaveLength(1);
+    });
+
+    it('T29 a failed barrier never reaches the task execution path', async () => {
+        const home = job('home', 'home-market');
+        const market = { marketKey: 'home', label: 'HOME', ok: true as const, skipped: 0, resetAt };
+        const area = new MemoryStorageArea();
+        await corruptJobStateShard(area, 2);
+        const made = makeHarness({ jobs: [home], markets: [market], complete: successCompletion, jobStateArea: area });
+
+        await expect(made.coordinator.run('owner', {}, prefetched([home], [market]))).rejects.toThrow();
+
+        expect(made.calls.filter((call) => call.startsWith('take:') || call.startsWith('complete:'))).toEqual([]);
+        expect(made.queueRun).not.toHaveBeenCalled();
     });
 });

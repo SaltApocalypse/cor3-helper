@@ -7,6 +7,7 @@ import { GameSection } from '../components/GameSection.js';
 import { InfoPanel } from '../components/InfoPanel.js';
 import { MARKET_SYMBOL } from '../market-icons.js';
 import type { JobMarketView } from '../components/JobMarketList.js';
+import { jobIdentityKey } from '../../contracts/jobs.js';
 import { useT } from '../i18n-context.js';
 
 export interface OverviewPageProps {
@@ -118,7 +119,7 @@ export function OverviewPage({
                     </div>
                     <div class="v2-market-summary-grid">
                         {markets.map((entry) => {
-                            const failed = entry.failed + entry.jobs.filter((job) => statusById[job.id] === 'failed').length;
+                            const failed = entry.failed + entry.jobs.filter((job) => statusById[jobIdentityKey(entry.market.key, job.id)] === 'failed').length;
                             return (
                                 <article key={entry.market.key} class="v2-market-summary-card">
                                     <div class="v2-market-summary-head">

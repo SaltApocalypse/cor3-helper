@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { selectJobs, type JobOffer } from './model.js';
+import { jobIdentityKey } from '../../contracts/jobs.js';
 
 function job(id: string, serverName: string, type: JobOffer['type'] = 'IP Injection'): JobOffer {
     return {
@@ -22,7 +23,7 @@ describe('Job selection', () => {
             job('3', 'D4RK RM7CE', 'Log Deletion'),
         ];
         const result = selectJobs(jobs, {
-            completedIds: new Set(['1']),
+            completedIds: new Set([jobIdentityKey('home', '1')]),
             supportedTypes: new Set(['IP Injection', 'Log Deletion']),
             serverPriority: () => 0,
         });

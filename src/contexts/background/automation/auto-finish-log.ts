@@ -3,6 +3,7 @@ import type { JobOutcome } from '../../../application/auto-job/outcome.js';
 import type { AutoJobQueueFailure } from '../../../application/auto-job/queue.js';
 import type { AutomationLogger, RunLogSink } from '../../../application/automation/ports.js';
 import type { JobLockRegistry } from './job-locks.js';
+import { jobIdentityKey } from '../../../contracts/jobs.js';
 import { failureOf, jobLocation, outcomeReasonText } from './job-outcome.js';
 
 export interface FinishLogDeps {
@@ -29,15 +30,15 @@ export function logAutoFinishJobs(deps: FinishLogDeps): void {
     }
     for (const entry of deps.retryEntries) {
         const failure = failureOf(entry);
-        const exhausted = deps.locks.isRetryExhausted(entry.job.id);
+        const exhausted = deps.locks.isRetryExhausted(entry.job.marketKey, entry.job.id);
         deps.runLogs.add(deps.runId, exhausted ? 'warn' : 'info', 'auto-jobs', `${jobLocation(failure.name, failure.serverName)}: ${exhausted ? 'retry paused (budget exhausted)' : 'retrying'} — ${failure.code}: ${failure.message}${failure.stage ? ` (${failure.stage})` : ''}`, {
             ...failure,
-            attempt: deps.locks.retryAttempt(entry.job.id)?.count ?? null,
+            attempt: deps.locks.retryAttempt(entry.job.marketKey, entry.job.id)?.count ?? null,
             exhausted,
         });
     }
     for (const entry of deps.effectiveFailed) {
-        const outcome = deps.outcomes.get(entry.job.id);
+        const outcome = deps.outcomes.get(jobIdentityKey(entry.job.marketKey, entry.job.id));
         if (outcome?.status === 'skipped') {
             deps.runLogs.add(deps.runId, 'info', 'auto-jobs', `Skipped ${jobLocation(entry.job.name, entry.job.serverName)}: ${outcomeReasonText(outcome)} (${outcome.reason})`, {
                 jobId: entry.job.id,
@@ -47,7 +48,7 @@ export function logAutoFinishJobs(deps: FinishLogDeps): void {
         }
     }
     for (const entry of deps.effectiveFailed) {
-        const outcome = deps.outcomes.get(entry.job.id);
+        const outcome = deps.outcomes.get(jobIdentityKey(entry.job.marketKey, entry.job.id));
         if (outcome?.status === 'expired') {
             deps.runLogs.add(deps.runId, 'info', 'auto-jobs', `Expired ${jobLocation(entry.job.name, entry.job.serverName)}: ${entry.error?.message ?? 'Job failed'}`, {
                 jobId: entry.job.id,

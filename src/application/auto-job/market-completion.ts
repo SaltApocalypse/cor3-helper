@@ -1,5 +1,8 @@
 import type { MarketCompletedJobsState } from '../../contracts/market-completed-jobs.js';
 import { normalizeMarketCompletionResetAt } from '../../contracts/market-completed-jobs.js';
+import type { StorageReadResult } from '../../contracts/storage-health.js';
+
+export type MarketCompletionStateReadResult = StorageReadResult<MarketCompletedJobsState>;
 
 export interface MarketCompletionWriteInput {
     readonly marketKey: string;
@@ -27,6 +30,11 @@ export interface MarketCompletionStorePort {
     recordCompletion(input: MarketCompletionWriteInput): Promise<MarketCompletionStoreOutcome>;
     getCompletion(marketKey: string, jobId: string): Promise<string | null>;
     getState(): Promise<MarketCompletedJobsState>;
+    /**
+     * One complete read for both `byMarket` and `unconfirmedByMarket`, so their
+     * health can never disagree. `missing` is a normal empty store.
+     */
+    getStateWithHealth?(): Promise<MarketCompletionStateReadResult>;
     clear(): Promise<void>;
     /** Remove only records in this market whose stored reset is older than currentResetAt. */
     pruneMarketBeforeReset(marketKey: string, currentResetAt: string): Promise<MarketCompletionPruneOutcome>;

@@ -473,3 +473,100 @@ describe('JobMarketSync completion reset pruning', () => {
         expect(prune).not.toHaveBeenCalled();
     });
 });
+
+describe('JobMarketSync reconciliation health propagation', () => {
+    function healthHarness(reconcile: (input: unknown) => Promise<unknown>, warn = vi.fn()) {
+        const resetAt = '2026-11-20T11:00:00.000Z';
+        const sync = new JobMarketSync({
+            snapshots: { get: async () => ok(snapshot()) },
+            marketSync: {
+                sync: async () => ok({
+                    snapshot: snapshot(),
+                    route: [],
+                    direct: true,
+                    market: { options: {}, lots: [], jobs: { jobs: [], recentJobs: [], nextJobsResetAt: resetAt } },
+                }),
+            } as unknown as MarketSyncService,
+            marketCache: new MarketCacheStore(new MemoryStorageArea()),
+            routing: { setEndpointIfNeeded: async () => ok(undefined) },
+            tabs: { findCor3Tab: async () => null, send: async () => null },
+            events: { publish: () => undefined },
+            logger: { debug: () => undefined, info: () => undefined, warn, error: () => undefined },
+            reconciler: { reconcile } as never,
+            now: () => 1,
+            humanDelay: async () => undefined,
+        });
+        return { sync, warn, resetAt };
+    }
+
+    function result(status: 'loaded' | 'partial' | 'unavailable', marketKey = JOB_MARKETS[0]!.key) {
+        return {
+            marketKey,
+            resetAt: '2026-11-20T11:00:00.000Z',
+            decisions: [],
+            updated: 0,
+            recoverable: [],
+            pending: 0,
+            conflicts: 0,
+            skippedActive: 0,
+            failedWrites: 0,
+            completionWrites: 0,
+            completionFailures: 0,
+            storeFailed: status !== 'loaded',
+            storeStatus: status,
+        };
+    }
+
+    it('T23 does not silently treat a partial reconciliation as complete success', async () => {
+        const warn = vi.fn();
+        const { sync } = healthHarness(async () => result('partial'), warn);
+
+        const synced = await sync.syncAll('owner', 'auto-jobs', [JOB_MARKETS[0]!]);
+
+        expect(synced.markets[0]?.ok).toBe(true);
+        expect(synced.markets[0]?.reconciliationStatus).toBe('partial');
+        expect(warn).toHaveBeenCalledWith('job-state', 'Market reconciliation was incomplete; local state was kept', expect.objectContaining({
+            market: JOB_MARKETS[0]!.key,
+            storeStatus: 'partial',
+        }));
+    });
+
+    it('T24 exposes storeFailed results and turns a reconciler exception into unavailable', async () => {
+        const { sync } = healthHarness(async () => result('unavailable'));
+
+        const synced = await sync.syncAll('owner', 'auto-jobs', [JOB_MARKETS[0]!]);
+        expect(synced.markets[0]?.reconciliationStatus).toBe('unavailable');
+
+        const throwing = healthHarness(async () => { throw new Error('reconciler crashed'); });
+        const failed = await throwing.sync.reconcileMarketSnapshot({
+            marketKey: JOB_MARKETS[0]!.key,
+            resetAt: '2026-11-20T11:00:00.000Z',
+            jobs: [],
+        });
+        expect(failed).toMatchObject({ storeFailed: true, storeStatus: 'unavailable' });
+    });
+
+    it('T25 recovers on the next complete reconciliation after a partial one', async () => {
+        const reconcile = vi.fn()
+            .mockResolvedValueOnce(result('partial'))
+            .mockResolvedValueOnce(result('loaded'));
+        const { sync } = healthHarness(reconcile);
+
+        const first = await sync.syncAll('owner', 'auto-jobs', [JOB_MARKETS[0]!]);
+        const second = await sync.syncAll('owner', 'auto-jobs', [JOB_MARKETS[0]!]);
+
+        expect(first.markets[0]?.reconciliationStatus).toBe('partial');
+        expect(second.markets[0]?.reconciliationStatus).toBe('loaded');
+    });
+
+    it('T26 keeps normal successful sync behavior when reconciliation is complete', async () => {
+        const warn = vi.fn();
+        const { sync } = healthHarness(async () => result('loaded'), warn);
+
+        const synced = await sync.syncAll('owner', 'auto-jobs', [JOB_MARKETS[0]!]);
+
+        expect(synced.markets[0]?.ok).toBe(true);
+        expect(synced.markets[0]?.reconciliationStatus).toBe('loaded');
+        expect(warn).not.toHaveBeenCalled();
+    });
+});

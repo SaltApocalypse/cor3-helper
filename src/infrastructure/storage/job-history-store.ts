@@ -11,6 +11,7 @@ const schema = z.object({
         name: z.string(),
         type: z.string(),
         serverName: z.string().nullable(),
+        marketKey: z.string().optional(),
         status: z.enum(['done', 'failed', 'retry']),
         at: z.number(),
         error: z.string().optional(),

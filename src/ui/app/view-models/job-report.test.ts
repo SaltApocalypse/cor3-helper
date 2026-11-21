@@ -1,18 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import type { JobOffer } from '../../../contracts/jobs.js';
-import type { AutoFinishMarketResult } from '../../../contracts/auto-finish.js';
+import type { AutoFinishFailure, AutoFinishMarketResult } from '../../../contracts/auto-finish.js';
 import {
     autoFinishMarketsToJobReport,
     autoJobsSnapshotToJobReport,
     buildJobMarketViews,
     buildJobStatusById,
+    buildUnknownJobIds,
+    buildUnknownJobIdsFromProjection,
     classifyJobQueueResult,
     countCompletionRecords,
     groupJobsByMarket,
+    isJobSelected,
     jobStatusKey,
     jobStatusTone,
     resetAtByMarket,
+    resolveUnknownJobs,
     selectShownJobReport,
+    showClaimableBadge,
+    sortUnknownJobs,
+    toggleJobSelection,
 } from './job-report.js';
 
 function offer(overrides: Partial<JobOffer> & Pick<JobOffer, 'id' | 'marketKey'>): JobOffer {
@@ -36,6 +43,7 @@ describe('jobStatusTone', () => {
         expect(jobStatusTone('failed')).toBe('v2-text-error');
         expect(jobStatusTone('complete')).toBe('v2-text-ok');
         expect(jobStatusTone('running')).toBe('v2-text-warn');
+        expect(jobStatusTone('unknown')).toBe('v2-text-warn');
         expect(jobStatusTone('synced')).toBe('v2-text-ok');
     });
 
@@ -148,21 +156,21 @@ describe('classifyJobQueueResult', () => {
     it('classifies every job and aggregates per market', () => {
         const outcome = classifyJobQueueResult(selected, {
             stopped: false,
-            done: ['done', 'expired'],
+            done: [jobStatusKey('home', 'done'), jobStatusKey('home', 'expired')],
             failed: [
-                { jobId: 'expired', name: 'expired', serverName: null, code: 'JOB_FAILED', message: 'job expired' },
-                { jobId: 'failed', name: 'failed', serverName: null, code: 'JOB_FAILED', message: 'boom' },
-                { jobId: 'preflight', name: 'preflight', serverName: null, code: 'PREFLIGHT_FAILED', message: 'no software' },
-                { jobId: 'cancelled', name: 'cancelled', serverName: null, code: 'JOB_CANCELLED', message: 'cancelled' },
+                { jobId: 'expired', name: 'expired', serverName: null, marketKey: 'home', code: 'JOB_FAILED', message: 'job expired' },
+                { jobId: 'failed', name: 'failed', serverName: null, marketKey: 'home', code: 'JOB_FAILED', message: 'boom' },
+                { jobId: 'preflight', name: 'preflight', serverName: null, marketKey: 'dark', code: 'PREFLIGHT_FAILED', message: 'no software' },
+                { jobId: 'cancelled', name: 'cancelled', serverName: null, marketKey: 'dark', code: 'JOB_CANCELLED', message: 'cancelled' },
             ],
         });
         expect(outcome.statuses).toEqual({
-            done: 'done',
-            expired: 'done',
-            failed: 'failed',
-            preflight: 'skipped',
-            cancelled: 'skipped',
-            pending: 'pending',
+            [jobStatusKey('home', 'done')]: 'done',
+            [jobStatusKey('home', 'expired')]: 'done',
+            [jobStatusKey('home', 'failed')]: 'failed',
+            [jobStatusKey('dark', 'preflight')]: 'skipped',
+            [jobStatusKey('dark', 'cancelled')]: 'skipped',
+            [jobStatusKey('dark', 'pending')]: 'pending',
         });
         expect(outcome.report).toEqual([
             { marketKey: 'home', label: 'CORE', ok: true, total: 3, success: 2, retry: 0, failed: 1, expired: 0, pending: 0 },
@@ -176,7 +184,27 @@ describe('classifyJobQueueResult', () => {
             done: [],
             failed: [],
         });
-        expect(outcome.statuses.pending).toBe('skipped');
+        expect(outcome.statuses[jobStatusKey('home', 'pending')]).toBe('skipped');
+    });
+
+    it('associates queue failures with the correct market for a shared job id', () => {
+        const outcome = classifyJobQueueResult(
+            [offer({ id: 'shared', marketKey: 'home' }), offer({ id: 'shared', marketKey: 'dark' })],
+            {
+                stopped: false,
+                done: [jobStatusKey('home', 'shared')],
+                failed: [{
+                    jobId: 'shared',
+                    name: 'shared',
+                    serverName: null,
+                    marketKey: 'dark',
+                    code: 'JOB_FAILED',
+                    message: 'dark failure',
+                }],
+            },
+        );
+        expect(outcome.statuses[jobStatusKey('home', 'shared')]).toBe('done');
+        expect(outcome.statuses[jobStatusKey('dark', 'shared')]).toBe('failed');
     });
 });
 
@@ -191,8 +219,8 @@ describe('buildJobStatusById', () => {
                 { jobId: 'a', name: 'A', serverName: null, marketKey: 'home', status: 'failed' },
                 { jobId: 'b', name: 'B', serverName: null, marketKey: 'home', status: 'failed', code: 'EXPIRED' },
             ],
-        }], { a: 'done' });
-        expect(result).toEqual({ a: 'done', [jobStatusKey('home', 'a')]: 'done', [jobStatusKey('home', 'b')]: 'expired' });
+        }], { [jobStatusKey('home', 'a')]: 'done' });
+        expect(result).toEqual({ [jobStatusKey('home', 'a')]: 'done', [jobStatusKey('home', 'b')]: 'expired' });
     });
 
     it('keeps a persisted Done status when a later report says skipped', () => {
@@ -256,6 +284,28 @@ describe('groupJobsByMarket', () => {
         expect(grouped.home?.map((job) => job.id)).toEqual(['a', 'c']);
         expect(grouped.dark?.map((job) => job.id)).toEqual(['b']);
     });
+
+    it('keeps the same job id as two independent UI records across markets', () => {
+        const grouped = groupJobsByMarket([
+            offer({ id: 'shared', marketKey: 'home' }),
+            offer({ id: 'shared', marketKey: 'dark' }),
+        ]);
+        expect(grouped.home?.map((job) => job.id)).toEqual(['shared']);
+        expect(grouped.dark?.map((job) => job.id)).toEqual(['shared']);
+        expect(jobStatusKey('home', 'shared')).not.toBe(jobStatusKey('dark', 'shared'));
+    });
+
+    it('selects the same job id independently per market', () => {
+        const selected = toggleJobSelection(new Set<string>(), 'home', 'shared');
+        expect(isJobSelected(selected, 'home', 'shared')).toBe(true);
+        expect(isJobSelected(selected, 'dark', 'shared')).toBe(false);
+        const next = toggleJobSelection(selected, 'dark', 'shared');
+        expect(isJobSelected(next, 'home', 'shared')).toBe(true);
+        expect(isJobSelected(next, 'dark', 'shared')).toBe(true);
+        const cleared = toggleJobSelection(next, 'home', 'shared');
+        expect(isJobSelected(cleared, 'home', 'shared')).toBe(false);
+        expect(isJobSelected(cleared, 'dark', 'shared')).toBe(true);
+    });
 });
 
 describe('resetAtByMarket', () => {
@@ -280,5 +330,421 @@ describe('buildJobMarketViews', () => {
         expect(home).toMatchObject({ skipped: 1, failed: 2, expired: 3, resetAt: null, ok: true });
         expect(home?.jobs.map((job) => job.id)).toEqual(['a']);
         expect(dark?.resetAt).toBe('2026-02-02T00:00:00.000Z');
+    });
+});
+
+
+describe('D0-1B unknown and ready dimensions', () => {
+    const reset = '2026-11-20T11:00:00.000Z';
+    const nextReset = '2026-11-20T12:00:00.000Z';
+
+    const failure = (marketKey: string | undefined, jobId = 'a', unconfirmed = true): AutoFinishFailure => ({
+        jobId,
+        name: jobId,
+        serverName: null,
+        ...(marketKey ? { marketKey } : {}),
+        code: 'COMPLETE_FAILED',
+        message: 'Completion result unconfirmed',
+        ...(unconfirmed ? { unconfirmed: true } : {}),
+    });
+
+    const market = (marketKey: string, resetAt: string | null, jobs: AutoFinishMarketResult['jobs']): AutoFinishMarketResult => ({
+        marketKey,
+        label: marketKey.toUpperCase(),
+        ok: true,
+        skipped: 0,
+        resetAt,
+        jobs,
+    });
+
+    const failedJob = (marketKey: string, id = 'a'): NonNullable<AutoFinishMarketResult['jobs']>[number] => ({
+        jobId: id,
+        name: id,
+        serverName: null,
+        marketKey,
+        status: 'failed',
+        code: 'COMPLETE_FAILED',
+        error: 'Completion result unconfirmed',
+    });
+
+    it('T01 keeps an ordinary failure as Failed', () => {
+        const status = buildJobStatusById(true, [market('home', reset, [failedJob('home')])], {}, {});
+        expect(status[jobStatusKey('home', 'a')]).toBe('failed');
+    });
+
+    it('T02 maps an unconfirmed failure to Unknown', () => {
+        const unknown = buildUnknownJobIds([market('home', reset, [failedJob('home')])], [failure('home')], { home: reset });
+        const status = buildJobStatusById(true, [market('home', reset, [failedJob('home')])], {}, {
+            unknownByIdentity: unknown,
+        });
+        expect(status[jobStatusKey('home', 'a')]).toBe('unknown');
+    });
+
+    it('T04 keeps Unknown and Ready as independent dimensions', () => {
+        const claimable = offer({ id: 'a', marketKey: 'home', alreadyTaken: true, canComplete: true });
+        const status = buildJobStatusById(true, [market('home', reset, [failedJob('home')])], {}, {
+            unknownByIdentity: new Set([jobStatusKey('home', 'a')]),
+            jobsByMarket: { home: [claimable] },
+        });
+        expect(status[jobStatusKey('home', 'a')]).toBe('unknown');
+        expect(showClaimableBadge(claimable, status[jobStatusKey('home', 'a')])).toBe(true);
+    });
+
+    it('T05 does not make Unknown Done without a sidecar', () => {
+        const status = buildJobStatusById(true, [market('home', reset, [failedJob('home')])], {}, {
+            completedJobsByMarket: { byMarket: {} },
+            unknownByIdentity: new Set([jobStatusKey('home', 'a')]),
+        });
+        expect(status[jobStatusKey('home', 'a')]).toBe('unknown');
+        expect(status[jobStatusKey('home', 'a')]).not.toBe('done');
+    });
+
+    it('T06 keeps Done when the sidecar has the current reset', () => {
+        const status = buildJobStatusById(true, [market('home', reset, [failedJob('home')])], {}, {
+            completedJobsByMarket: { byMarket: { home: { a: reset } } },
+            resetByMarket: { home: reset },
+            unknownByIdentity: new Set([jobStatusKey('home', 'a')]),
+            jobsByMarket: { home: [offer({ id: 'a', marketKey: 'home' })] },
+        });
+        expect(status[jobStatusKey('home', 'a')]).toBe('done');
+    });
+
+    it('T07 keeps same job id statuses independent across markets', () => {
+        const home = market('home', reset, [failedJob('home', 'shared')]);
+        const dark = market('dark', reset, [failedJob('dark', 'shared')]);
+        const unknown = buildUnknownJobIds([home, dark], [failure('home', 'shared')], { home: reset, dark: reset });
+        const status = buildJobStatusById(true, [home, dark], {}, {
+            unknownByIdentity: unknown,
+            jobsByMarket: {
+                home: [offer({ id: 'shared', marketKey: 'home', alreadyTaken: true, canComplete: true })],
+                dark: [offer({ id: 'shared', marketKey: 'dark', alreadyTaken: true, canComplete: true })],
+            },
+        });
+        expect(status[jobStatusKey('home', 'shared')]).toBe('unknown');
+        expect(status[jobStatusKey('dark', 'shared')]).toBe('failed');
+        expect(showClaimableBadge(offer({ id: 'shared', marketKey: 'dark', alreadyTaken: true, canComplete: true }), 'failed')).toBe(true);
+    });
+
+    it('T08 keeps Market A Unknown and Market B Ready without crossing', () => {
+        const status = buildJobStatusById(true, [market('home', reset, [failedJob('home', 'shared')])], {}, {
+            unknownByIdentity: new Set([jobStatusKey('home', 'shared')]),
+            jobsByMarket: {
+                home: [offer({ id: 'shared', marketKey: 'home', alreadyTaken: true, canComplete: true })],
+                dark: [offer({ id: 'shared', marketKey: 'dark', alreadyTaken: true, canComplete: true })],
+            },
+        });
+        expect(status[jobStatusKey('home', 'shared')]).toBe('unknown');
+        expect(status[jobStatusKey('dark', 'shared')]).toBe('ready');
+    });
+
+    it('T09 ignores a legacy failure without marketKey', () => {
+        const unknown = buildUnknownJobIds([market('home', reset, [failedJob('home')])], [failure(undefined)], { home: reset });
+        expect(unknown.size).toBe(0);
+    });
+
+    it('T10 ignores a failure from another reset', () => {
+        const unknown = buildUnknownJobIds([market('home', reset, [failedJob('home')])], [failure('home')], { home: nextReset });
+        expect(unknown.size).toBe(0);
+    });
+
+    it('T11 lets final Unknown win over live pending', () => {
+        const status = buildJobStatusById(true, [market('home', reset, [failedJob('home')])], {}, {
+            unknownByIdentity: new Set([jobStatusKey('home', 'a')]),
+            jobsByMarket: { home: [offer({ id: 'a', marketKey: 'home' })] },
+        });
+        expect(status[jobStatusKey('home', 'a')]).toBe('unknown');
+    });
+
+    it('T12 keeps a claimable badge for a cached claim-only row', () => {
+        const claimable = offer({ id: 'a', marketKey: 'home', alreadyTaken: true, canComplete: true });
+        const status = buildJobStatusById(true, [market('home', reset, [{
+            jobId: 'a', name: 'a', serverName: null, marketKey: 'home', status: 'pending',
+        }])], {}, { jobsByMarket: { home: [claimable] } });
+        expect(status[jobStatusKey('home', 'a')]).toBe('pending');
+        expect(showClaimableBadge(claimable, status[jobStatusKey('home', 'a')])).toBe(true);
+    });
+
+    const unknownJob = (marketKey: string, jobId: string, resetAt: string | null) => ({ marketKey, jobId, resetAt });
+
+    it('T01 loaded uses durable unknownJobs', () => {
+        const resolved = resolveUnknownJobs({
+            unknownJobs: [unknownJob('home', 'a', reset)],
+            unknownStateStatus: 'loaded',
+            autoRunMarkets: [market('home', reset, [failedJob('home')])],
+            failures: [],
+            resetByMarket: { home: reset },
+        });
+        expect(resolved.status).toBe('loaded');
+        expect(resolved.unknownByIdentity.has(jobStatusKey('home', 'a'))).toBe(true);
+    });
+
+    it('T02 loaded empty ignores old last.failures', () => {
+        const resolved = resolveUnknownJobs({
+            unknownJobs: [],
+            unknownStateStatus: 'loaded',
+            autoRunMarkets: [market('home', reset, [failedJob('home')])],
+            failures: [failure('home')],
+            resetByMarket: { home: reset },
+        });
+        expect(resolved.unknownByIdentity.size).toBe(0);
+    });
+
+    it('T03 partial uses durable unknownJobs', () => {
+        const resolved = resolveUnknownJobs({
+            unknownJobs: [unknownJob('home', 'a', reset)],
+            unknownStateStatus: 'partial',
+            autoRunMarkets: [],
+            failures: [],
+            resetByMarket: { home: reset },
+        });
+        expect(resolved.status).toBe('partial');
+        expect(resolved.unknownByIdentity.has(jobStatusKey('home', 'a'))).toBe(true);
+    });
+
+    it('T04 partial fallback requires matching market and reset', () => {
+        const resolved = resolveUnknownJobs({
+            unknownJobs: [],
+            unknownStateStatus: 'partial',
+            autoRunMarkets: [market('home', reset, [failedJob('home')])],
+            failures: [failure('home'), failure('dark')],
+            resetByMarket: { home: reset, dark: nextReset },
+        });
+        expect(resolved.unknownByIdentity.has(jobStatusKey('home', 'a'))).toBe(true);
+        expect(resolved.unknownByIdentity.has(jobStatusKey('dark', 'a'))).toBe(false);
+    });
+
+    it('T05 unavailable uses strictly checked fallback', () => {
+        const resolved = resolveUnknownJobs({
+            unknownJobs: [unknownJob('home', 'a', reset)],
+            unknownStateStatus: 'unavailable',
+            autoRunMarkets: [market('home', reset, [failedJob('home')])],
+            failures: [failure('home')],
+            resetByMarket: { home: reset },
+        });
+        expect(resolved.status).toBe('unavailable');
+        expect(resolved.unknownByIdentity.has(jobStatusKey('home', 'a'))).toBe(true);
+    });
+
+    it('T06 unavailable without usable failure is not treated as confirmed empty', () => {
+        const resolved = resolveUnknownJobs({
+            unknownJobs: [],
+            unknownStateStatus: 'unavailable',
+            autoRunMarkets: [],
+            failures: [failure(undefined)],
+            resetByMarket: {},
+        });
+        expect(resolved.status).toBe('unavailable');
+        expect(resolved.unknownByIdentity.size).toBe(0);
+    });
+
+    it('T07 ignores a failure without marketKey', () => {
+        const resolved = resolveUnknownJobs({
+            unknownJobs: [],
+            unknownStateStatus: 'partial',
+            autoRunMarkets: [market('home', reset, [failedJob('home')])],
+            failures: [failure(undefined)],
+            resetByMarket: { home: reset },
+        });
+        expect(resolved.unknownByIdentity.size).toBe(0);
+    });
+
+    it('T08 does not associate Unknown Reset A with current Reset B', () => {
+        const resolved = resolveUnknownJobs({
+            unknownJobs: [unknownJob('home', 'a', reset)],
+            unknownStateStatus: 'loaded',
+            autoRunMarkets: [market('home', nextReset, [failedJob('home')])],
+            failures: [],
+            resetByMarket: { home: nextReset },
+        });
+        expect(resolved.unknownByIdentity.size).toBe(0);
+    });
+
+    it('T09 does not associate null Unknown with a known current Reset', () => {
+        const resolved = resolveUnknownJobs({
+            unknownJobs: [unknownJob('home', 'a', null)],
+            unknownStateStatus: 'loaded',
+            autoRunMarkets: [market('home', reset, [failedJob('home')])],
+            failures: [],
+            resetByMarket: { home: reset },
+        });
+        expect(resolved.unknownByIdentity.size).toBe(0);
+    });
+
+    it('T10 does not associate known Unknown with a null current Reset', () => {
+        const resolved = resolveUnknownJobs({
+            unknownJobs: [unknownJob('home', 'a', reset)],
+            unknownStateStatus: 'loaded',
+            autoRunMarkets: [market('home', null, [failedJob('home')])],
+            failures: [],
+            resetByMarket: { home: null },
+        });
+        expect(resolved.unknownByIdentity.size).toBe(0);
+    });
+
+    it('T11 associates null Unknown with null current Reset but not Done', () => {
+        const resolved = resolveUnknownJobs({
+            unknownJobs: [unknownJob('home', 'a', null)],
+            unknownStateStatus: 'loaded',
+            autoRunMarkets: [market('home', null, [failedJob('home')])],
+            failures: [],
+            resetByMarket: { home: null },
+        });
+        expect(resolved.unknownByIdentity.has(jobStatusKey('home', 'a'))).toBe(true);
+    });
+
+    it('T12 makes Sidecar Done override Unknown', () => {
+        const status = buildJobStatusById(true, [market('home', reset, [failedJob('home')])], {}, {
+            unknownByIdentity: new Set([jobStatusKey('home', 'a')]),
+            completedJobsByMarket: { byMarket: { home: { a: reset } } },
+            resetByMarket: { home: reset },
+            jobsByMarket: { home: [offer({ id: 'a', marketKey: 'home' })] },
+        });
+        expect(status[jobStatusKey('home', 'a')]).toBe('done');
+    });
+
+    it('T13 shows Unknown and Ready together', () => {
+        const claimable = offer({ id: 'a', marketKey: 'home', alreadyTaken: true, canComplete: true });
+        const status = buildJobStatusById(true, [market('home', reset, [failedJob('home')])], {}, {
+            unknownByIdentity: new Set([jobStatusKey('home', 'a')]),
+            jobsByMarket: { home: [claimable] },
+        });
+        expect(status[jobStatusKey('home', 'a')]).toBe('unknown');
+        expect(showClaimableBadge(claimable, 'unknown')).toBe(true);
+    });
+
+    it('T14 keeps same job id independent across markets', () => {
+        const resolved = resolveUnknownJobs({
+            unknownJobs: [unknownJob('home', 'shared', reset)],
+            unknownStateStatus: 'loaded',
+            autoRunMarkets: [market('home', reset, [failedJob('home', 'shared')])],
+            failures: [],
+            resetByMarket: { home: reset, dark: reset },
+        });
+        expect(resolved.unknownByIdentity.has(jobStatusKey('home', 'shared'))).toBe(true);
+        expect(resolved.unknownByIdentity.has(jobStatusKey('dark', 'shared'))).toBe(false);
+    });
+
+    it('T15 keeps durable Unknown when old last.failures is overwritten/empty', () => {
+        const resolved = resolveUnknownJobs({
+            unknownJobs: [unknownJob('home', 'a', reset)],
+            unknownStateStatus: 'loaded',
+            autoRunMarkets: [market('home', reset, [failedJob('home')])],
+            failures: [],
+            resetByMarket: { home: reset },
+        });
+        expect(resolved.unknownByIdentity.has(jobStatusKey('home', 'a'))).toBe(true);
+    });
+
+    it('T16 sorts unknownJobs deterministically', () => {
+        const first = unknownJob('home', 'b', reset);
+        const second = unknownJob('home', 'a', nextReset);
+        expect(sortUnknownJobs([first, second])).toEqual([second, first]);
+        expect(sortUnknownJobs([second, first])).toEqual([second, first]);
+    });
+
+    it('T17 does not associate a different Reset identity', () => {
+        const resolved = resolveUnknownJobs({
+            unknownJobs: [unknownJob('home', 'shared', reset), unknownJob('home', 'shared', nextReset)],
+            unknownStateStatus: 'loaded',
+            autoRunMarkets: [market('home', reset, [failedJob('home', 'shared')])],
+            failures: [],
+            resetByMarket: { home: reset },
+        });
+        expect(resolved.unknownByIdentity.has(jobStatusKey('home', 'shared'))).toBe(true);
+        expect(buildUnknownJobIdsFromProjection([unknownJob('home', 'shared', nextReset)], { home: reset }).size).toBe(0);
+    });
+});
+
+describe('Manual Queue Unknown integration', () => {
+    const reset = '2026-11-20T11:00:00.000Z';
+    const selected = [offer({ id: 'shared', marketKey: 'home', alreadyTaken: true, canComplete: true })];
+
+    const failure = (unconfirmed: boolean, marketKey = 'home') => ({
+        jobId: 'shared',
+        name: 'shared',
+        serverName: null,
+        marketKey,
+        code: 'COMPLETE_FAILED',
+        message: unconfirmed ? 'Completion result unconfirmed' : 'explicit failure',
+        unconfirmed,
+    });
+
+    it('T04 keeps an explicit manual queue failure as Failed', () => {
+        const outcome = classifyJobQueueResult(selected, {
+            stopped: false,
+            done: [],
+            failed: [failure(false)],
+        });
+        expect(outcome.statuses[jobStatusKey('home', 'shared')]).toBe('failed');
+        expect(outcome.report[0]?.failed).toBe(1);
+    });
+
+    it('T05 maps an unconfirmed manual queue failure to Unknown', () => {
+        const outcome = classifyJobQueueResult(selected, {
+            stopped: false,
+            done: [],
+            failed: [failure(true)],
+        });
+        expect(outcome.statuses[jobStatusKey('home', 'shared')]).toBe('unknown');
+        expect(outcome.report[0]?.unknown).toBe(1);
+    });
+
+    it('T06 does not associate a manual failure with an empty marketKey', () => {
+        const outcome = classifyJobQueueResult(selected, {
+            stopped: false,
+            done: [],
+            failed: [failure(true, '')],
+        });
+        expect(outcome.statuses[jobStatusKey('home', 'shared')]).toBe('pending');
+    });
+
+    it('T07 keeps manual queue failures independent across markets', () => {
+        const jobs = [
+            offer({ id: 'shared', marketKey: 'home' }),
+            offer({ id: 'shared', marketKey: 'dark' }),
+        ];
+        const outcome = classifyJobQueueResult(jobs, {
+            stopped: false,
+            done: [],
+            failed: [failure(true, 'home')],
+        });
+        expect(outcome.statuses[jobStatusKey('home', 'shared')]).toBe('unknown');
+        expect(outcome.statuses[jobStatusKey('dark', 'shared')]).toBe('pending');
+    });
+
+    it('T14 keeps durable Unknown after manual in-memory status is cleared', () => {
+        const status = buildJobStatusById(true, [], {}, {
+            unknownByIdentity: new Set([jobStatusKey('home', 'shared')]),
+            jobsByMarket: { home: selected },
+        });
+        expect(status[jobStatusKey('home', 'shared')]).toBe('unknown');
+    });
+
+    it('T15 does not let an ordinary manual failure overwrite durable Unknown', () => {
+        const status = buildJobStatusById(true, [], { [jobStatusKey('home', 'shared')]: 'failed' }, {
+            unknownByIdentity: new Set([jobStatusKey('home', 'shared')]),
+            jobsByMarket: { home: selected },
+        });
+        expect(status[jobStatusKey('home', 'shared')]).toBe('unknown');
+    });
+
+    it('T17 keeps AutoFinish and Manual Queue Unknown judgment aligned', () => {
+        const resolved = resolveUnknownJobs({
+            unknownJobs: [{ marketKey: 'home', jobId: 'shared', resetAt: reset }],
+            unknownStateStatus: 'loaded',
+            autoRunMarkets: [{
+                marketKey: 'home', label: 'HOME', ok: true, skipped: 0, resetAt: reset,
+                jobs: [{ jobId: 'shared', name: 'shared', serverName: null, marketKey: 'home', status: 'failed', code: 'COMPLETE_FAILED' }],
+            }],
+            failures: [],
+            resetByMarket: { home: reset },
+        });
+        const manual = classifyJobQueueResult(selected, {
+            stopped: false,
+            done: [],
+            failed: [failure(true)],
+        });
+        expect(resolved.unknownByIdentity.has(jobStatusKey('home', 'shared'))).toBe(true);
+        expect(manual.statuses[jobStatusKey('home', 'shared')]).toBe('unknown');
     });
 });

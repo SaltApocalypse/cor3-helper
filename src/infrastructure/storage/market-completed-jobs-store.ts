@@ -1,5 +1,6 @@
 import type {
     MarketCompletionPruneOutcome,
+    MarketCompletionStateReadResult,
     MarketCompletionStoreOutcome,
     MarketCompletionStorePort,
     MarketCompletionWriteInput,
@@ -35,8 +36,13 @@ function withoutUnconfirmed(
     resetAt: string,
 ): MarketCompletedJobsState {
     const markets = state.unconfirmedByMarket;
-    if (!markets?.[marketKey] || markets[marketKey]?.[jobId] !== resetAt) return state;
-    const jobs = { ...markets[marketKey] };
+    const stored = markets?.[marketKey]?.[jobId];
+    // A known-reset fallback is released only by a completion for that exact
+    // reset. An identity-less legacy fallback is released only when an explicit
+    // completion for the same market/job is confirmed; reset changes alone,
+    // pruning, and read failures must never release it.
+    if (stored === undefined || (stored !== resetAt && stored !== JOB_STATE_UNKNOWN_RESET)) return state;
+    const jobs = { ...markets?.[marketKey] };
     delete jobs[jobId];
     const nextMarkets = { ...markets };
     if (Object.keys(jobs).length === 0) delete nextMarkets[marketKey];
@@ -76,6 +82,18 @@ export class MarketCompletedJobsStore implements MarketCompletionStorePort {
         return (await this.repository.get()) ?? EMPTY_MARKET_COMPLETED_JOBS;
     }
 
+    /**
+     * Write paths must never treat corrupt/unavailable data as an empty store.
+     * A failed read would otherwise overwrite the fallback barriers it cannot
+     * see. Missing is the only normal empty case.
+     */
+    private async readForWrite(): Promise<MarketCompletedJobsState> {
+        const result = await this.repository.read();
+        if (result.status === 'ok') return result.value;
+        if (result.status === 'missing') return EMPTY_MARKET_COMPLETED_JOBS;
+        throw new Error(result.error ?? `Completion store is ${result.status}`);
+    }
+
     async get(): Promise<MarketCompletedJobsState> {
         await this.writeQueue.catch(() => undefined);
         return this.read();
@@ -83,6 +101,11 @@ export class MarketCompletedJobsStore implements MarketCompletionStorePort {
 
     async getState(): Promise<MarketCompletedJobsState> {
         return this.get();
+    }
+
+    async getStateWithHealth(): Promise<MarketCompletionStateReadResult> {
+        await this.writeQueue.catch(() => undefined);
+        return this.repository.read();
     }
 
     async clear(): Promise<void> {
@@ -104,7 +127,7 @@ export class MarketCompletedJobsStore implements MarketCompletionStorePort {
             return { status: 'skipped', reason: 'invalid-reset', state: await this.get() };
         }
         return this.enqueue(async () => {
-            const state = await this.read();
+            const state = await this.readForWrite();
             const jobs = state.byMarket[market];
             if (!jobs) return { status: 'pruned', removed: 0, state };
             const next: Record<string, string> = {};
@@ -143,7 +166,7 @@ export class MarketCompletedJobsStore implements MarketCompletionStorePort {
                 : requireReset(input.expectedExistingResetAt, 'expectedExistingResetAt');
 
         return this.enqueue(async () => {
-            const current = await this.read();
+            const current = await this.readForWrite();
             const market = current.byMarket[marketKey] ?? {};
             const existingResetAt = market[jobId];
 
@@ -196,7 +219,7 @@ export class MarketCompletedJobsStore implements MarketCompletionStorePort {
         const jobId = requireValue(input.jobId, 'jobId');
         const value = input.resetAt === null ? JOB_STATE_UNKNOWN_RESET : requireReset(input.resetAt, 'resetAt');
         await this.enqueue(async () => {
-            const current = await this.read();
+            const current = await this.readForWrite();
             const markets = current.unconfirmedByMarket ?? {};
             await this.repository.set({
                 ...current,

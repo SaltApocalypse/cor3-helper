@@ -164,3 +164,22 @@ describe('Complete barrier when JobStateSession creation fails', () => {
         expect(await completions.getUnconfirmedState()).toEqual({ home: { 'job-1': 'unknown' } });
     });
 });
+
+describe('Completion fallback lifecycle execution gate', () => {
+    it('F13 blocks an unresolved identity-less fallback and allows execution after confirmed completion', async () => {
+        const completions = new MarketCompletedJobsStore(new MemoryStorageArea(), { now: () => 1 });
+        await completions.markUnconfirmed({ marketKey: 'home', jobId: 'job-1', resetAt: null });
+
+        const blocked = actions(() => ({ ok: true, value: { credits: 1, reputation: 1, renown: 0 } }));
+        const first = await service(blocked.port, completions, () => resetAt).executeDetailed(job());
+        expect(first.ok).toBe(false);
+        expect(blocked.calls).toEqual([]);
+
+        await completions.recordCompletion({ marketKey: 'home', jobId: 'job-1', resetAt });
+
+        const allowed = actions(() => ({ ok: true, value: { credits: 1, reputation: 1, renown: 0 } }));
+        const second = await service(allowed.port, completions, () => resetAt).executeDetailed(job());
+        expect(second.ok).toBe(true);
+        expect(allowed.calls).toEqual(['complete']);
+    });
+});

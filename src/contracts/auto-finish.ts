@@ -21,6 +21,8 @@ export const autoFinishFailureSchema = z.object({
     jobId: z.string(),
     name: z.string(),
     serverName: z.string().nullable(),
+    /** Market-scoped identity for cross-market failures; optional for old data. */
+    marketKey: z.string().optional(),
     code: z.string(),
     message: z.string(),
     retryable: z.boolean().optional(),
@@ -28,6 +30,16 @@ export const autoFinishFailureSchema = z.object({
     lockExpiresAt: z.number().optional(),
     stage: z.string().optional(),
     unconfirmed: z.boolean().optional(),
+}).strict();
+
+/**
+ * Durable Complete-Unknown projection. `resetAt` is the exact execution reset,
+ * or null when the reset was not known. Never infer a market/reset from jobId.
+ */
+export const autoFinishUnknownJobSchema = z.object({
+    marketKey: z.string().min(1),
+    jobId: z.string().min(1),
+    resetAt: z.string().min(1).nullable(),
 }).strict();
 
 export const autoFinishMarketSchema = z.object({
@@ -89,6 +101,7 @@ export const autoFinishRunResultSchema = z.object({
 
 export type AutoFinishJobResult = z.infer<typeof autoFinishJobSchema>;
 export type AutoFinishFailure = z.infer<typeof autoFinishFailureSchema>;
+export type AutoFinishUnknownJob = z.infer<typeof autoFinishUnknownJobSchema>;
 export type AutoFinishMarketResult = z.infer<typeof autoFinishMarketSchema>;
 export type AutoFinishLastRun = z.infer<typeof autoFinishLastRunSchema>;
 export type AutoFinishState = z.infer<typeof autoFinishStateSchema>;

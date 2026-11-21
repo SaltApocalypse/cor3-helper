@@ -2,6 +2,8 @@ import type { AutoJobsSkippedJob } from '../../contracts/auto-jobs.js';
 import type { JobMarketDefinition } from '../../domains/jobs/markets.js';
 import type { JobOffer } from '../../domains/jobs/model.js';
 import { useT } from '../i18n-context.js';
+import { jobIdentityKey } from '../../contracts/jobs.js';
+import { showClaimableBadge } from '../app/view-models/job-report.js';
 
 export interface JobMarketView {
     readonly market: JobMarketDefinition;
@@ -25,7 +27,7 @@ export interface JobMarketListProps {
     readonly statusById?: Readonly<Record<string, string | undefined>>;
     readonly statusReasonById?: Readonly<Record<string, string | undefined>>;
     readonly selectedIds?: ReadonlySet<string>;
-    readonly onToggleJob?: (id: string) => void;
+    readonly onToggleJob?: (marketKey: string, jobId: string) => void;
     readonly onToggleMarket?: (jobs: readonly JobOffer[]) => void;
     readonly selectable?: boolean;
     readonly selectionDisabled?: boolean;
@@ -51,7 +53,7 @@ function formatRemaining(timestamp: string | null, now: number): string {
 }
 
 function statusKey(marketKey: string, jobId: string): string {
-    return `${marketKey}\u0000${jobId}`;
+    return jobIdentityKey(marketKey, jobId);
 }
 
 function statusRank(status: string | undefined): number {
@@ -59,17 +61,18 @@ function statusRank(status: string | undefined): number {
     if (status === 'pending') return 1;
     if (status === 'ready') return 2;
     if (status === 'retry') return 3;
-    if (status === 'failed') return 4;
-    if (status === 'expired') return 5;
-    if (status === 'done') return 6;
-    if (status === 'skipped') return 7;
+    if (status === 'unknown') return 4;
+    if (status === 'failed') return 5;
+    if (status === 'expired') return 6;
+    if (status === 'done') return 7;
+    if (status === 'skipped') return 8;
     return 1;
 }
 
 function statusClass(status: string | undefined): string {
     if (status === 'failed') return 'v2-tag-error';
     if (status === 'done') return 'v2-tag-ok';
-    if (status === 'ready' || status === 'running' || status === 'pending' || status === 'retry' || status === 'expired') return 'v2-tag-warn';
+    if (status === 'unknown' || status === 'ready' || status === 'running' || status === 'pending' || status === 'retry' || status === 'expired') return 'v2-tag-warn';
     return '';
 }
 
@@ -115,14 +118,14 @@ export function JobMarketList({
     if (!active) return <p class="v2-muted">{emptyText ?? tr('No jobs loaded for this market.')}</p>;
 
     const statusFor = (jobId: string): string | undefined =>
-        statusById?.[statusKey(active.market.key, jobId)] ?? statusById?.[jobId];
+        statusById?.[statusKey(active.market.key, jobId)];
     const statusReasonFor = (jobId: string): string | undefined =>
-        statusReasonById?.[statusKey(active.market.key, jobId)] ?? statusReasonById?.[jobId];
+        statusReasonById?.[statusKey(active.market.key, jobId)];
     const sortedJobs = [...active.jobs].sort((left, right) => {
         const rank = statusRank(statusFor(left.id)) - statusRank(statusFor(right.id));
         return rank !== 0 ? rank : left.name.localeCompare(right.name);
     });
-    const allSelected = sortedJobs.length > 0 && sortedJobs.every((job) => selectedIds?.has(job.id));
+    const allSelected = sortedJobs.length > 0 && sortedJobs.every((job) => selectedIds?.has(jobIdentityKey(active.market.key, job.id)));
     const failedCount = active.failed + sortedJobs.filter((job) => statusFor(job.id) === 'failed').length;
     const expiredCount = active.expired + sortedJobs.filter((job) => statusFor(job.id) === 'expired').length;
     const retryCount = sortedJobs.filter((job) => statusFor(job.id) === 'retry').length;
@@ -157,13 +160,13 @@ export function JobMarketList({
                 <ul class="v2-job-list">
                     {sortedJobs.map((job) => {
                         const status = statusFor(job.id);
-                        const selected = selectedIds?.has(job.id) ?? false;
+                        const selected = selectedIds?.has(jobIdentityKey(active.market.key, job.id)) ?? false;
                         const content = (
                             <span class="v2-job-main">
                                 <strong>{job.name} — {job.serverName ?? tr('N/A')}</strong>
                                 <span>
                                     💰 {job.rewardCredits} · ⭐ {job.rewardReputation}
-                                    {job.alreadyTaken ? ` · ${job.canComplete ? tr('ready to claim') : tr('taken')}` : ''}
+                                    {job.alreadyTaken && !job.canComplete ? ` · ${tr('taken')}` : ''}
                                 </span>
                             </span>
                         );
@@ -175,7 +178,7 @@ export function JobMarketList({
                                             type="checkbox"
                                             checked={selected}
                                             disabled={selectionDisabled}
-                                            onChange={() => onToggleJob(job.id)}
+                                            onChange={() => onToggleJob(active.market.key, job.id)}
                                         />
                                         {content}
                                     </label>
@@ -187,6 +190,9 @@ export function JobMarketList({
                                     >
                                         {tr(status)}
                                     </span>
+                                ) : null}
+                                {showClaimableBadge(job, status) ? (
+                                    <span class="v2-tag v2-tag-warn">{tr('ready to claim')}</span>
                                 ) : null}
                             </li>
                         );

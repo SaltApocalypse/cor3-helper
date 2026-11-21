@@ -4,7 +4,7 @@
 
 The project is on the `v2` branch and contains the 2.0 rewrite. v1 is no longer in the working tree; it remains available in git history as a behavior reference.
 
-Last verified: 2026-11-21 at build `2.0.6-salta.308`. Typecheck, lint, Vitest (111 files / 736 tests) and build pass. The remaining gaps are tracked in the feature inventory (H4, H10, M7, O-016).
+Last verified: 2026-11-21 at build `2.0.6-salta.309`. Typecheck, lint, Vitest (117 files / 908 tests) and build pass. The remaining gaps are tracked in the feature inventory (H4, H10, M7, O-016).
 
 Authoritative decisions:
 

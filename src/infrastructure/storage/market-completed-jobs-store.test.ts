@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MarketCompletedJobsStore } from './market-completed-jobs-store.js';
 import { AutoFinishStateStore } from './auto-finish-state-store.js';
-import { MemoryStorageArea } from './storage-area.js';
+import { MemoryStorageArea, type StorageArea, type StorageKey } from './storage-area.js';
 
 const resetA = '2026-11-20T11:00:00.000Z';
 const resetB = '2026-11-20T12:00:00.000Z';
@@ -223,7 +223,7 @@ describe('MarketCompletedJobsStore unconfirmed barrier', () => {
 });
 
 describe('MarketCompletedJobsStore barrier reset identity', () => {
-    it('clears only a barrier for the exact completed reset', async () => {
+    it('clears exact-reset and identity-less barriers on confirmed completion but keeps other resets', async () => {
         const store = new MarketCompletedJobsStore(new MemoryStorageArea(), { now: () => 1 });
         await store.markUnconfirmed({ marketKey: 'home', jobId: 'same', resetAt: resetA });
         await store.markUnconfirmed({ marketKey: 'home', jobId: 'newer', resetAt: resetA });
@@ -239,7 +239,6 @@ describe('MarketCompletedJobsStore barrier reset identity', () => {
             home: {
                 newer: resetA,
                 older: resetB,
-                unknown: 'unknown',
             },
         });
     });
@@ -255,5 +254,193 @@ describe('MarketCompletedJobsStore clear semantics', () => {
 
         expect(await store.getState()).toEqual({ byMarket: {} });
         expect(await store.getUnconfirmedState()).toEqual({});
+    });
+});
+
+const COMPLETION_KEY = 'v2.auto-finish.completedJobs';
+
+class RejectingCompletionArea implements StorageArea {
+    async get(_keys: StorageKey): Promise<Record<string, unknown>> {
+        throw new Error('completion storage unavailable');
+    }
+
+    async set(_items: Record<string, unknown>): Promise<void> {
+        throw new Error('completion storage unavailable');
+    }
+
+    async remove(_keys: StorageKey): Promise<void> {
+        throw new Error('completion storage unavailable');
+    }
+}
+
+describe('MarketCompletedJobsStore health reads', () => {
+    it('T17 treats a missing key as a normal empty store', async () => {
+        const store = new MarketCompletedJobsStore(new MemoryStorageArea());
+        expect(await store.getStateWithHealth()).toEqual({ status: 'missing' });
+        expect(await store.getState()).toEqual({ byMarket: {} });
+        expect(await store.getUnconfirmedState()).toEqual({});
+    });
+
+    it('T18 reports a valid store as ok with both maps', async () => {
+        const store = new MarketCompletedJobsStore(new MemoryStorageArea(), { now: () => 1 });
+        await store.recordCompletion(input());
+        await store.markUnconfirmed({ marketKey: 'home', jobId: 'blocked', resetAt: resetB });
+
+        const result = await store.getStateWithHealth();
+        expect(result.status).toBe('ok');
+        if (result.status !== 'ok') return;
+        expect(result.value.byMarket).toEqual({ home: { 'job-1': resetA } });
+        expect(result.value.unconfirmedByMarket).toEqual({ home: { blocked: resetB } });
+    });
+
+    it('T19 reports schema corruption as corrupt instead of an empty store', async () => {
+        const area = new MemoryStorageArea();
+        await area.set({ [COMPLETION_KEY]: { schemaVersion: 1, writtenAt: 1, data: { byMarket: 'not-a-map' } } });
+        const store = new MarketCompletedJobsStore(area);
+
+        expect(await store.getStateWithHealth()).toMatchObject({ status: 'corrupt' });
+        expect(await store.getState()).toEqual({ byMarket: {} });
+    });
+
+    it('T20 reports a storage rejection as unavailable', async () => {
+        const store = new MarketCompletedJobsStore(new RejectingCompletionArea());
+        expect(await store.getStateWithHealth()).toMatchObject({ status: 'unavailable' });
+        await expect(store.getState()).rejects.toThrow('completion storage unavailable');
+    });
+
+    it('T21 derives byMarket and unconfirmedByMarket from the same complete read', async () => {
+        const area = new MemoryStorageArea();
+        const store = new MarketCompletedJobsStore(area, { now: () => 1 });
+        await store.recordCompletion(input({ marketKey: 'home', jobId: 'done', resetAt: resetA }));
+        await store.markUnconfirmed({ marketKey: 'dark', jobId: 'unknown', resetAt: null });
+
+        const result = await store.getStateWithHealth();
+        expect(result.status).toBe('ok');
+        if (result.status !== 'ok') return;
+        expect(result.value).toMatchObject({
+            byMarket: { home: { done: resetA } },
+            unconfirmedByMarket: { dark: { unknown: 'unknown' } },
+        });
+    });
+
+    it('T22 preserves the legacy reading APIs for missing and corrupt stores', async () => {
+        const missing = new MarketCompletedJobsStore(new MemoryStorageArea());
+        expect(await missing.getState()).toEqual({ byMarket: {} });
+        expect(await missing.getUnconfirmedState()).toEqual({});
+        expect(await missing.getCompletion('home', 'job-1')).toBeNull();
+
+        const area = new MemoryStorageArea();
+        await area.set({ [COMPLETION_KEY]: { nope: true } });
+        const corrupt = new MarketCompletedJobsStore(area);
+        expect(await corrupt.getState()).toEqual({ byMarket: {} });
+        expect(await corrupt.getUnconfirmedState()).toEqual({});
+        expect(await corrupt.getCompletion('home', 'job-1')).toBeNull();
+    });
+});
+
+class ToggleRejectingArea implements StorageArea {
+    failWrites = false;
+    private readonly base = new MemoryStorageArea();
+
+    get(keys: StorageKey): Promise<Record<string, unknown>> {
+        return this.base.get(keys);
+    }
+
+    set(items: Record<string, unknown>): Promise<void> {
+        if (this.failWrites) return Promise.reject(new Error('write failed'));
+        return this.base.set(items);
+    }
+
+    remove(keys: StorageKey): Promise<void> {
+        return this.base.remove(keys);
+    }
+}
+
+describe('Completion fallback lifecycle', () => {
+    it('F01 persists an identity-less fallback across restarts and duplicate writes', async () => {
+        const area = new MemoryStorageArea();
+        const store = new MarketCompletedJobsStore(area, { now: () => 1 });
+        await store.markUnconfirmed({ marketKey: 'home', jobId: 'job-1', resetAt: null });
+        await store.markUnconfirmed({ marketKey: 'home', jobId: 'job-1', resetAt: null });
+
+        const restarted = new MarketCompletedJobsStore(area);
+        expect(await restarted.getUnconfirmedState()).toEqual({ home: { 'job-1': 'unknown' } });
+    });
+
+    it('F02 keeps an identity-less fallback when a reset changes or older records are pruned', async () => {
+        const store = new MarketCompletedJobsStore(new MemoryStorageArea(), { now: () => 1 });
+        await store.markUnconfirmed({ marketKey: 'home', jobId: 'legacy', resetAt: null });
+        await store.pruneMarketBeforeReset('home', resetB);
+
+        expect(await store.getUnconfirmedState()).toEqual({ home: { legacy: 'unknown' } });
+    });
+
+    it('F03 releases an identity-less fallback only after a confirmed completion', async () => {
+        const area = new MemoryStorageArea();
+        const store = new MarketCompletedJobsStore(area, { now: () => 1 });
+        await store.markUnconfirmed({ marketKey: 'home', jobId: 'legacy', resetAt: null });
+
+        await store.recordCompletion(input({ jobId: 'legacy', resetAt: resetA }));
+
+        expect(await store.getUnconfirmedState()).toEqual({});
+        const restarted = new MarketCompletedJobsStore(area);
+        expect(await restarted.getUnconfirmedState()).toEqual({});
+    });
+
+    it('F04 keeps a different-reset fallback untouched by an older-reset completion', async () => {
+        const store = new MarketCompletedJobsStore(new MemoryStorageArea(), { now: () => 1 });
+        await store.markUnconfirmed({ marketKey: 'home', jobId: 'newer', resetAt: resetB });
+
+        await store.recordCompletion(input({ jobId: 'newer', resetAt: resetA }));
+
+        expect(await store.getUnconfirmedState()).toEqual({ home: { newer: resetB } });
+    });
+
+    it('F05 does not report release when the completion write fails', async () => {
+        const area = new ToggleRejectingArea();
+        const store = new MarketCompletedJobsStore(area, { now: () => 1 });
+        await store.markUnconfirmed({ marketKey: 'home', jobId: 'legacy', resetAt: null });
+        area.failWrites = true;
+
+        await expect(store.recordCompletion(input({ jobId: 'legacy', resetAt: resetA }))).rejects.toThrow('write failed');
+
+        expect(await store.getUnconfirmedState()).toEqual({ home: { legacy: 'unknown' } });
+    });
+
+    it('F06 keeps market and job isolation for identity-less fallbacks', async () => {
+        const store = new MarketCompletedJobsStore(new MemoryStorageArea(), { now: () => 1 });
+        await store.markUnconfirmed({ marketKey: 'home', jobId: 'shared', resetAt: null });
+        await store.markUnconfirmed({ marketKey: 'dark', jobId: 'shared', resetAt: null });
+        await store.markUnconfirmed({ marketKey: 'home', jobId: 'other', resetAt: null });
+
+        await store.recordCompletion(input({ marketKey: 'home', jobId: 'shared', resetAt: resetA }));
+
+        expect(await store.getUnconfirmedState()).toEqual({
+            home: { other: 'unknown' },
+            dark: { shared: 'unknown' },
+        });
+    });
+});
+
+describe('Completion Store write safety on corrupt data', () => {
+    it('F15 refuses to overwrite corrupt fallback data from write paths', async () => {
+        const area = new MemoryStorageArea();
+        const corrupt = {
+            schemaVersion: 1,
+            writtenAt: 1,
+            data: {
+                byMarket: {},
+                unconfirmedByMarket: { home: { 'job-1': 'unknown' } },
+                extra: 'not-allowed',
+            },
+        };
+        await area.set({ [COMPLETION_KEY]: corrupt });
+        const store = new MarketCompletedJobsStore(area);
+
+        await expect(store.recordCompletion(input())).rejects.toThrow('Stored payload is invalid');
+        await expect(store.markUnconfirmed({ marketKey: 'home', jobId: 'job-1', resetAt: null })).rejects.toThrow('Stored payload is invalid');
+        await expect(store.pruneMarketBeforeReset('home', resetB)).rejects.toThrow('Stored payload is invalid');
+
+        expect((await area.get(COMPLETION_KEY))[COMPLETION_KEY]).toEqual(corrupt);
     });
 });

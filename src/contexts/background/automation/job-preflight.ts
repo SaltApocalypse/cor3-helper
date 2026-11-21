@@ -99,8 +99,8 @@ export class JobPreflight {
 
         // A lock is scoped to the job/file that produced it. Never infer a
         // global lock from another file's minigame.
-        if (this.deps.locks?.isLocked(job.id)) {
-            const until = this.deps.locks.lockUntil(job.id) ?? this.now();
+        if (this.deps.locks?.isLocked(job.marketKey, job.id)) {
+            const until = this.deps.locks.lockUntil(job.marketKey, job.id) ?? this.now();
             return err({ code: 'PREFLIGHT_FAILED', message: lockMessage(until, this.now()) });
         }
 

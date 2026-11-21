@@ -278,6 +278,7 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
         clock,
         store: stores.autoFinish,
         completions: stores.marketCompletedJobs,
+        jobStates: stores.jobState,
         locks,
         history,
         queue: autoJobsQueue,

@@ -83,8 +83,8 @@ function preflight(
         snapshots: { get: async () => ok(snap) },
         loadout: { canSatisfy },
         locks: {
-            isLocked: (jobId) => jobId === options.lockedJobId,
-            lockUntil: (jobId) => jobId === options.lockedJobId ? (options.lockUntil ?? 60_000) : undefined,
+            isLocked: (_marketKey, jobId) => jobId === options.lockedJobId,
+            lockUntil: (_marketKey, jobId) => jobId === options.lockedJobId ? (options.lockUntil ?? 60_000) : undefined,
         },
         logger,
         now: () => 1,

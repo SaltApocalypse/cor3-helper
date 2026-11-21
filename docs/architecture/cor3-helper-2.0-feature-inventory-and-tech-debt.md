@@ -5,15 +5,15 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-21 against build `2.0.6-salta.308`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (111 files / 736 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-21 against build `2.0.6-salta.309`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (117 files / 908 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.6-salta.308`)
+## Current completion snapshot (build `2.0.6-salta.309`)
 
 | Metric | Value |
 |---|---|
-| TypeScript/TSX source files | 440 (including 108 test files) |
-| Files under `src/` | 448 (vendored JavaScript is limited to `src/libs/`) |
+| TypeScript/TSX source files | 451 (including 117 test files) |
+| Files under `src/` | 460 (vendored JavaScript is limited to `src/libs/`) |
 | v1 parity rows with a status | 147 |
 | Implemented / improved | 89 |
 | Partial | 37 |
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 111 files / 736 tests pass
-- `npm run build` — pass, `2.0.6-salta.308`
+- `npm test` — 117 files / 908 tests pass
+- `npm run build` — pass, `2.0.6-salta.309`
 
 ---
 
@@ -1409,7 +1409,7 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 
 ---
 
-# Part 68 — Phase B2.1.2: Alarm failure recovery (2.0.6-salta.308)
+# Part 68 — Phase B2.1.2: Alarm failure recovery (2.0.6-salta.309)
 
 - Added `AUTO_JOBS_INFO_REPAIR_ALARM` with a dedicated alarm route. Repair never runs the market refresh itself; it asks the coordinator to recompute the latest normal schedule.
 - Normal alarm create is confirmed via `Scheduler.get`; failure creates a repair alarm with 30s/60s/2m/5m/10m backoff.

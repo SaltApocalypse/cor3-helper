@@ -1,4 +1,5 @@
 import type { AutomationStateStore } from '../../../infrastructure/storage/automation-state-store.js';
+import { jobIdentityKey, jobIdentityParts } from '../../../contracts/jobs.js';
 
 export const MAX_RETRY_ATTEMPTS = 3;
 /**
@@ -24,6 +25,8 @@ interface LockEntry {
  * Sole owner of the Auto Jobs job locks and retry budget. Persistence goes
  * through the existing automation state store; no other module mutates these
  * maps.
+ *
+ * Keys are `{marketKey, jobId}` identities, never jobId alone.
  */
 export class JobLockRegistry {
     private readonly locks = new Map<string, LockEntry>();
@@ -34,75 +37,76 @@ export class JobLockRegistry {
         private readonly now: () => number = () => Date.now(),
     ) {}
 
-    lockUntil(jobId: string): number | undefined {
-        return this.locks.get(jobId)?.until;
+    lockUntil(marketKey: string, jobId: string): number | undefined {
+        return this.locks.get(jobIdentityKey(marketKey, jobId))?.until;
     }
 
-    setLock(jobId: string, until: number, marketKey: string | null = null, resetAt: string | null = null): void {
-        this.locks.set(jobId, { until, marketKey, resetAt });
+    setLock(marketKey: string, jobId: string, until: number, resetAt: string | null = null): void {
+        this.locks.set(jobIdentityKey(marketKey, jobId), { until, marketKey, resetAt });
     }
 
-    deleteLock(jobId: string): void {
-        this.locks.delete(jobId);
+    deleteLock(marketKey: string, jobId: string): void {
+        this.locks.delete(jobIdentityKey(marketKey, jobId));
     }
 
     clearLocks(): void {
         this.locks.clear();
     }
 
-    isLocked(jobId: string): boolean {
-        const entry = this.locks.get(jobId);
+    isLocked(marketKey: string, jobId: string): boolean {
+        const entry = this.locks.get(jobIdentityKey(marketKey, jobId));
         return entry !== undefined && entry.until > this.now();
     }
 
     pruneExpiredLocks(): void {
-        for (const [jobId, entry] of this.locks) {
-            if (entry.until <= this.now()) this.locks.delete(jobId);
+        for (const [key, entry] of this.locks) {
+            if (entry.until <= this.now()) this.locks.delete(key);
         }
     }
 
     locksSnapshot(): Record<string, number> {
         const snapshot: Record<string, number> = {};
         const now = this.now();
-        for (const [jobId, entry] of this.locks) {
-            if (entry.until > now) snapshot[jobId] = entry.until;
+        for (const [key, entry] of this.locks) {
+            if (entry.until > now) snapshot[key] = entry.until;
         }
         return snapshot;
     }
 
     attemptsSnapshot(): Record<string, RetryAttempt> {
         const snapshot: Record<string, RetryAttempt> = {};
-        for (const [jobId, entry] of this.attempts) snapshot[jobId] = entry;
+        for (const [key, entry] of this.attempts) snapshot[key] = entry;
         return snapshot;
     }
 
-    isRetryExhausted(jobId: string): boolean {
-        const entry = this.attempts.get(jobId);
+    isRetryExhausted(marketKey: string, jobId: string): boolean {
+        const entry = this.attempts.get(jobIdentityKey(marketKey, jobId));
         if (entry === undefined || entry.count < MAX_RETRY_ATTEMPTS) return false;
         // Budgets expire after a quiet period so a batch of transient failures
         // does not hide a job until the next market reset.
         return this.now() - entry.lastAttemptAt < RETRY_BUDGET_COOLDOWN_MS;
     }
 
-    retryAttempt(jobId: string): RetryAttempt | undefined {
-        return this.attempts.get(jobId);
+    retryAttempt(marketKey: string, jobId: string): RetryAttempt | undefined {
+        return this.attempts.get(jobIdentityKey(marketKey, jobId));
     }
 
     retryEntries(): IterableIterator<[string, RetryAttempt]> {
         return this.attempts.entries();
     }
 
-    retryCount(jobId: string): number {
-        return this.attempts.get(jobId)?.count ?? 0;
+    retryCount(marketKey: string, jobId: string): number {
+        return this.attempts.get(jobIdentityKey(marketKey, jobId))?.count ?? 0;
     }
 
-    recordRetry(jobId: string, marketKey: string, resetAt: string | null): void {
+    recordRetry(marketKey: string, jobId: string, resetAt: string | null): void {
         const now = this.now();
-        const current = this.attempts.get(jobId);
+        const key = jobIdentityKey(marketKey, jobId);
+        const current = this.attempts.get(key);
         const continuing = current !== undefined
             && current.resetAt === resetAt
             && now - current.lastAttemptAt <= RETRY_BUDGET_COOLDOWN_MS;
-        this.attempts.set(jobId, {
+        this.attempts.set(key, {
             count: continuing ? current.count + 1 : 1,
             marketKey,
             resetAt,
@@ -124,28 +128,28 @@ export class JobLockRegistry {
      * compare against.
      */
     reconcileResets(resetByMarket: ReadonlyMap<string, string>): void {
-        for (const [jobId, entry] of this.attempts) {
+        for (const [key, entry] of this.attempts) {
             const resetAt = resetByMarket.get(entry.marketKey);
             if (resetAt === undefined) continue;
             if (entry.resetAt === null) continue;
-            if (resetAt !== entry.resetAt) this.attempts.delete(jobId);
+            if (resetAt !== entry.resetAt) this.attempts.delete(key);
         }
-        for (const [jobId, entry] of this.locks) {
+        for (const [key, entry] of this.locks) {
             if (entry.marketKey === null) continue;
             const resetAt = resetByMarket.get(entry.marketKey);
             if (resetAt === undefined) continue;
             if (entry.resetAt === null) continue;
-            if (resetAt !== entry.resetAt) this.locks.delete(jobId);
+            if (resetAt !== entry.resetAt) this.locks.delete(key);
         }
     }
 
     async persist(phase: 'idle' | 'running' | 'waiting' = 'idle'): Promise<void> {
         const locks: Record<string, { until: number; marketKey: string | null; resetAt: string | null }> = {};
-        for (const [jobId, entry] of this.locks) {
-            if (entry.until > this.now()) locks[jobId] = entry;
+        for (const [key, entry] of this.locks) {
+            if (entry.until > this.now()) locks[key] = entry;
         }
         const attempts: Record<string, RetryAttempt> = {};
-        for (const [jobId, entry] of this.attempts) attempts[jobId] = entry;
+        for (const [key, entry] of this.attempts) attempts[key] = entry;
         await this.state.set('auto-jobs', {
             phase,
             payload: { locks, retryAttempts: attempts },
@@ -156,35 +160,50 @@ export class JobLockRegistry {
     restore(payload: Readonly<Record<string, unknown>>): void {
         const storedLocks = payload.locks;
         if (storedLocks && typeof storedLocks === 'object' && !Array.isArray(storedLocks)) {
-            for (const [jobId, raw] of Object.entries(storedLocks)) {
+            for (const [key, raw] of Object.entries(storedLocks)) {
                 if (typeof raw === 'number') {
-                    if (raw > this.now()) this.locks.set(jobId, { until: raw, marketKey: null, resetAt: null });
+                    // Legacy jobId-only lock: it cannot be attributed to a
+                    // market, so do not apply it to any market.
                     continue;
                 }
                 if (!raw || typeof raw !== 'object') continue;
                 const entry = raw as { until?: unknown; marketKey?: unknown; resetAt?: unknown };
+                const identity = restoreIdentity(key, entry.marketKey);
+                if (!identity) continue;
                 if (typeof entry.until !== 'number' || entry.until <= this.now()) continue;
-                this.locks.set(jobId, {
+                this.locks.set(jobIdentityKey(identity.marketKey, identity.jobId), {
                     until: entry.until,
-                    marketKey: typeof entry.marketKey === 'string' ? entry.marketKey : null,
+                    marketKey: identity.marketKey,
                     resetAt: typeof entry.resetAt === 'string' ? entry.resetAt : null,
                 });
             }
         }
         const storedAttempts = payload.retryAttempts;
         if (storedAttempts && typeof storedAttempts === 'object' && !Array.isArray(storedAttempts)) {
-            for (const [jobId, raw] of Object.entries(storedAttempts)) {
+            for (const [key, raw] of Object.entries(storedAttempts)) {
                 if (!raw || typeof raw !== 'object') continue;
                 const entry = raw as { count?: unknown; marketKey?: unknown; resetAt?: unknown; lastAttemptAt?: unknown };
-                if (typeof entry.count === 'number' && typeof entry.marketKey === 'string') {
-                    this.attempts.set(jobId, {
-                        count: entry.count,
-                        marketKey: entry.marketKey,
-                        resetAt: typeof entry.resetAt === 'string' ? entry.resetAt : null,
-                        lastAttemptAt: typeof entry.lastAttemptAt === 'number' ? entry.lastAttemptAt : 0,
-                    });
-                }
+                const identity = restoreIdentity(key, entry.marketKey);
+                if (!identity || typeof entry.count !== 'number') continue;
+                this.attempts.set(jobIdentityKey(identity.marketKey, identity.jobId), {
+                    count: entry.count,
+                    marketKey: identity.marketKey,
+                    resetAt: typeof entry.resetAt === 'string' ? entry.resetAt : null,
+                    lastAttemptAt: typeof entry.lastAttemptAt === 'number' ? entry.lastAttemptAt : 0,
+                });
             }
         }
     }
+}
+
+/**
+ * Restore an identity from either the new market-scoped key or a legacy
+ * jobId-only key that still carries a marketKey in its entry. A legacy key
+ * without a market is discarded rather than guessed.
+ */
+function restoreIdentity(key: string, marketKey: unknown): { readonly marketKey: string; readonly jobId: string } | null {
+    const parsed = jobIdentityParts(key);
+    if (parsed) return parsed;
+    if (typeof marketKey !== 'string' || marketKey.length === 0 || key.length === 0) return null;
+    return { marketKey, jobId: key };
 }

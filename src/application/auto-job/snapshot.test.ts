@@ -110,4 +110,19 @@ describe('mergeAutoJobsSnapshot', () => {
         const result = mergeAutoJobsSnapshot(previous, update);
         expect(result.markets[0]).toMatchObject({ stale: true, updatedAt: 10, error: 'timeout' });
     });
+
+    it('keeps the same job id independently in two markets', () => {
+        const previous = snapshot(1, ['home', 'dark'], [job('shared', 'home'), job('shared', 'dark')]);
+        const update: AutoJobsSnapshot = {
+            at: 2,
+            jobs: [job('shared', 'home')],
+            markets: [
+                { marketKey: 'home', label: 'HOME', ok: true, skipped: 0, resetAt: 'reset-home' },
+                { marketKey: 'dark', label: 'DARK', ok: false, skipped: 0, resetAt: null, error: 'timeout' },
+            ],
+        };
+        const result = mergeAutoJobsSnapshot(previous, update);
+        expect(result.jobs.map((entry) => `${entry.marketKey}/${entry.id}`).sort()).toEqual(['dark/shared', 'home/shared']);
+        expect(result.markets.find((market) => market.marketKey === 'dark')).toMatchObject({ ok: false, stale: true });
+    });
 });

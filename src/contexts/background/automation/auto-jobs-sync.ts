@@ -37,7 +37,7 @@ export async function syncJobMarket(
     const market = jobMarketByKey(request.marketKey);
     const completionServerId = market ? market.completionServerId ?? request.serverId : request.serverId;
     const mapped = mapMarketSnapshotJobs(result.value.market, request.marketId, request.marketKey, completionServerId);
-    await deps.markets.reconcileMarketSnapshot({
+    const reconciliation = await deps.markets.reconcileMarketSnapshot({
         marketKey: request.marketKey,
         resetAt: mapped.resetAt ?? null,
         observedAt: deps.now(),
@@ -64,6 +64,7 @@ export async function syncJobMarket(
                 resetAt: mapped.resetAt ?? null,
                 updatedAt: deps.now(),
                 stale: false,
+                ...(reconciliation ? { reconciliationStatus: reconciliation.storeStatus } : {}),
             },
         ],
     });
@@ -76,6 +77,7 @@ export async function syncJobMarket(
             failed: mapped.failed,
             skippedJobs: mapped.skippedJobs,
             resetAt: mapped.resetAt ?? null,
+            ...(reconciliation ? { reconciliationStatus: reconciliation.storeStatus } : {}),
         },
     };
 }

@@ -1,5 +1,6 @@
 import type { JobOffer } from '../../../domains/jobs/model.js';
 import { jobActiveKey } from '../../../contracts/job-state.js';
+import { jobIdentityKey } from '../../../contracts/jobs.js';
 import type { AutoJobProgress, AutoJobQueueFailure, AutoJobQueueService } from '../../../application/auto-job/queue.js';
 import type { NetworkOperationQueue } from '../../../application/network/operation-queue.js';
 import type { NetworkSnapshotService } from '../../../application/network/snapshot-service.js';
@@ -18,6 +19,7 @@ export interface JobQueueRunState {
     readonly runId: string;
     status: JobQueueRunStatus;
     progress: AutoJobProgress | null;
+    /** Market-scoped identity strings (`jobIdentityKey`). */
     done: readonly string[];
     failed: readonly AutoJobQueueFailure[];
     error: string | null;
@@ -28,6 +30,7 @@ export interface JobQueueRunRequest {
     readonly runId: string;
     readonly jobs: readonly JobOffer[];
     readonly owner: string;
+    /** Market-scoped identity strings (`jobIdentityKey`). */
     readonly completedIds?: readonly string[];
     readonly supportedTypes?: readonly string[];
 }
@@ -170,7 +173,7 @@ export class JobQueueCoordinator {
             this.deps.runLogs.add(request.runId, 'warn', 'job-queue', `${failure.job.name}: ${failure.error.code} — ${failure.error.message}`);
         }
         this.deps.runLogs.add(request.runId, 'info', 'job-queue', `Queue finished: ${result.done.length} done, ${result.failed.length} failed${result.stopped ? ' (stopped)' : ''}`);
-        state.done = result.done.map((job) => job.id);
+        state.done = result.done.map((job) => jobIdentityKey(job.marketKey, job.id));
         state.failed = result.failed;
         state.status = result.stopped ? 'cancelled' : 'done';
         state.updatedAt = this.deps.clock.now();

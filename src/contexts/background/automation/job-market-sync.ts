@@ -9,6 +9,7 @@ import type { NetworkSnapshot } from '../../../domains/network/model.js';
 import { withSnapshotEndpoint } from '../../../domains/network/model.js';
 import type { MarketSyncService } from '../../../application/network/market-sync.js';
 import type { JobReconciliationResult, JobStateReconcilerPort, ReconcileMarketInput } from '../../../application/auto-job/job-state-reconciler.js';
+import { unavailableReconciliationResult } from '../../../application/auto-job/job-state-reconciler.js';
 import type { MarketCompletionStorePort } from '../../../application/auto-job/market-completion.js';
 import type { MarketCompletedJobsState } from '../../../contracts/market-completed-jobs.js';
 import type { MarketCacheStore } from '../../../infrastructure/storage/market-cache-store.js';
@@ -31,6 +32,8 @@ export interface JobMarketSyncEntry {
     readonly jobs?: readonly import('../../../contracts/auto-finish.js').AutoFinishJobResult[];
     readonly updatedAt?: number;
     readonly stale?: boolean;
+    /** Health of the optional lifecycle reconciliation; `loaded` means complete. */
+    readonly reconciliationStatus?: 'loaded' | 'partial' | 'unavailable';
     readonly error?: string;
     readonly errorCode?: string;
 }
@@ -103,7 +106,7 @@ export class JobMarketSync {
                 resetAt: input.resetAt,
                 message: error instanceof Error ? error.message : String(error),
             });
-            return null;
+            return unavailableReconciliationResult(input.marketKey, input.resetAt);
         }
     }
 
@@ -253,13 +256,23 @@ export class JobMarketSync {
         }
         // Reconcile before returning the market to the scheduler. This is a
         // successful, non-stale snapshot, so its game rows are valid evidence.
-        await this.reconcileMarketSnapshot({
+        const reconciliation = await this.reconcileMarketSnapshot({
             marketKey: market.key,
             resetAt: mapped.resetAt ?? null,
             observedAt: this.now(),
             jobs: mapped.jobs,
             skippedJobs: mapped.skippedJobs,
         });
+        if (reconciliation?.storeFailed) {
+            this.deps.logger.warn('job-state', 'Market reconciliation was incomplete; local state was kept', {
+                market: market.key,
+                resetAt: mapped.resetAt ?? null,
+                storeStatus: reconciliation.storeStatus,
+                updated: reconciliation.updated,
+                pending: reconciliation.pending,
+                completionFailures: reconciliation.completionFailures,
+            });
+        }
         const view = mapMarketView(synced.value.market);
         if (view) {
             await this.deps.marketCache.set(market.marketId, view);
@@ -292,6 +305,7 @@ export class JobMarketSync {
                 resetAt: mapped.resetAt ?? null,
                 updatedAt: this.now(),
                 stale: false,
+                ...(reconciliation ? { reconciliationStatus: reconciliation.storeStatus } : {}),
             },
             jobs: mapped.jobs,
             snapshot: synced.value.snapshot,

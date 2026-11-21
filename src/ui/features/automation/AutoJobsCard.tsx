@@ -20,6 +20,7 @@ export interface AutoJobsReportRow {
     readonly failed: number;
     readonly expired: number;
     readonly pending: number;
+    readonly unknown?: number;
     readonly skipped?: number;
     readonly error?: string;
     readonly errorCode?: string;
@@ -63,7 +64,7 @@ export interface AutoJobsCardProps {
     readonly jobStatusById: Readonly<Record<string, string | undefined>>;
     readonly jobStatusReasonById: Readonly<Record<string, string | undefined>>;
     readonly selectedJobs: ReadonlySet<string>;
-    readonly toggleJob: (id: string) => void;
+    readonly toggleJob: (marketKey: string, jobId: string) => void;
     readonly toggleSelectMarket: (jobs: readonly JobOffer[]) => void;
     readonly cancelAutoFinish: () => void | Promise<void>;
     readonly runAutoFinishNow: () => void | Promise<void>;
@@ -133,6 +134,7 @@ export function AutoJobsCard(props: AutoJobsCardProps) {
         failed: market.failed ?? 0,
         expired: 0,
         pending: 0,
+        unknown: 0,
         ...(market.ok ? {} : { error: market.error }),
         ...(market.ok ? {} : (market.errorCode ? { errorCode: market.errorCode } : {})),
     }));
@@ -317,6 +319,7 @@ export function AutoJobsCard(props: AutoJobsCardProps) {
                                     <span class="v2-item-name">{market.label}</span>
                                     <span class="v2-tag v2-tag-ok">{tr('{count} success', { count: market.success })}</span>
                                     {market.retry > 0 ? <span class="v2-tag v2-tag-warn">{tr('{count} retry', { count: market.retry })}</span> : null}
+                                    {(market.unknown ?? 0) > 0 ? <span class="v2-tag v2-tag-warn">{tr('{count} unknown', { count: market.unknown ?? 0 })}</span> : null}
                                     <span class="v2-tag v2-tag-warn">{tr('{count} pending', { count: market.pending })}</span>
                                     {(market.skipped ?? 0) > 0 ? <span class="v2-tag">{tr('{count} skipped', { count: market.skipped ?? 0 })}</span> : null}
                                     {market.expired > 0 ? <span class="v2-tag v2-tag-warn">{tr('{count} expired', { count: market.expired })}</span> : null}

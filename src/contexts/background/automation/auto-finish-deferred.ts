@@ -1,4 +1,5 @@
 import type { JobOffer } from '../../../domains/jobs/model.js';
+import { jobIdentityKey } from '../../../contracts/jobs.js';
 import { JOB_MARKETS } from '../../../domains/jobs/markets.js';
 import type { AutoJobQueueFailure, AutoJobQueueResult } from '../../../application/auto-job/queue.js';
 import { classifyJobFailure } from '../../../application/auto-job/outcome.js';
@@ -34,7 +35,7 @@ export async function runDeferredRetryPass(deps: DeferredRetryDeps): Promise<Def
     const runDone: JobOffer[] = [...deps.done];
     const failedById = new Map<string, AutoJobQueueFailure>();
     const deferredExpiredIds = new Set<string>();
-    for (const entry of deps.failed) failedById.set(entry.job.id, entry);
+    for (const entry of deps.failed) failedById.set(jobIdentityKey(entry.job.marketKey, entry.job.id), entry);
     if (deps.cancelRequested()) return { runDone, failedById, deferredExpiredIds };
 
     const deferredNow = deps.now();
@@ -63,16 +64,16 @@ export async function runDeferredRetryPass(deps: DeferredRetryDeps): Promise<Def
         const retryTargets = JOB_MARKETS.filter((market) => retryMarketKeys.has(market.key));
         const retrySynced = await deps.markets.syncAll(deps.owner, 'auto-jobs-retry', retryTargets, undefined, deps.cancelRequested);
         deps.publishSnapshot({ at: deps.now(), jobs: retrySynced.jobs, markets: retrySynced.markets });
-        const freshById = new Map(retrySynced.jobs.map((job) => [job.id, job]));
+        const freshById = new Map(retrySynced.jobs.map((job) => [jobIdentityKey(job.marketKey, job.id), job]));
         const syncedMarketKeys = new Set(retrySynced.markets.filter((market) => market.ok).map((market) => market.marketKey));
         const skippedById = new Map<string, { readonly expired?: boolean; readonly status: string }>();
         for (const market of retrySynced.markets) {
-            for (const skipped of market.skippedJobs ?? []) skippedById.set(skipped.id, skipped);
+            for (const skipped of market.skippedJobs ?? []) skippedById.set(jobIdentityKey(market.marketKey, skipped.id), skipped);
         }
         const retryJobs: JobOffer[] = [];
         for (const entry of retryCandidates) {
             if (entry.error.unconfirmed === true) continue;
-            const fresh = freshById.get(entry.job.id);
+            const fresh = freshById.get(jobIdentityKey(entry.job.marketKey, entry.job.id));
             if (fresh) {
                 retryJobs.push(fresh);
                 continue;
@@ -80,7 +81,7 @@ export async function runDeferredRetryPass(deps: DeferredRetryDeps): Promise<Def
             // Only trust a disappearance when that market synced
             // successfully; otherwise keep the job as retry.
             if (!syncedMarketKeys.has(entry.job.marketKey)) continue;
-            const skipped = skippedById.get(entry.job.id);
+            const skipped = skippedById.get(jobIdentityKey(entry.job.marketKey, entry.job.id));
             if (skipped && /complete/i.test(skipped.status)) {
                 // The game already considers this job completed even
                 // though our completion reply was lost. Align the
@@ -89,7 +90,7 @@ export async function runDeferredRetryPass(deps: DeferredRetryDeps): Promise<Def
                 continue;
             }
             if (skipped?.expired || /expire|failed/i.test(skipped?.status ?? '') || skipped === undefined) {
-                deferredExpiredIds.add(entry.job.id);
+                deferredExpiredIds.add(jobIdentityKey(entry.job.marketKey, entry.job.id));
             }
         }
         deps.runLogs.add(deps.runId, 'info', 'auto-jobs', `Deferred retry sync: ${retryJobs.length} runnable, ${deferredExpiredIds.size} expired`, {
@@ -99,7 +100,7 @@ export async function runDeferredRetryPass(deps: DeferredRetryDeps): Promise<Def
         if (retryJobs.length > 0) {
             const deferred = await deps.runQueue(retryJobs);
             runDone.push(...deferred.done);
-            for (const entry of deferred.failed) failedById.set(entry.job.id, entry);
+            for (const entry of deferred.failed) failedById.set(jobIdentityKey(entry.job.marketKey, entry.job.id), entry);
         }
     } catch (error) {
         deps.runLogs.add(deps.runId, 'warn', 'auto-jobs', `Deferred retry pass failed: ${error instanceof Error ? error.message : String(error)}`);

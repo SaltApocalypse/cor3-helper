@@ -138,7 +138,7 @@ export class JobExecutionService implements JobExecutionPort {
         private readonly stateRecorder?: JobStateRecorderPort,
         private readonly solverHandoffDeadlineMs: number = SOLVER_HANDOFF_DEADLINE_MS,
         private readonly completions?: MarketCompletionStorePort,
-        private readonly jobStates?: Pick<JobStateStorePort, 'get' | 'list'>,
+        private readonly jobStates?: Pick<JobStateStorePort, 'get' | 'list' | 'getWithHealth' | 'listWithHealth'>,
         private readonly resetAtForMarket?: (marketKey: string) => string | null,
     ) {}
 
@@ -773,21 +773,47 @@ export class JobExecutionService implements JobExecutionPort {
 
         const key = state?.key;
         if (state && this.jobStates) {
-            let record;
-            try {
-                record = await this.jobStates.get(state.key);
-            } catch (error) {
-                return this.blockedError(`Completion state unavailable: ${error instanceof Error ? error.message : String(error)}`);
+            if (this.jobStates.getWithHealth) {
+                let read;
+                try {
+                    read = await this.jobStates.getWithHealth.call(this.jobStates, state.key);
+                } catch (error) {
+                    return this.blockedError(`Completion state unavailable: ${error instanceof Error ? error.message : String(error)}`);
+                }
+                if (read.status === 'corrupt' || read.status === 'unavailable') {
+                    return this.blockedError(`Completion state unavailable: ${read.status}`);
+                }
+                if (read.status === 'ok' && isCompletionUncertainRecord(read.record)) return this.blockedError();
+            } else {
+                let record;
+                try {
+                    record = await this.jobStates.get(state.key);
+                } catch (error) {
+                    return this.blockedError(`Completion state unavailable: ${error instanceof Error ? error.message : String(error)}`);
+                }
+                if (record && isCompletionUncertainRecord(record)) return this.blockedError();
             }
-            if (record && isCompletionUncertainRecord(record)) return this.blockedError();
         }
 
         if (this.jobStates?.list) {
             let records;
-            try {
-                records = await this.jobStates.list();
-            } catch (error) {
-                return this.blockedError(`Job state barrier unavailable: ${error instanceof Error ? error.message : String(error)}`);
+            if (this.jobStates.listWithHealth) {
+                let list;
+                try {
+                    list = await this.jobStates.listWithHealth.call(this.jobStates);
+                } catch (error) {
+                    return this.blockedError(`Job state barrier unavailable: ${error instanceof Error ? error.message : String(error)}`);
+                }
+                if (list.status !== 'loaded') {
+                    return this.blockedError(`Job state barrier unavailable: ${list.status}`);
+                }
+                records = list.records;
+            } else {
+                try {
+                    records = await this.jobStates.list();
+                } catch (error) {
+                    return this.blockedError(`Job state barrier unavailable: ${error instanceof Error ? error.message : String(error)}`);
+                }
             }
             const nullResetBlocked = records.some((record) =>
                 record.marketKey === job.marketKey
@@ -804,13 +830,28 @@ export class JobExecutionService implements JobExecutionPort {
             }
         }
 
-        const readUnconfirmed = this.completions?.getUnconfirmedState;
-        if (readUnconfirmed) {
-            let barriers;
-            try {
-                barriers = await readUnconfirmed.call(this.completions);
-            } catch (error) {
-                return this.blockedError(`Completion barrier unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        const completions = this.completions;
+        if (completions) {
+            let barriers: Readonly<Record<string, Readonly<Record<string, string>>>>;
+            if (completions.getStateWithHealth) {
+                let read;
+                try {
+                    read = await completions.getStateWithHealth.call(completions);
+                } catch (error) {
+                    return this.blockedError(`Completion barrier unavailable: ${error instanceof Error ? error.message : String(error)}`);
+                }
+                if (read.status === 'corrupt' || read.status === 'unavailable') {
+                    return this.blockedError(`Completion barrier unavailable: ${read.status}`);
+                }
+                barriers = read.status === 'ok' ? (read.value.unconfirmedByMarket ?? {}) : {};
+            } else {
+                const readUnconfirmed = completions.getUnconfirmedState;
+                if (!readUnconfirmed) return null;
+                try {
+                    barriers = await readUnconfirmed.call(completions);
+                } catch (error) {
+                    return this.blockedError(`Completion barrier unavailable: ${error instanceof Error ? error.message : String(error)}`);
+                }
             }
             const value = barriers?.[job.marketKey]?.[job.id];
             if (value !== undefined) {

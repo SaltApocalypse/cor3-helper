@@ -7,6 +7,7 @@ import type { AutoJobsSnapshot } from '../../../contracts/auto-jobs.js';
 import type { RunLogSink } from '../../../application/automation/ports.js';
 import { withSnapshotEndpoint, type NetworkSnapshot } from '../../../domains/network/model.js';
 import { asServerId } from '../../../kernel/ids.js';
+import { jobIdentityKey } from '../../../contracts/jobs.js';
 
 export interface DismissFailedJobsSummary {
     readonly dismissed: number;
@@ -101,7 +102,7 @@ export class FailedJobDismisser {
                 }],
             });
             const failedJobs = mapped.skippedJobs.filter((job) =>
-                (job.status === 'failed' || job.expired === true) && !skipIds.has(job.id));
+                (job.status === 'failed' || job.expired === true) && !skipIds.has(jobIdentityKey(market.key, job.id)));
             if (failedJobs.length === 0) continue;
             const outcome = await this.deps.service.run(failedJobs.map((job) => ({
                 id: job.id,

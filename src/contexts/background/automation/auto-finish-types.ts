@@ -1,4 +1,4 @@
-import type { AutoFinishLastRun, AutoFinishMarketResult } from '../../../contracts/auto-finish.js';
+import type { AutoFinishLastRun, AutoFinishMarketResult, AutoFinishUnknownJob } from '../../../contracts/auto-finish.js';
 import type { MarketCompletedJobsState } from '../../../contracts/market-completed-jobs.js';
 import type { AutoJobsSnapshot } from '../../../contracts/auto-jobs.js';
 import type { AutoJobProgress, AutoJobQueueService } from '../../../application/auto-job/queue.js';
@@ -41,7 +41,7 @@ export interface AutoFinishDeps {
     readonly store: AutoFinishStateStore;
     readonly completions: import('../../../application/auto-job/market-completion.js').MarketCompletionStorePort;
     /** Durable Job State barrier for unconfirmed Complete results. */
-    readonly jobStates?: Pick<import('../../../application/auto-job/job-state-port.js').JobStateStorePort, 'list'>;
+    readonly jobStates?: Pick<import('../../../application/auto-job/job-state-port.js').JobStateStorePort, 'list' | 'listWithHealth'>;
     readonly locks: JobLockRegistry;
     readonly history: JobHistoryRecorder;
     readonly queue: AutoJobQueueService;
@@ -66,4 +66,8 @@ export interface AutoFinishStatus {
     readonly legacyCompletedJobs: Readonly<Record<string, string>>;
     /** `unavailable` means the sidecar could not be read; it is not an empty store. */
     readonly completionStateStatus: 'not-loaded' | 'loaded' | 'unavailable';
+    /** Durable per-job Complete-Unknown projection. */
+    readonly unknownJobs: readonly AutoFinishUnknownJob[];
+    /** Availability of the Unknown projection sources. */
+    readonly unknownStateStatus: 'loaded' | 'partial' | 'unavailable';
 }

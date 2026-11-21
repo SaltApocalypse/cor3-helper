@@ -18,6 +18,7 @@ export interface AutoJobProgress {
 
 export interface AutoJobQueueOptions {
     readonly owner: string;
+    /** Market-scoped identity strings (`jobIdentityKey`). */
     readonly completedIds?: ReadonlySet<string>;
     readonly supportedTypes?: ReadonlySet<string>;
     readonly serverPriority: (serverName: string | null, job: JobOffer) => number;

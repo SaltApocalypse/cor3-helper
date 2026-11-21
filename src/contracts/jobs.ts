@@ -86,3 +86,31 @@ export interface JobOffer {
     readonly fileInfo?: { readonly id?: string | undefined; readonly name?: string | undefined } | null | undefined;
 }
 export type RawJob = z.infer<typeof rawJobSchema>;
+
+/** Cross-market job identity. Market is part of the identity; never infer it. */
+export interface JobIdentity {
+    readonly marketKey: string;
+    readonly jobId: string;
+}
+
+/** Stable market-scoped job identity string. */
+export function jobIdentityKey(marketKey: string, jobId: string): string {
+    return JSON.stringify([marketKey, jobId]);
+}
+
+/**
+ * Parses a key produced by {@link jobIdentityKey}. Returns null for legacy
+ * jobId-only keys so callers never guess a market for old data.
+ */
+export function jobIdentityParts(key: string): JobIdentity | null {
+    try {
+        const parsed: unknown = JSON.parse(key);
+        if (!Array.isArray(parsed) || parsed.length !== 2) return null;
+        const [marketKey, jobId] = parsed;
+        if (typeof marketKey !== 'string' || typeof jobId !== 'string') return null;
+        if (marketKey.length === 0 || jobId.length === 0) return null;
+        return { marketKey, jobId };
+    } catch {
+        return null;
+    }
+}

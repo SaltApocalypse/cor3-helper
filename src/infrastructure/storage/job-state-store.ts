@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+    isCompletionUncertainRecord,
     jobStateRecordSchema,
     jobStateKeyId,
     normalizeJobStateRecord,
@@ -7,7 +8,13 @@ import {
     type JobStateKey,
     type JobStateRecord,
 } from '../../contracts/job-state.js';
-import type { JobStatePruneOptions, JobStateStorePort } from '../../application/auto-job/job-state-port.js';
+import type {
+    JobStateListResult,
+    JobStatePruneOptions,
+    JobStateRecordReadResult,
+    JobStateShardHealth,
+    JobStateStorePort,
+} from '../../application/auto-job/job-state-port.js';
 import type { StorageArea } from './storage-area.js';
 import { VersionedRepository } from './versioned-repository.js';
 
@@ -59,6 +66,7 @@ function emptyShard(): JobStateShard {
 export class JobStateStore implements JobStateStorePort {
     private readonly repositories: VersionedRepository<JobStateShard>[];
     private readonly memory: Array<JobStateShard | null>;
+    private readonly memoryStatus: Array<'ok' | 'missing' | null>;
     private readonly queues: Array<Promise<unknown>>;
     private readonly now: () => number;
 
@@ -77,6 +85,7 @@ export class JobStateStore implements JobStateStorePort {
             ...(logger ? { logger } : {}),
         }));
         this.memory = Array.from({ length: SHARD_COUNT }, () => null);
+        this.memoryStatus = Array.from({ length: SHARD_COUNT }, () => null);
         this.queues = Array.from({ length: SHARD_COUNT }, () => Promise.resolve());
     }
 
@@ -86,13 +95,62 @@ export class JobStateStore implements JobStateStorePort {
         return next;
     }
 
+    private cache(bucket: number, shard: JobStateShard, status: 'ok' | 'missing'): void {
+        this.memory[bucket] = shard;
+        this.memoryStatus[bucket] = status;
+    }
+
+    /**
+     * Read one shard with health. Successful reads (including a genuinely
+     * missing key) are cached; corrupt/unavailable results are never cached as
+     * an empty shard so a later health read cannot mistake damage for absence.
+     */
+    private async readShard(bucket: number): Promise<
+        | { readonly status: 'ok'; readonly shard: JobStateShard }
+        | { readonly status: 'missing'; readonly shard: JobStateShard }
+        | { readonly status: 'corrupt'; readonly error?: string }
+        | { readonly status: 'unavailable'; readonly error?: string }
+    > {
+        const cached = this.memory[bucket];
+        if (cached) {
+            return this.memoryStatus[bucket] === 'missing'
+                ? { status: 'missing', shard: cached }
+                : { status: 'ok', shard: cached };
+        }
+        const result = await this.repositories[bucket]!.read();
+        if (result.status === 'ok') {
+            this.cache(bucket, result.value, 'ok');
+            return { status: 'ok', shard: result.value };
+        }
+        if (result.status === 'missing') {
+            const shard = emptyShard();
+            this.cache(bucket, shard, 'missing');
+            return { status: 'missing', shard };
+        }
+        return result.error === undefined
+            ? { status: result.status }
+            : { status: result.status, error: result.error };
+    }
+
     private async load(bucket: number): Promise<JobStateShard> {
         const cached = this.memory[bucket];
         if (cached) return cached;
-        const stored = await this.repositories[bucket]!.get();
-        const shard = stored ?? emptyShard();
-        this.memory[bucket] = shard;
-        return shard;
+        const result = await this.repositories[bucket]!.read();
+        if (result.status === 'ok') {
+            this.cache(bucket, result.value, 'ok');
+            return result.value;
+        }
+        if (result.status === 'missing') {
+            const shard = emptyShard();
+            this.cache(bucket, shard, 'missing');
+            return shard;
+        }
+        if (result.status === 'unavailable') {
+            throw new Error(result.error ?? 'Job state storage unavailable');
+        }
+        // Preserve the legacy list()/get() view of a corrupt shard as empty,
+        // but do not cache it: health reads must still see the corruption.
+        return emptyShard();
     }
 
     private async settled(bucket: number): Promise<void> {
@@ -108,10 +166,46 @@ export class JobStateStore implements JobStateStorePort {
         return record ? normalizeJobStateRecord(record) : null;
     }
 
+    async getWithHealth(key: JobStateKey): Promise<JobStateRecordReadResult> {
+        const id = jobStateKeyId(key);
+        const bucket = bucketOf(id);
+        await this.settled(bucket);
+        const shard = await this.readShard(bucket);
+        if (shard.status === 'corrupt' || shard.status === 'unavailable') {
+            return shard.error === undefined
+                ? { status: shard.status }
+                : { status: shard.status, error: shard.error };
+        }
+        const record = shard.shard.records[id];
+        return record ? { status: 'ok', record: normalizeJobStateRecord(record) } : { status: 'missing' };
+    }
+
     async list(): Promise<readonly JobStateRecord[]> {
         await Promise.all(this.queues.map((queue) => queue.catch(() => undefined)));
         const shards = await Promise.all(this.memory.map((cached, index) => cached ?? this.load(index)));
         return shards.flatMap((shard) => Object.values(shard.records).map(normalizeJobStateRecord));
+    }
+
+    async listWithHealth(): Promise<JobStateListResult> {
+        await Promise.all(this.queues.map((queue) => queue.catch(() => undefined)));
+        const shards = await Promise.all(this.memory.map((_, index) => this.readShard(index)));
+        const records: JobStateRecord[] = [];
+        const shardResults: JobStateShardHealth[] = [];
+        let readable = 0;
+        for (let index = 0; index < shards.length; index++) {
+            const result = shards[index]!;
+            if (result.status === 'ok' || result.status === 'missing') {
+                readable += 1;
+                records.push(...Object.values(result.shard.records).map(normalizeJobStateRecord));
+                shardResults.push({ shardIndex: index, status: result.status });
+                continue;
+            }
+            shardResults.push(result.error === undefined
+                ? { shardIndex: index, status: result.status }
+                : { shardIndex: index, status: result.status, error: result.error });
+        }
+        const status = readable === SHARD_COUNT ? 'loaded' : readable > 0 ? 'partial' : 'unavailable';
+        return { records, status, shardResults };
     }
 
     async upsert(record: JobStateRecord): Promise<void> {
@@ -122,6 +216,7 @@ export class JobStateStore implements JobStateStorePort {
             const shard = await this.load(bucket);
             shard.records[id] = normalized;
             await this.repositories[bucket]!.set(shard);
+            this.cache(bucket, shard, 'ok');
         });
     }
 
@@ -138,12 +233,19 @@ export class JobStateStore implements JobStateStorePort {
             let count = 0;
             for (const [id, record] of Object.entries(shard.records)) {
                 if (RECOVERABLE_JOB_STATUSES.has(record.status)) continue;
+                // An unresolved Complete Unknown is a durable barrier, not an
+                // ordinary aged observation. Keep it until an explicit
+                // completion/terminal path (or an explicit clear) resolves it.
+                if (isCompletionUncertainRecord(record)) continue;
                 const updatedAt = Date.parse(record.updatedAt);
                 if (Number.isFinite(updatedAt) && now - updatedAt <= maxAgeMs) continue;
                 delete shard.records[id];
                 count += 1;
             }
-            if (count > 0) await this.repositories[bucket]!.set(shard);
+            if (count > 0) {
+                await this.repositories[bucket]!.set(shard);
+                this.cache(bucket, shard, 'ok');
+            }
             return count;
         })));
         return removed.reduce((sum, count) => sum + count, 0);
@@ -152,7 +254,7 @@ export class JobStateStore implements JobStateStorePort {
     async clear(): Promise<void> {
         await Promise.all(this.repositories.map((repository, bucket) => this.enqueue(bucket, async () => {
             await repository.clear();
-            this.memory[bucket] = emptyShard();
+            this.cache(bucket, emptyShard(), 'missing');
         })));
     }
 }

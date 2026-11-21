@@ -11,6 +11,7 @@ import type { AutoJobQueueFailure } from '../../../application/auto-job/queue.js
 import { AUTO_FINISH_RETRY_ALARM } from './alarm-ids.js';
 import type { AutoJobsSink } from './auto-finish-types.js';
 import { computeAutoFinishRetry } from './auto-finish-retry.js';
+import { jobIdentityKey } from '../../../contracts/jobs.js';
 
 export interface FinalizeAutoFinishDeps {
     readonly store: AutoFinishStateStore;
@@ -106,8 +107,22 @@ async function writeMarketCompletions(
     let state: MarketCompletedJobsState = EMPTY_MARKET_COMPLETED_JOBS;
     let stateKnown = false;
     try {
-        state = await deps.completions.getState();
-        stateKnown = true;
+        if (deps.completions.getStateWithHealth) {
+            const read = await deps.completions.getStateWithHealth();
+            if (read.status === 'ok') {
+                state = read.value;
+                stateKnown = true;
+            } else if (read.status === 'missing') {
+                state = EMPTY_MARKET_COMPLETED_JOBS;
+                stateKnown = true;
+            } else {
+                deps.runLogs.add(input.runId, 'warn', 'completion', `Market-scoped completions are ${read.status}; skipping writes`);
+                return { state, failures: 0, available: false };
+            }
+        } else {
+            state = await deps.completions.getState();
+            stateKnown = true;
+        }
     } catch (error) {
         deps.runLogs.add(input.runId, 'warn', 'completion', `Unable to read market-scoped completions: ${error instanceof Error ? error.message : String(error)}`);
         // Unavailable is not empty: skip all writes and keep the coordinator's
@@ -264,7 +279,7 @@ export async function finalizeAutoFinish(
             const skippedIds = new Set<string>();
             for (const market of input.markets) {
                 for (const job of market.jobs ?? []) {
-                    if (job.status === 'skipped') skippedIds.add(job.jobId);
+                    if (job.status === 'skipped') skippedIds.add(jobIdentityKey(market.marketKey, job.jobId));
                 }
             }
             const remaining = await deps.autoJobs.dismissFailedJobs(

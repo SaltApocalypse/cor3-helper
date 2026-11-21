@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'preact/hooks';
 import type { JobQueueProgress, PopupPortal } from '../../../application/popup/portal.js';
 import type { TranslateSource } from '../../i18n-context.js';
+import { jobIdentityKey } from '../../../contracts/jobs.js';
 import { classifyJobQueueResult } from '../view-models/job-report.js';
 import type { JobsState } from './useJobs.js';
 import { usePolling } from './usePolling.js';
@@ -34,7 +35,7 @@ export function useJobQueue(portal: PopupPortal, deps: JobQueueDeps): JobQueueSt
 
     const applyQueueProgress = useCallback((progress: JobQueueProgress) => {
         jobs.setJobProgress(progress);
-        jobs.setJobRunStatusById((current) => ({ ...current, [progress.jobId]: 'running' }));
+        jobs.setJobRunStatusById((current) => ({ ...current, [jobIdentityKey(progress.marketKey, progress.jobId)]: 'running' }));
     }, [jobs.setJobProgress, jobs.setJobRunStatusById]);
 
     const pollQueueProgress = useCallback(async () => {
@@ -46,7 +47,7 @@ export function useJobQueue(portal: PopupPortal, deps: JobQueueDeps): JobQueueSt
             const runningProgress = progress.value.progress;
             jobs.setJobProgress(runningProgress);
             if (runningProgress) {
-                jobs.setJobRunStatusById((current) => ({ ...current, [runningProgress.jobId]: 'running' }));
+                jobs.setJobRunStatusById((current) => ({ ...current, [jobIdentityKey(runningProgress.marketKey, runningProgress.jobId)]: 'running' }));
             }
             if (progress.value.status !== 'running') setQueuePollingActive(false);
         }
@@ -57,7 +58,7 @@ export function useJobQueue(portal: PopupPortal, deps: JobQueueDeps): JobQueueSt
     usePolling(pollQueueProgress, 1000, { enabled: queuePolling, pauseWhenHidden: false });
 
     const runSelectedJobs = useCallback(async () => {
-        const selected = jobs.jobs.filter((job) => job.marketKey === jobs.marketKey && jobs.selectedJobs.has(job.id));
+        const selected = jobs.jobs.filter((job) => job.marketKey === jobs.marketKey && jobs.selectedJobs.has(jobIdentityKey(job.marketKey, job.id)));
         if (selected.length === 0) {
             jobs.setJobStatus(tt('Select at least one job in the current market'));
             return;
@@ -66,7 +67,7 @@ export function useJobQueue(portal: PopupPortal, deps: JobQueueDeps): JobQueueSt
         jobs.setJobRunId(runId);
         jobs.setJobBusy(true);
         jobs.setJobProgress(null);
-        jobs.setJobRunStatusById(Object.fromEntries(selected.map((job) => [job.id, 'pending' as const])));
+        jobs.setJobRunStatusById(Object.fromEntries(selected.map((job) => [jobIdentityKey(job.marketKey, job.id), 'pending' as const])));
         jobs.setJobStatus(tt('Running {count} job(s)...', { count: selected.length }));
         setQueuePollingActive(true);
         const response = await portal.runJobQueue(selected, runId);
@@ -84,7 +85,7 @@ export function useJobQueue(portal: PopupPortal, deps: JobQueueDeps): JobQueueSt
         } else {
             jobs.setJobRunStatusById((current) => {
                 const next = { ...current };
-                for (const job of selected) next[job.id] = 'failed';
+                for (const job of selected) next[jobIdentityKey(job.marketKey, job.id)] = 'failed';
                 return next;
             });
             jobs.setJobStatus(response.error.message);

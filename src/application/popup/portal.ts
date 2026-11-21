@@ -18,11 +18,11 @@ import type { LoadoutView } from '../loadout/view.js';
 
 export type { LoadoutView } from '../loadout/view.js';
 
-import type { AutoFinishFailure, AutoFinishLastRun, AutoFinishMarketResult, AutoFinishRunResult } from '../../contracts/auto-finish.js';
+import type { AutoFinishFailure, AutoFinishLastRun, AutoFinishMarketResult, AutoFinishRunResult, AutoFinishUnknownJob } from '../../contracts/auto-finish.js';
 import type { AutoJobsSnapshot } from '../../contracts/auto-jobs.js';
 import type { MarketCompletedJobsState } from '../../contracts/market-completed-jobs.js';
 
-export type { AutoFinishFailure, AutoFinishLastRun, AutoFinishMarketResult, AutoFinishRunResult, AutoJobsSnapshot, MarketCompletedJobsState };
+export type { AutoFinishFailure, AutoFinishLastRun, AutoFinishMarketResult, AutoFinishRunResult, AutoFinishUnknownJob, AutoJobsSnapshot, MarketCompletedJobsState };
 
 export interface JobRouteNode {
     readonly id: string;
@@ -76,9 +76,12 @@ export interface JobQueueFailure {
     readonly jobId: string;
     readonly name: string;
     readonly serverName: string | null;
+    /** Market-scoped identity; failure must not be mapped by jobId alone. */
+    readonly marketKey: string;
     readonly code: string;
     readonly message: string;
     readonly retryable?: boolean;
+    readonly unconfirmed?: boolean;
     readonly retryAt?: number;
     readonly lockExpiresAt?: number;
     readonly stage?: string;
@@ -86,6 +89,7 @@ export interface JobQueueFailure {
 
 export interface JobQueueResult {
     readonly stopped: boolean;
+    /** Market-scoped job identity strings (`jobIdentityKey`), not raw job ids. */
     readonly done: readonly string[];
     readonly failed: readonly JobQueueFailure[];
 }
@@ -95,6 +99,8 @@ export interface JobHistoryEntry {
     readonly name: string;
     readonly type: string;
     readonly serverName: string | null;
+    /** Optional for legacy history entries; new entries carry market identity. */
+    readonly marketKey?: string;
     readonly status: 'done' | 'failed' | 'retry';
     readonly at: number;
     readonly error?: string;
@@ -105,6 +111,7 @@ export interface JobQueueProgress {
     readonly total: number;
     readonly jobId: string;
     readonly jobName: string;
+    readonly marketKey: string;
     readonly serverName: string | null;
     readonly doneCount: number;
     readonly failedCount: number;
@@ -337,9 +344,9 @@ export interface AutoJobsStatus {
     readonly repairAt: number | null;
     readonly lastRefreshAt: number | null;
     readonly snapshotAt: number | null;
-    /** Active minigame locks: job id -> expiry. */
+    /** Active minigame locks: market-scoped job identity -> expiry. */
     readonly locks: Readonly<Record<string, number>>;
-    /** Per-job retry budget for the current reset. */
+    /** Per-job retry budget for the current reset, keyed by market-scoped identity. */
     readonly retryAttempts: Readonly<Record<string, { readonly count: number; readonly lastAttemptAt: number }>>;
 }
 
@@ -357,12 +364,17 @@ export interface AutoFinishStatus {
     /** Legacy jobId-only records; display/diagnostics only. */
     readonly legacyCompletedJobs: Readonly<Record<string, string>>;
     readonly completionStateStatus: 'not-loaded' | 'loaded' | 'unavailable';
+    /** Durable per-job Complete-Unknown projection. */
+    readonly unknownJobs: readonly AutoFinishUnknownJob[];
+    /** Availability of the Unknown projection sources. */
+    readonly unknownStateStatus: 'loaded' | 'partial' | 'unavailable';
 }
 
 export interface JobQueueState {
     readonly runId: string;
     readonly status: 'running' | 'done' | 'cancelled' | 'error';
     readonly progress: JobQueueProgress | null;
+    /** Market-scoped identity strings (`jobIdentityKey`). */
     readonly done: readonly string[];
     readonly failed: readonly JobQueueFailure[];
     readonly error: string | null;

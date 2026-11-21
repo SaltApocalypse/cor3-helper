@@ -234,6 +234,7 @@ describe('Complete unknown recovery integration', () => {
         let fail = true;
         const flaky: MarketCompletionStorePort = {
             getState: () => made.completionStore.getState(),
+            getStateWithHealth: () => made.completionStore.getStateWithHealth(),
             getCompletion: (marketKey, jobId) => made.completionStore.getCompletion(marketKey, jobId),
             clear: () => made.completionStore.clear(),
             pruneMarketBeforeReset: (marketKey, reset) => made.completionStore.pruneMarketBeforeReset(marketKey, reset),
@@ -264,6 +265,7 @@ describe('Complete unknown recovery integration', () => {
         const made = await makeUnknownJob();
         const unavailable: MarketCompletionStorePort = {
             getState: async () => { throw new Error('sidecar unavailable'); },
+            getStateWithHealth: async () => ({ status: 'unavailable' }),
             getCompletion: async () => null,
             clear: async () => undefined,
             pruneMarketBeforeReset: async () => ({ status: 'pruned', removed: 0, state: { byMarket: {} } }),
@@ -272,7 +274,8 @@ describe('Complete unknown recovery integration', () => {
         const result = await reconcilerFor(made, unavailable).reconcile({
             marketKey: 'home', resetAt: resetA, observedAt: 2, jobs: [], skippedJobs: completedSkip(),
         });
-        expect(result.completionFailures).toBe(1);
+        expect(result.storeStatus).toBe('partial');
+        expect(result.completionFailures).toBe(0);
         expect((await made.jobStore.get({ marketKey: 'home', jobId: 'job-1', resetAt: resetA }))?.status).toBe('unknown');
         expect(await made.completionStore.getState()).toEqual({ byMarket: {} });
 

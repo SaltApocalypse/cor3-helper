@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { jobIdentityKey } from './jobs.js';
 
 /**
  * Local lifecycle of one job within one market reset. This is a record of what
@@ -78,7 +79,7 @@ export function sameJobStateKey(a: JobStateKey, b: JobStateKey): boolean {
  * jobId still prevents cross-market collisions.
  */
 export function jobActiveKey(marketKey: string, jobId: string): string {
-    return JSON.stringify([marketKey, jobId]);
+    return jobIdentityKey(marketKey, jobId);
 }
 
 /**

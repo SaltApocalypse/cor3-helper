@@ -1,5 +1,5 @@
 import type { JobLifecycleStatus, JobStateKey, JobStateRecord } from '../../contracts/job-state.js';
-import { isCompletionUncertainRecord, normalizeJobStateResetAt } from '../../contracts/job-state.js';
+import { isCompletionUncertainRecord, JOB_STATE_UNKNOWN_RESET, normalizeJobStateResetAt } from '../../contracts/job-state.js';
 import type { JobOffer } from '../../domains/jobs/model.js';
 import type { AutomationLogger } from '../automation/ports.js';
 import type { SkippedJob } from './market-mapper.js';
@@ -74,7 +74,14 @@ export interface JobReconciliationResult {
     readonly failedWrites: number;
     readonly completionWrites: number;
     readonly completionFailures: number;
+    /** True whenever any required source was not fully trustworthy. */
     readonly storeFailed: boolean;
+    /**
+     * `loaded` means every required source was read completely and the
+     * reconciliation may be treated as a complete success. `partial` keeps
+     * successful diagnostic data but must not authorize completion/cleanup.
+     */
+    readonly storeStatus: 'loaded' | 'partial' | 'unavailable';
 }
 
 export interface JobStateReconcilerPort {
@@ -203,7 +210,11 @@ export function decideJobStateReconciliation(
     return { outcome: 'unchanged', recoverable: false, reason: 'remote-status-ambiguous' };
 }
 
-function emptyResult(marketKey: string, resetAt: string | null, storeFailed: boolean): JobReconciliationResult {
+function emptyResult(
+    marketKey: string,
+    resetAt: string | null,
+    storeStatus: JobReconciliationResult['storeStatus'],
+): JobReconciliationResult {
     return {
         marketKey,
         resetAt,
@@ -216,8 +227,14 @@ function emptyResult(marketKey: string, resetAt: string | null, storeFailed: boo
         failedWrites: 0,
         completionWrites: 0,
         completionFailures: 0,
-        storeFailed,
+        storeFailed: storeStatus !== 'loaded',
+        storeStatus,
     };
+}
+
+/** Result used when the reconciler itself could not run safely. */
+export function unavailableReconciliationResult(marketKey: string, resetAt: string | null): JobReconciliationResult {
+    return emptyResult(marketKey, resetAt, 'unavailable');
 }
 
 /**
@@ -235,17 +252,16 @@ export class JobStateReconciler implements JobStateReconcilerPort {
     async reconcile(input: ReconcileMarketInput): Promise<JobReconciliationResult> {
         const resetAt = normalizeJobStateResetAt(input.resetAt);
         const observedAt = input.observedAt ?? this.now();
-        let records: readonly JobStateRecord[];
-        try {
-            records = await this.deps.store.list();
-        } catch (error) {
-            this.deps.logger.warn('job-state', 'Failed to read job state for reconciliation', {
+        const jobState = await this.readJobStateHealth();
+        if (jobState.status !== 'loaded') {
+            this.deps.logger.warn('job-state', 'Job state is incomplete for reconciliation; keeping local state', {
                 marketKey: input.marketKey,
                 resetAt,
-                message: error instanceof Error ? error.message : String(error),
+                status: jobState.status,
             });
-            return emptyResult(input.marketKey, resetAt, true);
+            return emptyResult(input.marketKey, resetAt, jobState.status);
         }
+        const records = jobState.records;
 
         const local = records.filter((record) =>
             record.marketKey === input.marketKey
@@ -258,20 +274,19 @@ export class JobStateReconciler implements JobStateReconcilerPort {
                 && normalizeJobStateResetAt(record.resetAt) === null
                 && isCompletionUncertainRecord(record),
             );
-        let completionBarriers: Readonly<Record<string, Readonly<Record<string, string>>>> = {};
-        if (resetAt !== null && this.deps.completions?.getUnconfirmedState) {
-            try {
-                completionBarriers = await this.deps.completions.getUnconfirmedState();
-            } catch (error) {
-                this.deps.logger.warn('job-state', 'Unable to read completion barriers for reconciliation', {
-                    marketKey: input.marketKey,
-                    message: error instanceof Error ? error.message : String(error),
-                });
-            }
+        const completion = await this.readCompletionBarriers(resetAt);
+        if (completion.status === 'corrupt' || completion.status === 'unavailable') {
+            this.deps.logger.warn('job-state', 'Completion Store is incomplete for reconciliation; keeping local state', {
+                marketKey: input.marketKey,
+                resetAt,
+                status: completion.status,
+            });
+            return emptyResult(input.marketKey, resetAt, 'partial');
         }
+        const completionBarriers = completion.barriers;
         const marketBarriers = completionBarriers[input.marketKey] ?? {};
         if (local.length === 0 && nullUncertain.length === 0 && Object.keys(marketBarriers).length === 0) {
-            return emptyResult(input.marketKey, resetAt, false);
+            return emptyResult(input.marketKey, resetAt, 'loaded');
         }
 
         const remote = buildRemoteObservations(input);
@@ -450,8 +465,12 @@ export class JobStateReconciler implements JobStateReconcilerPort {
         if (resetAt !== null) {
             const handledJobIds = new Set([...local, ...nullUncertain].map((record) => record.jobId));
             for (const [jobId, barrierReset] of Object.entries(marketBarriers)) {
-                    // 'unknown' has no trustworthy reset identity; keep it fail-closed.
-                    if (barrierReset !== resetAt || handledJobIds.has(jobId)) continue;
+                    // Known-reset fallbacks are released only for that exact
+                    // reset. Identity-less legacy fallbacks can be released by
+                    // explicit completed evidence for the current, validated
+                    // reset; merely seeing a different reset never releases it.
+                    const matchesReset = barrierReset === resetAt || barrierReset === JOB_STATE_UNKNOWN_RESET;
+                    if (!matchesReset || handledJobIds.has(jobId)) continue;
                     const observation = remote.get(jobId) ?? 'absent';
                     if (observation !== 'completed') continue;
                     const bridged = await this.bridgeCompletion(input.marketKey, jobId, resetAt);
@@ -514,9 +533,51 @@ export class JobStateReconciler implements JobStateReconcilerPort {
             completionWrites,
             completionFailures,
             storeFailed: false,
+            storeStatus: 'loaded',
         };
         this.log(input, result);
         return result;
+    }
+
+    private async readJobStateHealth(): Promise<{
+        readonly records: readonly JobStateRecord[];
+        readonly status: JobReconciliationResult['storeStatus'];
+    }> {
+        const listWithHealth = this.deps.store.listWithHealth;
+        if (!listWithHealth) return { records: [], status: 'unavailable' };
+        try {
+            const result = await listWithHealth.call(this.deps.store);
+            return { records: result.records, status: result.status };
+        } catch (error) {
+            this.deps.logger.warn('job-state', 'Failed to read job state health for reconciliation', {
+                message: error instanceof Error ? error.message : String(error),
+            });
+            return { records: [], status: 'unavailable' };
+        }
+    }
+
+    private async readCompletionBarriers(resetAt: string | null): Promise<{
+        readonly status: 'ok' | 'missing' | 'corrupt' | 'unavailable';
+        readonly barriers: Readonly<Record<string, Readonly<Record<string, string>>>>;
+    }> {
+        // A null/unknown reset cannot bridge or clear completion evidence, so
+        // the sidecar is not a required source for that reconciliation.
+        if (resetAt === null || !this.deps.completions) return { status: 'missing', barriers: {} };
+        const getStateWithHealth = this.deps.completions.getStateWithHealth;
+        if (!getStateWithHealth) return { status: 'unavailable', barriers: {} };
+        try {
+            const result = await getStateWithHealth.call(this.deps.completions);
+            if (result.status === 'ok') {
+                return { status: 'ok', barriers: result.value.unconfirmedByMarket ?? {} };
+            }
+            if (result.status === 'missing') return { status: 'missing', barriers: {} };
+            return { status: result.status, barriers: {} };
+        } catch (error) {
+            this.deps.logger.warn('job-state', 'Unable to read completion barriers for reconciliation', {
+                message: error instanceof Error ? error.message : String(error),
+            });
+            return { status: 'unavailable', barriers: {} };
+        }
     }
 
     private async bridgeCompletion(
@@ -536,25 +597,50 @@ export class JobStateReconciler implements JobStateReconcilerPort {
         const writer = new CompletionRecordWriter(this.deps.completions);
         for (let attempt = 0; attempt < 3; attempt++) {
             let state;
-            try {
-                state = await this.deps.completions.getState();
-            } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                this.deps.logger.warn('job-state', 'Unable to read completion sidecar for reconciliation', {
-                    marketKey,
-                    jobId,
-                    message,
-                });
-                return { status: 'unavailable', blocksJobState: true, error: message };
+            if (this.deps.completions.getStateWithHealth) {
+                let read;
+                try {
+                    read = await this.deps.completions.getStateWithHealth.call(this.deps.completions);
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    this.deps.logger.warn('job-state', 'Unable to read completion sidecar health for reconciliation', {
+                        marketKey,
+                        jobId,
+                        message,
+                    });
+                    return { status: 'unavailable', blocksJobState: true, error: message };
+                }
+                if (read.status === 'corrupt' || read.status === 'unavailable') {
+                    this.deps.logger.warn('job-state', 'Completion sidecar is not trustworthy for reconciliation', {
+                        marketKey,
+                        jobId,
+                        status: read.status,
+                    });
+                    return { status: 'unavailable', blocksJobState: true, error: `completion store is ${read.status}` };
+                }
+                state = read.status === 'ok' ? read.value : { byMarket: {} };
+            } else {
+                try {
+                    state = await this.deps.completions.getState();
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    this.deps.logger.warn('job-state', 'Unable to read completion sidecar for reconciliation', {
+                        marketKey,
+                        jobId,
+                        message,
+                    });
+                    return { status: 'unavailable', blocksJobState: true, error: message };
+                }
             }
             const current = state.byMarket[marketKey]?.[jobId];
-            if (current === resetAt) return { status: 'already-recorded', blocksJobState: false };
             let expected: string | null;
             if (current !== undefined) {
-                const currentTime = Date.parse(current);
-                const nextTime = Date.parse(resetAt);
-                if (!Number.isFinite(currentTime) || !Number.isFinite(nextTime) || nextTime < currentTime) {
-                    return { status: 'reset-mismatch', blocksJobState: false };
+                if (current !== resetAt) {
+                    const currentTime = Date.parse(current);
+                    const nextTime = Date.parse(resetAt);
+                    if (!Number.isFinite(currentTime) || !Number.isFinite(nextTime) || nextTime < currentTime) {
+                        return { status: 'reset-mismatch', blocksJobState: false };
+                    }
                 }
                 expected = current;
             } else {
@@ -601,6 +687,7 @@ export class JobStateReconciler implements JobStateReconcilerPort {
             failedWrites: result.failedWrites,
             completionWrites: result.completionWrites,
             completionFailures: result.completionFailures,
+            storeStatus: result.storeStatus,
         };
         if (result.conflicts > 0 || result.failedWrites > 0 || result.completionFailures > 0) {
             this.deps.logger.warn('job-state', 'Job state reconciliation needs attention', data);

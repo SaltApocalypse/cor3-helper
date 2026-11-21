@@ -1,5 +1,6 @@
 import type { AutoFinishJobResult, AutoFinishMarketResult } from '../../../contracts/auto-finish.js';
 import { isServerlessJob, type JobOffer } from '../../../domains/jobs/model.js';
+import { jobIdentityKey } from '../../../contracts/jobs.js';
 import { isCompletedForMarketReset } from '../../../application/auto-job/market-completion.js';
 import { EMPTY_MARKET_COMPLETED_JOBS, type MarketCompletedJobsState } from '../../../contracts/market-completed-jobs.js';
 import type { JobOutcome } from '../../../application/auto-job/outcome.js';
@@ -36,6 +37,48 @@ export function recalcLiveMarkets(markets: readonly AutoFinishMarketResult[]): A
     });
 }
 
+/**
+ * Overlays the live market snapshot onto the final execution report.
+ *
+ * The final report is authoritative for every market/job it contains. Live
+ * data is used only to keep rows that the final report does not know about
+ * (for example a market that was refreshed after the final report was
+ * assembled). This prevents a live snapshot from deleting failed markets,
+ * cached claim-only rows or final outcomes, while still preserving genuinely
+ * new live-only rows.
+ */
+export function mergeFinalWithLive(
+    finalMarkets: readonly AutoFinishMarketResult[],
+    liveMarkets: readonly AutoFinishMarketResult[],
+): AutoFinishMarketResult[] {
+    const liveByMarket = new Map(liveMarkets.map((market) => [market.marketKey, market]));
+    const seenMarkets = new Set<string>();
+    const merged: AutoFinishMarketResult[] = [];
+
+    for (const finalMarket of finalMarkets) {
+        seenMarkets.add(finalMarket.marketKey);
+        const live = liveByMarket.get(finalMarket.marketKey);
+        if (!live) {
+            merged.push(recalcLiveMarkets([finalMarket])[0] ?? finalMarket);
+            continue;
+        }
+        const finalJobs = finalMarket.jobs ?? [];
+        const finalJobIds = new Set(finalJobs.map((job) => job.jobId));
+        const liveOnlyJobs = (live.jobs ?? []).filter((job) => !finalJobIds.has(job.jobId));
+        merged.push(recalcLiveMarkets([{
+            ...finalMarket,
+            jobs: [...liveOnlyJobs, ...finalJobs],
+        }])[0] ?? finalMarket);
+    }
+
+    for (const live of liveMarkets) {
+        if (seenMarkets.has(live.marketKey)) continue;
+        merged.push(recalcLiveMarkets([live])[0] ?? live);
+    }
+
+    return merged;
+}
+
 export function buildLiveMarkets(
     synced: { jobs: readonly JobOffer[]; markets: readonly JobMarketSyncEntry[] },
     runnable: readonly JobOffer[],
@@ -47,7 +90,7 @@ export function buildLiveMarkets(
         readonly resetByMarket?: ReadonlyMap<string, string>;
     },
 ): AutoFinishMarketResult[] {
-    const runnableIds = new Set(runnable.map((job) => job.id));
+    const runnableIds = new Set(runnable.map((job) => jobIdentityKey(job.marketKey, job.id)));
     const completedByMarket = completed?.completedJobsByMarket ?? EMPTY_MARKET_COMPLETED_JOBS;
     const resetByMarket = completed?.resetByMarket;
     return synced.markets.map((market) => {
@@ -59,14 +102,14 @@ export function buildLiveMarkets(
                 const claimOnly = job.alreadyTaken && job.canComplete;
                 const typeBlocked = !claimOnly && !allowedTypes.has(job.type);
                 const needsServer = !claimOnly && !isServerlessJob(job.type);
-                const lockUntil = locks.lockUntil(job.id);
+                const lockUntil = locks.lockUntil(job.marketKey, job.id);
                 const locked = lockUntil !== undefined && lockUntil > now;
-                const exhausted = locks.isRetryExhausted(job.id);
+                const exhausted = locks.isRetryExhausted(job.marketKey, job.id);
                 const resetAt = resetByMarket?.get(job.marketKey) ?? null;
                 // Jobs completed earlier in this reset stay done instead of
                 // reappearing as "already completed" (and losing their tag).
                 const completedForReset = isCompletedForMarketReset(completedByMarket, job.marketKey, job.id, resetAt);
-                const blocked = (needsServer && !job.serverId) || typeBlocked || locked || exhausted || !runnableIds.has(job.id);
+                const blocked = (needsServer && !job.serverId) || typeBlocked || locked || exhausted || !runnableIds.has(jobIdentityKey(job.marketKey, job.id));
                 return {
                     jobId: job.id,
                     name: job.name,
@@ -85,7 +128,7 @@ export function buildLiveMarkets(
                                     ? { error: 'Minigame is locked', code: 'MINIGAME_FAILED', stage: 'minigame', lockExpiresAt: lockUntil }
                                     : exhausted
                                         ? { error: 'Retry budget exhausted for this market reset', code: 'RETRY_EXHAUSTED', stage: 'retry', retryExhausted: true }
-                                        : !runnableIds.has(job.id)
+                                        : !runnableIds.has(jobIdentityKey(job.marketKey, job.id))
                                             ? { error: 'Already completed for this market reset', code: 'ALREADY_COMPLETED' }
                                             : {}),
                 };
@@ -130,7 +173,7 @@ export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketRes
         if (!market.ok) {
             const previous = previousMarkets?.find((entry) => entry.marketKey === market.marketKey);
             const doneHere = (params.doneJobs ?? []).filter((job) => job.marketKey === market.marketKey);
-            const previousJobs = (previous?.jobs ?? []).filter((job) => !doneIds.has(job.jobId));
+            const previousJobs = (previous?.jobs ?? []).filter((job) => !doneIds.has(jobIdentityKey(job.marketKey, job.jobId)));
             const jobs: AutoFinishJobResult[] = [
                 ...previousJobs,
                 ...doneHere.map((job): AutoFinishJobResult => ({
@@ -160,15 +203,15 @@ export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketRes
         }
         const marketJobs = synced.jobs.filter((job) => job.marketKey === market.marketKey);
         const jobs: AutoFinishJobResult[] = marketJobs.map((job): AutoFinishJobResult => {
-            const failure = failedById.get(job.id);
+            const failure = failedById.get(jobIdentityKey(job.marketKey, job.id));
             const failureError = failure?.error;
-            const outcome = outcomes.get(job.id);
+            const outcome = outcomes.get(jobIdentityKey(job.marketKey, job.id));
             const resetAt = resetByMarket.get(job.marketKey) ?? null;
             const completedForReset = isCompletedForMarketReset(completedJobsByMarket, job.marketKey, job.id, resetAt);
             // Report a job as done when it completed in this run or earlier in
             // the same reset. This keeps the Done tag after claim-only passes
             // and after a market refresh failed in a later cycle.
-            if (doneIds.has(job.id) || completedForReset) {
+            if (doneIds.has(jobIdentityKey(job.marketKey, job.id)) || completedForReset) {
                 return {
                     jobId: job.id,
                     name: job.name,
@@ -207,7 +250,7 @@ export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketRes
                     stage: 'select',
                 };
             }
-            const lockUntil = locks.lockUntil(job.id);
+            const lockUntil = locks.lockUntil(job.marketKey, job.id);
             if (lockUntil !== undefined && lockUntil > now) {
                 return {
                     jobId: job.id,
@@ -238,7 +281,7 @@ export function buildFinalMarkets(params: FinalMarketInput): AutoFinishMarketRes
                 };
             }
             if (outcome?.status === 'retry' && failure) {
-                const exhausted = locks.isRetryExhausted(job.id);
+                const exhausted = locks.isRetryExhausted(job.marketKey, job.id);
                 return {
                     jobId: job.id,
                     name: job.name,

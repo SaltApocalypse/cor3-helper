@@ -15,6 +15,8 @@ import type { DroneState } from '../../domains/drone/model.js';
 import type { JobMarketDefinition } from '../../domains/jobs/markets.js';
 import { jobOfferSchema } from '../../contracts/jobs.js';
 import { marketCompletedJobsSchema } from '../../contracts/market-completed-jobs.js';
+import { autoJobsScheduleStateSchema, autoJobsStatusSchema } from '../../contracts/auto-jobs.js';
+import { autoFinishLastRunSchema, autoFinishMarketSchema, autoFinishRunResultSchema, autoFinishUnknownJobSchema } from '../../contracts/auto-finish.js';
 import { buildNumberFromVersionName } from '../../kernel/version.js';
 
 const pingSchema = z.object({ version: z.string(), phase: z.string() });
@@ -362,78 +364,6 @@ const inventorySortSchema = z.object({
     fallback: z.boolean(),
     notice: z.string().nullable(),
 }).strict();
-const autoFinishJobSchema = z.object({
-    jobId: z.string(),
-    name: z.string(),
-    serverName: z.string().nullable(),
-    marketKey: z.string(),
-    status: z.enum(['done', 'failed', 'pending', 'running', 'skipped', 'retry', 'expired']),
-    rewardCredits: z.number().optional(),
-    rewardReputation: z.number().optional(),
-    error: z.string().optional(),
-    code: z.string().optional(),
-    retryable: z.boolean().optional(),
-    retryAt: z.number().optional(),
-    lockExpiresAt: z.number().optional(),
-    retryExhausted: z.boolean().optional(),
-    stage: z.string().optional(),
-}).strict();
-const autoJobsStatusSchema = z.object({
-    enabled: z.boolean(),
-    intervalMinutes: z.number(),
-    running: z.boolean(),
-    stage: z.string().default('idle'),
-    nextRefreshAt: z.number().nullable(),
-    refreshReason: z.enum(['interval', 'reset', 'fallback']),
-    lastRefreshAt: z.number().nullable(),
-    snapshotAt: z.number().nullable().default(null),
-    locks: z.record(z.string(), z.number()).default({}),
-    retryAttempts: z.record(z.string(), z.object({
-        count: z.number().int().nonnegative(),
-        lastAttemptAt: z.number(),
-    }).strict()).default({}),
-}).strict();
-const autoFinishMarketSchema = z.object({
-    marketKey: z.string(),
-    label: z.string(),
-    ok: z.boolean(),
-    skipped: z.number().int().nonnegative(),
-    retry: z.number().int().nonnegative().optional(),
-    expired: z.number().int().nonnegative().optional(),
-    resetAt: z.string().nullable().optional(),
-    jobTotal: z.number().int().nonnegative().optional(),
-    success: z.number().int().nonnegative().optional(),
-    failed: z.number().int().nonnegative().optional(),
-    pending: z.number().int().nonnegative().optional(),
-    jobs: z.array(autoFinishJobSchema).optional(),
-    updatedAt: z.number().int().nonnegative().optional(),
-    stale: z.boolean().optional(),
-    error: z.string().optional(),
-}).strict();
-const autoFinishFailureSchema = z.object({
-    jobId: z.string(),
-    name: z.string(),
-    serverName: z.string().nullable(),
-    code: z.string(),
-    message: z.string(),
-    retryable: z.boolean().optional(),
-    retryAt: z.number().optional(),
-    lockExpiresAt: z.number().optional(),
-    stage: z.string().optional(),
-}).strict();
-const autoFinishLastSchema = z.object({
-    runId: z.string(),
-    finishedAt: z.number(),
-    jobs: z.number().int().nonnegative(),
-    done: z.number().int().nonnegative(),
-    retry: z.number().int().nonnegative().optional(),
-    skipped: z.number().int().nonnegative().optional(),
-    expired: z.number().int().nonnegative().optional(),
-    failed: z.number().int().nonnegative(),
-    stopped: z.boolean(),
-    markets: z.array(autoFinishMarketSchema),
-    failures: z.array(autoFinishFailureSchema).default([]),
-}).strict();
 const autoFinishProgressSchema = z.object({
     index: z.number().int().nonnegative(),
     total: z.number().int().nonnegative(),
@@ -453,24 +383,15 @@ const autoFinishStatusSchema = z.object({
     running: z.boolean(),
     currentRunId: z.string().nullable().default(null),
     live: autoFinishLiveSchema.nullable().default(null),
-    last: autoFinishLastSchema.nullable(),
+    last: autoFinishLastRunSchema.nullable(),
     progress: autoFinishProgressSchema.nullable(),
     nextRetryAt: z.number().nullable(),
     retryReason: z.string().nullable(),
     completedJobsByMarket: marketCompletedJobsSchema.default({ byMarket: {} }),
     legacyCompletedJobs: z.record(z.string(), z.string()).default({}),
     completionStateStatus: z.enum(['not-loaded', 'loaded', 'unavailable']).default('not-loaded'),
-}).strict();
-const autoFinishRunSchema = z.object({
-    jobs: z.number().int().nonnegative(),
-    done: z.number().int().nonnegative(),
-    retry: z.number().int().nonnegative().optional(),
-    skipped: z.number().int().nonnegative().optional(),
-    expired: z.number().int().nonnegative().optional(),
-    failed: z.number().int().nonnegative(),
-    stopped: z.boolean(),
-    markets: z.array(autoFinishMarketSchema),
-    failures: z.array(autoFinishFailureSchema).default([]),
+    unknownJobs: z.array(autoFinishUnknownJobSchema).default([]),
+    unknownStateStatus: z.enum(['loaded', 'partial', 'unavailable']).default('unavailable'),
 }).strict();
 const networkOperationInfoSchema = z.object({
     id: z.string(),
@@ -494,9 +415,11 @@ const overviewAutomationSchema = z.object({
     lastError: z.string().nullable(),
     waiting: z.boolean().optional(),
 }).strict();
-const overviewAutoJobsSchema = z.object({
+export const overviewAutoJobsSchema = z.object({
     nextRefreshAt: z.number().int().nonnegative().nullable(),
     refreshReason: z.enum(['interval', 'reset', 'fallback']),
+    scheduleState: autoJobsScheduleStateSchema,
+    repairAt: z.number().nullable(),
     lastRefreshAt: z.number().int().nonnegative().nullable(),
     lastError: z.string().nullable(),
     lastSkipReason: z.string().nullable(),
@@ -507,7 +430,7 @@ const overviewTimerSchema = z.object({
     name: z.string(),
     endsAt: z.string().nullable(),
 }).strict();
-const overviewStateSchema = z.object({
+export const overviewStateSchema = z.object({
     auth: authStatusSchema,
     network: networkMapSummarySchema.nullable(),
     networkAgeMs: z.number().int().nonnegative().nullable(),
@@ -517,7 +440,7 @@ const overviewStateSchema = z.object({
     autoJobs: overviewAutoJobsSchema,
     automations: z.array(overviewAutomationSchema),
     timers: z.array(overviewTimerSchema),
-    jobReport: autoFinishLastSchema.nullable(),
+    jobReport: autoFinishLastRunSchema.nullable(),
 }).strict();
 const backgroundEventSchema = z.object({
     type: z.string(),
@@ -610,6 +533,7 @@ const jobAllMarketsSchema = z.object({
         resetAt: z.string().nullable().optional(),
         updatedAt: z.number().int().nonnegative().optional(),
         stale: z.boolean().optional(),
+        reconciliationStatus: z.enum(['loaded', 'partial', 'unavailable']).optional(),
         error: z.string().optional(),
         errorCode: z.string().optional(),
     }).strict()),
@@ -629,9 +553,11 @@ const jobQueueFailureSchema = z.object({
     jobId: z.string(),
     name: z.string(),
     serverName: z.string().nullable(),
+    marketKey: z.string(),
     code: z.string(),
     message: z.string(),
     retryable: z.boolean().optional(),
+    unconfirmed: z.boolean().optional(),
     retryAt: z.number().optional(),
     lockExpiresAt: z.number().optional(),
     stage: z.string().optional(),
@@ -643,6 +569,7 @@ const jobQueueSchema = z.object({
 }).strict();
 const jobHistorySchema = z.array(z.object({
     jobId: z.string(), name: z.string(), type: z.string(), serverName: z.string().nullable(),
+    marketKey: z.string().optional(),
     status: z.enum(['done', 'failed', 'retry']), at: z.number(), error: z.string().optional(),
 }).strict());
 const jobQueueProgressSchema = z.object({
@@ -650,6 +577,7 @@ const jobQueueProgressSchema = z.object({
     total: z.number().int().nonnegative(),
     jobId: z.string(),
     jobName: z.string(),
+    marketKey: z.string(),
     serverName: z.string().nullable(),
     doneCount: z.number().int().nonnegative(),
     failedCount: z.number().int().nonnegative(),
@@ -1119,7 +1047,7 @@ export class ChromePopupPortal implements PopupPortal {
     }
 
     runAutoFinish(force = false): Promise<{ ok: true; value: AutoFinishRunResult } | { ok: false; error: { code: string; message: string } }> {
-        return this.client.request('auto-finish.run', { force }, autoFinishRunSchema, 600000) as Promise<{ ok: true; value: AutoFinishRunResult } | { ok: false; error: { code: string; message: string } }>;
+        return this.client.request('auto-finish.run', { force }, autoFinishRunResultSchema, 600000) as Promise<{ ok: true; value: AutoFinishRunResult } | { ok: false; error: { code: string; message: string } }>;
     }
 
     cancelAutoFinish(): Promise<{ ok: true; value: void } | { ok: false; error: { code: string; message: string } }> {

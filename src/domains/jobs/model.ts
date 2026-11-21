@@ -1,5 +1,6 @@
 import { JOB_TYPES, type JobType } from '../../kernel/job-types.js';
 import type { JobCondition, JobOffer } from '../../contracts/jobs.js';
+import { jobIdentityKey } from '../../contracts/jobs.js';
 
 export { JOB_TYPES, type JobType };
 export type { JobCondition, JobOffer };
@@ -10,6 +11,7 @@ export const JOB_TYPE_PRIORITY: readonly JobType[] = [
 ];
 
 export interface JobSelectionOptions {
+    /** Market-scoped job identity strings (`jobIdentityKey`). */
     readonly completedIds?: ReadonlySet<string>;
     readonly supportedTypes?: ReadonlySet<string>;
     readonly serverPriority: (serverName: string | null, job: JobOffer) => number;
@@ -105,7 +107,7 @@ export function selectJobs(offers: readonly JobOffer[], options: JobSelectionOpt
     const completed = options.completedIds ?? new Set<string>();
     const supported = options.supportedTypes;
     return offers
-        .filter((job) => !completed.has(job.id))
+        .filter((job) => !completed.has(jobIdentityKey(job.marketKey, job.id)))
         .filter((job) => !supported || supported.has(job.type))
         .sort((a, b) => {
             const server = options.serverPriority(a.serverName, a) - options.serverPriority(b.serverName, b);

@@ -15,3 +15,4 @@ export * from './market-view.js';
 export * from './market.js';
 export * from './specialists.js';
 export * from './storage.js';
+export * from './storage-health.js';
