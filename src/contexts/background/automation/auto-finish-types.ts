@@ -41,7 +41,7 @@ export interface AutoFinishDeps {
     readonly store: AutoFinishStateStore;
     readonly completions: import('../../../application/auto-job/market-completion.js').MarketCompletionStorePort;
     /** Durable Job State barrier for unconfirmed Complete results. */
-    readonly jobStates?: Pick<import('../../../application/auto-job/job-state-port.js').JobStateStorePort, 'list' | 'listWithHealth'>;
+    readonly jobStates?: Pick<import('../../../application/auto-job/job-state-port.js').JobStateStorePort, 'list' | 'listWithHealth' | 'upsert'>;
     readonly locks: JobLockRegistry;
     readonly history: JobHistoryRecorder;
     readonly queue: AutoJobQueueService;

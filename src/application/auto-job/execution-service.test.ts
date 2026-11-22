@@ -1278,4 +1278,110 @@ describe('JobExecutionService Complete classification', () => {
         expect(fake.calls.filter((call) => call === 'complete')).toHaveLength(4);
         expect(lifecycle.transitions).not.toContain('completed');
     });
+
+    it('retries a transient market-not-reachable Complete instead of marking it unknown', async () => {
+        const fake = actions();
+        let attempts = 0;
+        fake.port.complete = async () => {
+            fake.calls.push('complete');
+            attempts += 1;
+            return attempts === 1
+                ? { ok: false as const, error: { code: 'GAME_JOB_FAILED', message: 'market-not-reachable' } }
+                : { ok: true as const, value: { credits: 1, reputation: 1, renown: 0 } };
+        };
+        const lifecycle = lifecycleRecorder();
+        const service = serviceWithComplete(fake.port, lifecycle.recorder);
+
+        const result = await service.executeDetailed(job('Log Deletion'));
+
+        expect(result.ok).toBe(true);
+        expect(fake.calls.filter((call) => call === 'complete')).toHaveLength(2);
+        expect(lifecycle.transitions).not.toContain('unknown');
+        expect(lifecycle.transitions.at(-1)).toBe('completed');
+    });
+
+    it('retries a transient Complete for a claimable job without taking it again', async () => {
+        const fake = actions();
+        let attempts = 0;
+        fake.port.complete = async () => {
+            fake.calls.push('complete');
+            attempts += 1;
+            return attempts === 1
+                ? { ok: false as const, error: { code: 'GAME_JOB_FAILED', message: 'market-not-reachable' } }
+                : { ok: true as const, value: { credits: 1, reputation: 1, renown: 0 } };
+        };
+        const lifecycle = lifecycleRecorder();
+        const service = serviceWithComplete(fake.port, lifecycle.recorder);
+
+        const result = await service.executeDetailed(job('File Decryption', {
+            alreadyTaken: true,
+            canComplete: true,
+        }));
+
+        expect(result.ok).toBe(true);
+        expect(fake.calls).toEqual(['complete', 'complete']);
+        expect(lifecycle.transitions).not.toContain('unknown');
+    });
+
+    it('keeps a transient Complete retryable after the bounded retries are exhausted', async () => {
+        const fake = actions();
+        fake.port.complete = async () => {
+            fake.calls.push('complete');
+            return { ok: false as const, error: { code: 'GAME_JOB_FAILED', message: 'market-not-reachable' } };
+        };
+        const lifecycle = lifecycleRecorder();
+        const service = serviceWithComplete(fake.port, lifecycle.recorder);
+
+        const result = await service.executeDetailed(job('Log Deletion'));
+
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+            expect(result.error.code).toBe('COMPLETE_FAILED');
+            expect(result.error.unconfirmed).not.toBe(true);
+            expect(result.error.retryable).toBe(true);
+        }
+        expect(fake.calls.filter((call) => call === 'complete')).toHaveLength(3);
+        expect(lifecycle.transitions).not.toContain('unknown');
+    });
+
+    it('treats a delayed already-completed response as a completed claim', async () => {
+        const fake = actions();
+        let attempts = 0;
+        fake.port.complete = async () => {
+            fake.calls.push('complete');
+            attempts += 1;
+            return attempts === 1
+                ? { ok: false as const, error: { code: 'GAME_JOB_FAILED', message: 'market-not-reachable' } }
+                : { ok: false as const, error: { code: 'GAME_JOB_FAILED', message: 'job-already-completed' } };
+        };
+        const lifecycle = lifecycleRecorder();
+        const service = serviceWithComplete(fake.port, lifecycle.recorder);
+
+        const result = await service.executeDetailed(job('Log Deletion'));
+
+        expect(result.ok).toBe(true);
+        expect(fake.calls.filter((call) => call === 'complete')).toHaveLength(2);
+        expect(lifecycle.transitions.at(-1)).toBe('completed');
+        expect(lifecycle.transitions).not.toContain('unknown');
+        expect(lifecycle.transitions).not.toContain('expired');
+    });
+
+    it('does not retry an ambiguous Complete timeout', async () => {
+        const fake = actions();
+        fake.port.complete = async () => {
+            fake.calls.push('complete');
+            return { ok: false as const, error: { code: 'GAME_TIMEOUT', message: 'Timed out waiting for market:job.complete' } };
+        };
+        const lifecycle = lifecycleRecorder();
+        const service = serviceWithComplete(fake.port, lifecycle.recorder);
+
+        const result = await service.executeDetailed(job('Log Deletion'));
+
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+            expect(result.error.unconfirmed).toBe(true);
+        }
+        expect(fake.calls.filter((call) => call === 'complete')).toHaveLength(1);
+        expect(lifecycle.transitions.at(-1)).toBe('unknown');
+    });
 });

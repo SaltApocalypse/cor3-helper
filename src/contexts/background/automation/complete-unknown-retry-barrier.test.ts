@@ -192,6 +192,29 @@ describe('Complete unknown retry barrier', () => {
         expect((await made.jobStore.get({ marketKey: 'home', jobId: 'shared', resetAt }))?.status).toBe('unknown');
     });
 
+    it('releases a claimable completion barrier on force retry', async () => {
+        const home = job('home', 'home-market');
+        const market = { marketKey: 'home', label: 'HOME', ok: true as const, skipped: 0, resetAt };
+        const made = makeHarness({
+            jobs: [home],
+            markets: [market],
+            complete: () => ({ ok: true, value: { credits: 1, reputation: 1, renown: 0 } }),
+        });
+        await made.jobStore.upsert({
+            marketKey: 'home', jobId: 'shared', resetAt, status: 'unknown', unconfirmed: true,
+            createdAt: '2026-11-20T10:00:00.000Z', updatedAt: '2026-11-20T10:00:00.000Z', lastTransitionAt: '2026-11-20T10:00:00.000Z',
+        } as JobStateRecord);
+        await made.completionStore.markUnconfirmed!({ marketKey: 'home', jobId: 'shared', resetAt });
+
+        await made.coordinator.run('owner', { forceRefresh: true }, prefetched([home], [market]));
+
+        expect(made.calls.filter((call) => call === 'complete:shared')).toHaveLength(1);
+        expect(made.calls.filter((call) => call === 'take:shared')).toHaveLength(0);
+        expect(await made.completionStore.getUnconfirmedState!()).toEqual({});
+        expect(await made.jobStore.get({ marketKey: 'home', jobId: 'shared', resetAt }))
+            .toMatchObject({ status: 'completed' });
+    });
+
     it('releases the barrier only after explicit remote completed and a sidecar write', async () => {
         const home = job('home', 'home-market');
         const market = { marketKey: 'home', label: 'HOME', ok: true as const, skipped: 0, resetAt };

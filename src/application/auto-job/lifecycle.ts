@@ -10,7 +10,7 @@ export interface JobLifecycleFailure {
     readonly unconfirmed?: boolean;
 }
 
-const UNCONFIRMED_RESULT = /timeout|timed out|no response|response (?:lost|missing)|lost response|disconnected|socket|connection (?:reset|closed|refused)|econn|not[-\s]?reachable|unknown (?:result|outcome)/i;
+const UNCONFIRMED_RESULT = /timeout|timed out|no response|response (?:lost|missing)|lost response|disconnected|socket|connection (?:reset|closed|refused)|econn|unknown (?:result|outcome)/i;
 const MINIGAME_LOCK = /minigame.*lock|lock(?:ed)?.*minigame|locked\s*\(/i;
 const CONDITIONS_NOT_MET = /conditions?.*not.*met|not met|not ready|still.*process/i;
 

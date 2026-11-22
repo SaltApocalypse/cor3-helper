@@ -109,6 +109,14 @@ const PROTECTED_ABSENT_STATUSES: ReadonlySet<JobLifecycleStatus> = new Set([
     'unknown',
 ]);
 
+/**
+ * How long an unconfirmed Complete must remain unresolved before a remote
+ * claimable row may release it for one more claim-only attempt. This keeps the
+ * safety barrier for genuinely ambiguous results without stranding a job until
+ * the market reset.
+ */
+const CLAIMABLE_RECOVERY_COOLDOWN_MS = 15 * 60_000;
+
 interface ReconciliationDecision {
     readonly outcome: JobReconciliationOutcome;
     readonly nextStatus?: JobLifecycleStatus;
@@ -149,11 +157,18 @@ export function decideJobStateReconciliation(
     previousStatus: JobLifecycleStatus,
     observation: RemoteJobObservation,
     completionUnconfirmed = false,
+    allowClaimableRecovery = false,
 ): ReconciliationDecision {
     // A Complete whose result was never confirmed cannot be cleared by the job
     // merely still existing (taken/claimable/available/absent). Only explicit
     // completed evidence may release the barrier; expired/failed remain terminal.
     if (completionUnconfirmed && observation !== 'completed' && observation !== 'expired' && observation !== 'failed') {
+        // A claimable row proves the reward is still unclaimed. After a cooling
+        // period, allow the existing claim-only path one more attempt instead of
+        // stranding the job until the market reset.
+        if (observation === 'taken-claimable' && allowClaimableRecovery) {
+            return { outcome: 'recoverable', nextStatus: 'ready-to-claim', recoverable: true, reason: 'remote-claimable-recovery' };
+        }
         return { outcome: 'pending', recoverable: false, reason: 'complete-result-unknown' };
     }
     if (observation === 'completed') {
@@ -352,9 +367,23 @@ export class JobStateReconciler implements JobStateReconcilerPort {
                 continue;
             }
 
-            let decision = decideJobStateReconciliation(record.status, observation, isCompletionUncertainRecord(record));
+            const recordUpdatedAt = Date.parse(record.updatedAt);
+            const recoveryCooledDown = Number.isFinite(recordUpdatedAt)
+                && this.now() - recordUpdatedAt >= CLAIMABLE_RECOVERY_COOLDOWN_MS;
+            let decision = decideJobStateReconciliation(
+                record.status,
+                observation,
+                isCompletionUncertainRecord(record),
+                recoveryCooledDown,
+            );
             let completionStatus: CompletionBridgeStatus | undefined;
             let completionError: string | undefined;
+            if (decision.reason === 'remote-claimable-recovery') {
+                const cleared = await this.clearFallbackBarrier(record.marketKey, record.jobId, resetAt);
+                if (!cleared) {
+                    decision = { outcome: 'pending', recoverable: false, reason: 'completion-barrier-clear-failed' };
+                }
+            }
             if (observation === 'completed') {
                 const bridged = await this.bridgeCompletion(record.marketKey, record.jobId, resetAt);
                 completionStatus = bridged.status;
@@ -577,6 +606,30 @@ export class JobStateReconciler implements JobStateReconcilerPort {
                 message: error instanceof Error ? error.message : String(error),
             });
             return { status: 'unavailable', barriers: {} };
+        }
+    }
+
+    /**
+     * Removes a completion-store fallback barrier before releasing a claimable
+     * recovery. Test doubles without the optional port are treated as clear.
+     */
+    private async clearFallbackBarrier(
+        marketKey: string,
+        jobId: string,
+        resetAt: string | null,
+    ): Promise<boolean> {
+        const clear = this.deps.completions?.clearUnconfirmed;
+        if (!clear) return true;
+        try {
+            await clear.call(this.deps.completions, { marketKey, jobId, resetAt });
+            return true;
+        } catch (error) {
+            this.deps.logger.warn('job-state', 'Failed to clear completion fallback barrier', {
+                marketKey,
+                jobId,
+                message: error instanceof Error ? error.message : String(error),
+            });
+            return false;
         }
     }
 

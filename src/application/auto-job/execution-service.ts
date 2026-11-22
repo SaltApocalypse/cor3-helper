@@ -20,7 +20,29 @@ const UNCONFIRMED_COMPLETE_CODES = new Set(['GAME_TIMEOUT', 'GAME_NO_SOCKET', 'J
 // Only locally-generated pre-send failures are provably safe to retry.
 const EXPLICIT_COMPLETE_CODES = new Set(['NO_COR3_TAB', 'INVALID_JOB']);
 
+/** Bounded verification retries for a transient market/Complete rejection. */
+const TRANSIENT_COMPLETE_RETRY_ATTEMPTS = 2;
+const TRANSIENT_COMPLETE_RETRY_DELAY_MS = 2_000;
+/**
+ * A server-side "market not reachable" (or rate-limit/busy) response means the
+ * market check did not complete, not that the Complete may have been applied.
+ * It must stay retryable instead of becoming a durable Complete-Unknown barrier.
+ */
+const TRANSIENT_COMPLETE_HINTS = /market[-\s]?not[-\s]?reachable|not[-\s]?reachable|rate[\s-]?limit|too many requests|busy|processing|in progress|try again|temporarily unavailable|server busy/i;
+/** A repeated Complete can answer "already completed" after a delayed first ACK. */
+const ALREADY_COMPLETED_HINTS = /already[-\s]?completed|already[-\s]?claimed|job[-\s]?completed|duplicate complete/i;
+
+function isTransientCompleteMessage(message: string): boolean {
+    return TRANSIENT_COMPLETE_HINTS.test(message);
+}
+
+function isAlreadyCompletedMessage(message: string): boolean {
+    return ALREADY_COMPLETED_HINTS.test(message);
+}
+
 function unconfirmedCompleteError(error: GameError): boolean {
+    if (isAlreadyCompletedMessage(error.message)) return false;
+    if (isTransientCompleteMessage(error.message)) return false;
     if (error.unconfirmed !== undefined) return error.unconfirmed;
     if (UNCONFIRMED_COMPLETE_CODES.has(error.code)) return true;
     if (EXPLICIT_COMPLETE_CODES.has(error.code)) return false;
@@ -213,7 +235,7 @@ export class JobExecutionService implements JobExecutionPort {
         // Completion is the only remaining step for a claimable job. It must
         // not be rejected for a missing target server or a disabled type.
         if (job.alreadyTaken && job.canComplete) {
-            return this.complete(job, state, executionResetAt);
+            return this.completeWithTransientRetry(job, state, executionResetAt);
         }
         if (!job.serverId && !isServerlessJob(job.type)) {
             return err({ code: 'NO_SERVER', message: 'Job has no server id' });
@@ -249,7 +271,7 @@ export class JobExecutionService implements JobExecutionPort {
                 if (refreshed.ok && refreshed.value.status === 'fresh') current = refreshed.value.job;
             }
             if (current.alreadyTaken && current.canComplete) {
-                return this.complete(current, state, executionResetAt);
+                return this.completeWithTransientRetry(current, state, executionResetAt);
             }
         }
 
@@ -292,7 +314,7 @@ export class JobExecutionService implements JobExecutionPort {
             if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
             await this.pace?.();
         }
-        return this.complete(job, state, executionResetAt);
+        return this.completeWithTransientRetry(job, state, executionResetAt);
     }
 
     private async cleanupIps(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
@@ -309,7 +331,7 @@ export class JobExecutionService implements JobExecutionPort {
             if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
             await this.pace?.();
         }
-        return this.complete(job, state, executionResetAt);
+        return this.completeWithTransientRetry(job, state, executionResetAt);
     }
 
     private async eliminateFile(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
@@ -320,37 +342,37 @@ export class JobExecutionService implements JobExecutionPort {
             file.jobId === job.id
             || refs.some((ref) => ref.fileId === file.fileId || (ref.name !== undefined && ref.name === file.name)),
         ) ?? files.value.find((file) => file.source === 'job');
-        if (!target) return this.complete(job, state, executionResetAt);
+        if (!target) return this.completeWithTransientRetry(job, state, executionResetAt);
         const result = await this.actions.deleteFile(job.serverId!, target.fileId);
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
-        return this.complete(job, state, executionResetAt);
+        return this.completeWithTransientRetry(job, state, executionResetAt);
     }
 
     private async deleteLog(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
         const logs = await this.actions.getServerLogs(job.serverId!);
         if (!logs.ok) return err({ code: 'ACTION_FAILED', message: logs.error.message });
         const target = logs.value.find((log) => log.jobId === job.id);
-        if (!target) return this.complete(job, state, executionResetAt);
+        if (!target) return this.completeWithTransientRetry(job, state, executionResetAt);
         const result = await this.actions.deleteLog(job.serverId!, target.seq);
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
-        return this.complete(job, state, executionResetAt);
+        return this.completeWithTransientRetry(job, state, executionResetAt);
     }
 
     private async downloadLog(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
         const logs = await this.actions.getServerLogs(job.serverId!);
         if (!logs.ok) return err({ code: 'ACTION_FAILED', message: logs.error.message });
         const target = logs.value.find((log) => log.jobId === job.id);
-        if (!target) return this.complete(job, state, executionResetAt);
+        if (!target) return this.completeWithTransientRetry(job, state, executionResetAt);
         const result = await this.actions.downloadLog(job.serverId!, target.seq);
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
-        return this.complete(job, state, executionResetAt);
+        return this.completeWithTransientRetry(job, state, executionResetAt);
     }
 
     private async downloadFile(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
         const files = await this.actions.getServerFiles(job.serverId!);
         if (!files.ok) return err({ code: 'ACTION_FAILED', message: files.error.message });
         const target = files.value.find((file) => file.jobId === job.id);
-        if (!target) return this.complete(job, state, executionResetAt);
+        if (!target) return this.completeWithTransientRetry(job, state, executionResetAt);
         const result = await this.actions.downloadFile(job.serverId!, target.fileId);
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
         if (requiresDecrypt(job)) {
@@ -358,7 +380,7 @@ export class JobExecutionService implements JobExecutionPort {
             if (!download.ok) return download;
             return this.decryptAndComplete(job, download.value, state, executionResetAt);
         }
-        return this.complete(job, state, executionResetAt);
+        return this.completeWithTransientRetry(job, state, executionResetAt);
     }
 
     private async fileDecryption(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
@@ -736,7 +758,32 @@ export class JobExecutionService implements JobExecutionPort {
         if (!fileName) return err({ code: 'ACTION_FAILED', message: 'No upload file found' });
         const result = await this.actions.uploadFile(job.serverId, fileName);
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
-        return this.complete(job, state, executionResetAt);
+        return this.completeWithTransientRetry(job, state, executionResetAt);
+    }
+
+    /**
+     * Sends Complete and, for transient market rejections, refreshes the job
+     * row and retries a bounded number of times. A transient failure stays
+     * retryable instead of becoming a durable Complete-Unknown barrier.
+     */
+    private async completeWithTransientRetry(
+        job: JobOffer,
+        state: JobStateSession | null,
+        executionResetAt: string | null,
+    ): Promise<Result<JobReward, JobExecutionError>> {
+        let current = job;
+        let last = await this.complete(current, state, executionResetAt);
+        for (let attempt = 1; attempt <= TRANSIENT_COMPLETE_RETRY_ATTEMPTS && !last.ok; attempt++) {
+            if (!isTransientCompleteMessage(last.error.message)) return last;
+            this.trace?.(`Complete hit a transient market error; refreshing before retry ${attempt}`, {
+                jobId: current.id,
+                message: last.error.message,
+            });
+            await this.sleep(TRANSIENT_COMPLETE_RETRY_DELAY_MS);
+            current = await this.refreshForCompletion(current);
+            last = await this.complete(current, state, executionResetAt);
+        }
+        return last;
     }
 
     private async complete(job: JobOffer, state: JobStateSession | null, executionResetAt: string | null): Promise<Result<JobReward, JobExecutionError>> {
@@ -749,11 +796,25 @@ export class JobExecutionService implements JobExecutionPort {
             if (!hook.ok) return err({ code: 'COMPLETE_FAILED', message: hook.error.message, ...retryMetadata(hook.error) });
         }
         const result = await this.actions.complete(job);
+        if (!result.ok && isAlreadyCompletedMessage(result.error.message)) {
+            // A delayed first ACK can make the retry answer "already completed".
+            // The reward is not claimable anymore, so record the completion and
+            // report success instead of leaving an Unknown barrier or expired tag.
+            const persisted = await this.persistCompletion(job, state, executionResetAt);
+            if (!persisted.ok) return persisted;
+            await state?.transition('completed');
+            return ok({
+                credits: job.rewardCredits,
+                reputation: job.rewardReputation,
+                renown: 0,
+            });
+        }
         if (!result.ok) {
             return err({
                 code: 'COMPLETE_FAILED',
                 message: result.error.message,
                 ...retryMetadata(result.error),
+                ...(isTransientCompleteMessage(result.error.message) ? { retryable: true } : {}),
                 ...(unconfirmedCompleteError(result.error) ? { unconfirmed: true } : {}),
             });
         }

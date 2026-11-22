@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-22 against build `2.0.7-salta.311`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (122 files / 986 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-23 against build `2.0.8-salta.312`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (122 files / 995 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.7-salta.311`)
+## Current completion snapshot (build `2.0.8-salta.312`)
 
 | Metric | Value |
 |---|---|
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 122 files / 986 tests pass
-- `npm run build` — pass, `2.0.7-salta.311`
+- `npm test` — 122 files / 995 tests pass
+- `npm run build` — pass, `2.0.8-salta.312`
 
 ---
 
@@ -1430,4 +1430,16 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 - Native `fetch` is invoked with the global receiver, fixing `Illegal invocation` failures in the MV3 worker.
 - Persisted results are projected onto the strict `UpdateCheckResult` contract, fixing the `source` key rejection that surfaced as "Could not save the update status".
 - Storage read failures surface as `STORAGE_READ_FAILED` instead of appearing as an empty cache.
-- Verification: 122 files / 986 tests, including service/store/lifecycle coverage and a UI architecture guard against direct GitHub or `UpdateChecker` access.
+- Verification: 122 files / 995 tests, including service/store/lifecycle coverage and a UI architecture guard against direct GitHub or `UpdateChecker` access.
+
+---
+
+# Part 70 — Transient Complete recovery and claim-only liveness (2.0.7-salta.312)
+
+- `market-not-reachable` and similar server-side busy/rate-limit rejections are treated as transient Complete failures, not unconfirmed results; they no longer create a durable Complete-Unknown barrier.
+- Direct Complete paths refresh the job row after a 2s pause and retry up to two times. If a delayed first ACK makes the retry answer "already completed", the result is recorded as a successful completion instead of `unknown`/`expired`.
+- `lifecycleStatusForFailure` no longer turns "not reachable" text into an unknown lifecycle record on its own.
+- Force run releases stale completion barriers only for jobs whose fresh market row is `alreadyTaken && canComplete`, then runs the normal claim-only path; non-claimable jobs stay blocked.
+- The reconciler releases an aged (15 minutes) unconfirmed completion when the remote row is claimable, clears the fallback barrier and marks the record ready-to-claim; only an unknown fallback or a recent barrier stays pending.
+- The completion store gains `clearUnconfirmed` so one fallback barrier can be released without touching completion records or other resets.
+- Verification: 122 files / 995 tests, including transient-retry, already-completed, claimable-recovery, force-run and barrier-clear coverage.

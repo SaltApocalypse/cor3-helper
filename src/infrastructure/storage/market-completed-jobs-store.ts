@@ -210,6 +210,42 @@ export class MarketCompletedJobsStore implements MarketCompletionStorePort {
         return (await this.get()).unconfirmedByMarket ?? {};
     }
 
+    /**
+     * Removes a fallback barrier for one identity without touching completed
+     * records. A known reset only clears its own barrier (or an identity-less
+     * one); a different known reset is left intact.
+     */
+    async clearUnconfirmed(input: {
+        readonly marketKey: string;
+        readonly jobId: string;
+        readonly resetAt: string | null;
+    }): Promise<void> {
+        const marketKey = requireValue(input.marketKey, 'marketKey');
+        const jobId = requireValue(input.jobId, 'jobId');
+        const requested = input.resetAt === null
+            ? JOB_STATE_UNKNOWN_RESET
+            : requireReset(input.resetAt, 'resetAt');
+        await this.enqueue(async () => {
+            const current = await this.readForWrite();
+            const stored = current.unconfirmedByMarket?.[marketKey]?.[jobId];
+            if (stored === undefined) return;
+            if (requested === JOB_STATE_UNKNOWN_RESET) {
+                if (stored !== JOB_STATE_UNKNOWN_RESET) return;
+            } else if (stored !== requested && stored !== JOB_STATE_UNKNOWN_RESET) {
+                return;
+            }
+            const jobs = { ...current.unconfirmedByMarket?.[marketKey] };
+            delete jobs[jobId];
+            const markets = { ...current.unconfirmedByMarket };
+            if (Object.keys(jobs).length === 0) delete markets[marketKey];
+            else markets[marketKey] = jobs;
+            await this.repository.set({
+                byMarket: current.byMarket,
+                ...(Object.keys(markets).length > 0 ? { unconfirmedByMarket: markets } : {}),
+            });
+        });
+    }
+
     async markUnconfirmed(input: {
         readonly marketKey: string;
         readonly jobId: string;

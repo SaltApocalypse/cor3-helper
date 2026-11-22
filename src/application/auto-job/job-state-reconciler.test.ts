@@ -438,6 +438,59 @@ describe('JobStateReconciler completion bridge', () => {
         expect(await made.completions.getState()).toEqual({ byMarket: {} });
     });
 
+    it('releases an aged unconfirmed completion when the remote row is claimable', async () => {
+        const made = await harness([record({
+            jobId: 'job-1',
+            status: 'unknown',
+            unconfirmed: true,
+            updatedAt: '2026-11-20T09:00:00.000Z',
+        })]);
+        await made.completions.markUnconfirmed!({ marketKey: 'home', jobId: 'job-1', resetAt: resetA });
+
+        const result = await made.reconciler.reconcile({
+            marketKey: 'home',
+            resetAt: resetA,
+            observedAt,
+            jobs: [job('job-1', { alreadyTaken: true, canComplete: true })],
+        });
+
+        expect(result.decisions[0]).toMatchObject({
+            previousStatus: 'unknown',
+            observation: 'taken-claimable',
+            outcome: 'recoverable',
+            recoverable: true,
+            reason: 'remote-claimable-recovery',
+        });
+        expect(result.recoverable).toEqual(['job-1']);
+        const stored = await made.store.get({ marketKey: 'home', jobId: 'job-1', resetAt: resetA });
+        expect(stored).toMatchObject({ status: 'ready-to-claim' });
+        expect(stored?.unconfirmed).toBeUndefined();
+        expect(await made.completions.getUnconfirmedState!()).toEqual({});
+    });
+
+    it('keeps an aged unconfirmed completion pending when the row is only taken', async () => {
+        const made = await harness([record({
+            jobId: 'job-1',
+            status: 'unknown',
+            unconfirmed: true,
+            updatedAt: '2026-11-20T09:00:00.000Z',
+        })]);
+
+        const result = await made.reconciler.reconcile({
+            marketKey: 'home',
+            resetAt: resetA,
+            observedAt,
+            jobs: [job('job-1', { alreadyTaken: true, canComplete: false })],
+        });
+
+        expect(result.decisions[0]).toMatchObject({
+            observation: 'taken',
+            outcome: 'pending',
+            reason: 'complete-result-unknown',
+        });
+        expect((await made.store.get({ marketKey: 'home', jobId: 'job-1', resetAt: resetA }))?.status).toBe('unknown');
+    });
+
     it('treats a legacy unknown COMPLETE_FAILED record as completion-uncertain', async () => {
         const made = await harness([record({
             jobId: 'job-1', status: 'unknown', errorCode: 'COMPLETE_FAILED',

@@ -210,6 +210,32 @@ describe('MarketCompletedJobsStore unconfirmed barrier', () => {
         expect(await restarted.getCompletion('home', 'known')).toBe(resetA);
     });
 
+    it('clears one fallback barrier without touching completions or other resets', async () => {
+        const store = new MarketCompletedJobsStore(new MemoryStorageArea(), { now: () => 1 });
+        await store.recordCompletion(input({ jobId: 'done', resetAt: resetA }));
+        await store.markUnconfirmed({ marketKey: 'home', jobId: 'same', resetAt: resetA });
+        await store.markUnconfirmed({ marketKey: 'home', jobId: 'other', resetAt: resetB });
+        await store.markUnconfirmed({ marketKey: 'home', jobId: 'unknown', resetAt: null });
+        await store.markUnconfirmed({ marketKey: 'dark', jobId: 'dark-job', resetAt: resetA });
+
+        await store.clearUnconfirmed({ marketKey: 'home', jobId: 'same', resetAt: resetA });
+        expect(await store.getUnconfirmedState()).toEqual({
+            home: { other: resetB, unknown: 'unknown' },
+            dark: { 'dark-job': resetA },
+        });
+
+        await store.clearUnconfirmed({ marketKey: 'home', jobId: 'other', resetAt: resetA });
+        expect(await store.getUnconfirmedState()).toEqual({
+            home: { other: resetB, unknown: 'unknown' },
+            dark: { 'dark-job': resetA },
+        });
+
+        await store.clearUnconfirmed({ marketKey: 'home', jobId: 'other', resetAt: resetB });
+        await store.clearUnconfirmed({ marketKey: 'home', jobId: 'unknown', resetAt: null });
+        expect(await store.getUnconfirmedState()).toEqual({ dark: { 'dark-job': resetA } });
+        expect(await store.getCompletion('home', 'done')).toBe(resetA);
+    });
+
     it('keeps barriers when pruning older completion resets', async () => {
         const store = new MarketCompletedJobsStore(new MemoryStorageArea(), { now: () => 1 });
         await store.recordCompletion(input({ jobId: 'old', resetAt: resetA }));

@@ -347,6 +347,90 @@ export class AutoFinishCoordinator {
         return { exact, unknown, all };
     }
 
+    /**
+     * Force run: a remote claimable row proves the reward is still unclaimed.
+     * Release stale Complete-Unknown barriers for those identities only, then
+     * let the normal claim-only path run. Non-claimable/ambiguous jobs stay
+     * blocked, and a failed retry recreates the barrier through the normal path.
+     */
+    private async releaseClaimableCompletionBarriers(
+        jobs: readonly JobOffer[],
+        resetByMarket: ReadonlyMap<string, string>,
+    ): Promise<number> {
+        const claimable = jobs.filter((job) => job.alreadyTaken && job.canComplete);
+        if (claimable.length === 0) return 0;
+
+        let records: readonly JobStateRecord[] = [];
+        const jobStates = this.deps.jobStates;
+        if (jobStates) {
+            try {
+                if (jobStates.listWithHealth) {
+                    const result = await jobStates.listWithHealth.call(jobStates);
+                    if (result.status !== 'loaded') return 0;
+                    records = result.records;
+                } else {
+                    records = await jobStates.list();
+                }
+            } catch (error) {
+                this.deps.logger.warn('auto-jobs', 'Unable to read job state for force retry recovery', {
+                    message: error instanceof Error ? error.message : String(error),
+                });
+                return 0;
+            }
+        }
+
+        const at = new Date(this.deps.clock.now()).toISOString();
+        let released = 0;
+        for (const job of claimable) {
+            const resetAt = resetByMarket.get(job.marketKey) ?? null;
+            const record = records.find((entry) =>
+                entry.marketKey === job.marketKey
+                && entry.jobId === job.id
+                && (entry.resetAt === resetAt || (resetAt !== null && entry.resetAt === null))
+                && isCompletionUncertainRecord(entry));
+            if (record && jobStates) {
+                try {
+                    await jobStates.upsert({
+                        marketKey: record.marketKey,
+                        jobId: record.jobId,
+                        resetAt: record.resetAt,
+                        status: 'ready-to-claim',
+                        createdAt: record.createdAt,
+                        updatedAt: at,
+                        lastTransitionAt: at,
+                        ...(record.errorCode ? { errorCode: record.errorCode } : {}),
+                        ...(record.lastError ? { lastError: record.lastError } : {}),
+                        ...(record.stage ? { stage: record.stage } : {}),
+                    });
+                    released += 1;
+                } catch (error) {
+                    this.deps.logger.warn('auto-jobs', 'Failed to release claimable completion barrier', {
+                        jobId: job.id,
+                        marketKey: job.marketKey,
+                        message: error instanceof Error ? error.message : String(error),
+                    });
+                    continue;
+                }
+            }
+            const clear = this.deps.completions.clearUnconfirmed;
+            if (clear) {
+                try {
+                    await clear.call(this.deps.completions, { marketKey: job.marketKey, jobId: job.id, resetAt });
+                } catch (error) {
+                    this.deps.logger.warn('auto-jobs', 'Failed to clear completion fallback barrier', {
+                        jobId: job.id,
+                        marketKey: job.marketKey,
+                        message: error instanceof Error ? error.message : String(error),
+                    });
+                }
+            }
+        }
+        if (released > 0) {
+            this.deps.logger.info('auto-jobs', `Force retry released ${released} claimable completion barrier(s)`, { released });
+        }
+        return released;
+    }
+
     private matchesCompletionBarrier(
         barrier: { readonly exact: ReadonlySet<string>; readonly unknown: ReadonlySet<string>; readonly all: ReadonlySet<string> },
         job: JobOffer,
@@ -396,6 +480,9 @@ export class AutoFinishCoordinator {
                 if (market.ok && typeof market.resetAt === 'string' && market.resetAt.length > 0) {
                     preResets.set(market.marketKey, market.resetAt);
                 }
+            }
+            if (options.forceRefresh === true) {
+                await this.releaseClaimableCompletionBarriers(prefetched.jobs, preResets);
             }
             const preUnconfirmed = await this.loadCompletionBarrier();
             if (preState.clearAttempts) this.deps.locks.clearAttempts();
@@ -560,6 +647,9 @@ export class AutoFinishCoordinator {
                 if (market.ok && typeof market.resetAt === 'string' && market.resetAt.length > 0) {
                     resetByMarket.set(market.marketKey, market.resetAt);
                 }
+            }
+            if (options.forceRefresh === true) {
+                await this.releaseClaimableCompletionBarriers(synced.jobs, resetByMarket);
             }
             const unconfirmed = await this.loadCompletionBarrier();
             if (state.clearAttempts) this.deps.locks.clearAttempts();

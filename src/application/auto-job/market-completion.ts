@@ -40,6 +40,15 @@ export interface MarketCompletionStorePort {
     pruneMarketBeforeReset(marketKey: string, currentResetAt: string): Promise<MarketCompletionPruneOutcome>;
     /** Optional durable fallback barrier used when Job State cannot persist. */
     getUnconfirmedState?(): Promise<Readonly<Record<string, Readonly<Record<string, string>>>>>;
+    /**
+     * Removes one durable fallback barrier without recording a completion.
+     * Used only after a remote row proves the reward is still claimable.
+     */
+    clearUnconfirmed?(input: {
+        readonly marketKey: string;
+        readonly jobId: string;
+        readonly resetAt: string | null;
+    }): Promise<void>;
     markUnconfirmed?(input: {
         readonly marketKey: string;
         readonly jobId: string;
