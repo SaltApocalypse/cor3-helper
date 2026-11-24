@@ -1,4 +1,6 @@
+import { useState } from 'preact/hooks';
 import type { PopupPortal } from '../../../application/popup/portal.js';
+import { t } from '../../i18n.js';
 import { DeveloperPage } from '../../pages/DeveloperPage.js';
 import type { DebugLogsState } from '../hooks/useDebugLogs.js';
 import type { NetworkState } from '../hooks/useNetwork.js';
@@ -22,6 +24,27 @@ export function DeveloperPanel({
     settings,
     debugLive,
 }: DeveloperPanelProps) {
+    const [loadoutDumpBusy, setLoadoutDumpBusy] = useState(false);
+    const [loadoutDumpStatus, setLoadoutDumpStatus] = useState('');
+
+    const exportLoadout = async () => {
+        setLoadoutDumpBusy(true);
+        setLoadoutDumpStatus(t(settings.language, 'developer.loadout.reading'));
+        try {
+            const response = await portal.dumpLoadout();
+            if (!response.ok) {
+                setLoadoutDumpStatus(response.error.message);
+                return;
+            }
+            portal.exportText(response.value.fileName, response.value.json);
+            setLoadoutDumpStatus(`${t(settings.language, 'developer.loadout.done')} · ${response.value.fileName}`);
+        } catch (error) {
+            setLoadoutDumpStatus(error instanceof Error ? error.message : String(error));
+        } finally {
+            setLoadoutDumpBusy(false);
+        }
+    };
+
     return (
         <DeveloperPage
             language={settings.language}
@@ -46,6 +69,9 @@ export function DeveloperPanel({
                     : { snapshot: null, autoJobsDiagnostics: network.diagnostics?.autoJobs ?? null };
                 await portal.copyText(JSON.stringify(value, null, 2));
             }}
+            onExportLoadout={exportLoadout}
+            loadoutDumpBusy={loadoutDumpBusy}
+            loadoutDumpStatus={loadoutDumpStatus}
             debugLines={debug.debugLogs}
             debugLoading={debug.debugLogsLoading}
             debugLive={debugLive}

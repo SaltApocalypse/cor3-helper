@@ -172,7 +172,7 @@ describe('Complete unknown retry barrier', () => {
         expect(await made.completionStore.getState()).toEqual({ byMarket: {} });
     });
 
-    it('does not execute a previously unconfirmed job on a later AutoFinish selection', async () => {
+    it('releases a claimable completion barrier without an explicit force retry', async () => {
         const home = job('home', 'home-market');
         const market = { marketKey: 'home', label: 'HOME', ok: true as const, skipped: 0, resetAt };
         const made = makeHarness({
@@ -187,9 +187,10 @@ describe('Complete unknown retry barrier', () => {
 
         await made.coordinator.run('owner', {}, prefetched([home], [market]));
 
-        expect(made.queueRun).not.toHaveBeenCalled();
-        expect(made.calls.filter((call) => call === 'complete:shared')).toHaveLength(0);
-        expect((await made.jobStore.get({ marketKey: 'home', jobId: 'shared', resetAt }))?.status).toBe('unknown');
+        expect(made.queueRun).toHaveBeenCalledTimes(1);
+        expect(made.calls.filter((call) => call === 'take:shared')).toHaveLength(0);
+        expect(made.calls.filter((call) => call === 'complete:shared')).toHaveLength(1);
+        expect((await made.jobStore.get({ marketKey: 'home', jobId: 'shared', resetAt }))?.status).toBe('completed');
     });
 
     it('releases a claimable completion barrier on force retry', async () => {
@@ -455,7 +456,7 @@ describe('Complete unknown retry barrier', () => {
         });
     });
 
-    it('does not let one market unconfirmed block the same job id in another market', async () => {
+    it('releases one market barrier without blocking the same job id in another market', async () => {
         const home = job('home', 'home-market');
         const dark = job('dark', 'dark-market');
         const markets = [
@@ -474,9 +475,10 @@ describe('Complete unknown retry barrier', () => {
 
         await made.coordinator.run('owner', {}, prefetched([home, dark], markets));
 
-        expect(made.calls.filter((call) => call === 'complete:shared')).toHaveLength(1);
-        expect(made.calls).toContain('complete:shared');
-        expect((await made.jobStore.get({ marketKey: 'home', jobId: 'shared', resetAt }))?.status).toBe('unknown');
+        // The claimable row proves the home reward is still unclaimed, so the
+        // barrier is released and both markets are claimed independently.
+        expect(made.calls.filter((call) => call === 'complete:shared')).toHaveLength(2);
+        expect((await made.jobStore.get({ marketKey: 'home', jobId: 'shared', resetAt }))?.status).toBe('completed');
         expect((await made.jobStore.get({ marketKey: 'dark', jobId: 'shared', resetAt }))?.status).toBe('completed');
     });
 });

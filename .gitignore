@@ -5,3 +5,7 @@ RELEASE_NOTES.md
 cor3-ws-export*.json
 *.zip
 *.log
+
+# Local game captures (personal account data; never commit)
+catalog/captures/*.json
+cor3-loadout-*.json

@@ -24,6 +24,9 @@ export interface DeveloperPageProps {
     readonly onRefreshDiagnostics: () => void | Promise<void>;
     readonly onCopyDiagnostics: () => void | Promise<void>;
     readonly onCopyAutoJobsSnapshot: () => void | Promise<void>;
+    readonly onExportLoadout: () => void | Promise<void>;
+    readonly loadoutDumpBusy: boolean;
+    readonly loadoutDumpStatus: string;
     readonly debugLines: readonly DebugLogLine[];
     readonly debugLoading: boolean;
     readonly debugLive: boolean;
@@ -50,6 +53,9 @@ export function DeveloperPage({
     onRefreshDiagnostics,
     onCopyDiagnostics,
     onCopyAutoJobsSnapshot,
+    onExportLoadout,
+    loadoutDumpBusy,
+    loadoutDumpStatus,
     debugLines,
     debugLoading,
     debugLive,
@@ -176,6 +182,21 @@ export function DeveloperPage({
                 {diagnostics
                     ? <pre class="v2-diagnostics">{JSON.stringify(diagnostics, null, 2)}</pre>
                     : <p class="v2-muted">{t(language, 'developer.diagnostics.notLoaded')}</p>}
+            </GameSection>
+
+            <GameSection
+                title={t(language, 'developer.loadout.title')}
+                description={t(language, 'developer.loadout.description')}
+                expanded={panelOpen['developer.loadout'] ?? false}
+                onOpenChange={(open) => onPanelOpenChange('developer.loadout', open)}
+            >
+                <div class="v2-actions">
+                    <button type="button" disabled={loadoutDumpBusy} onClick={() => void onExportLoadout()}>
+                        {loadoutDumpBusy ? t(language, 'developer.loadout.reading') : t(language, 'developer.loadout.export')}
+                    </button>
+                </div>
+                {loadoutDumpStatus ? <p class="v2-muted">{loadoutDumpStatus}</p> : null}
+                <p class="v2-muted">{t(language, 'developer.loadout.hint')}</p>
             </GameSection>
 
             <GameSection

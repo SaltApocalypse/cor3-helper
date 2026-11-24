@@ -23,8 +23,12 @@ export function registerMessaging(core: CoreRuntime, automation: AutomationRunti
         }
         if (type === 'V2_MARKET_CACHE') {
             const marketId = (message as { marketId?: unknown }).marketId;
+            const source = (message as { source?: unknown }).source;
             const parsed = rawMarketSnapshotSchema.safeParse((message as { snapshot?: unknown }).snapshot);
-            if (typeof marketId === 'string' && parsed.success) automation.autoJobs.applyMarketCacheSnapshot(marketId, parsed.data);
+            if (typeof marketId === 'string' && parsed.success) {
+                const component = source === 'jobs' || source === 'options' || source === 'lots' ? source : undefined;
+                automation.autoJobs.applyMarketCacheSnapshot(marketId, parsed.data, component);
+            }
             return false;
         }
         if (type === 'V2_EXPEDITION_DECISIONS') {

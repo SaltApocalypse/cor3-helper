@@ -71,7 +71,14 @@ export interface LoadoutPlan {
     readonly hardware: HardwareSet;
     readonly ability: AbilityType;
     readonly target: string;
+    /** Integer power used for feasibility. */
     readonly power: number;
+    /** Unrounded power, kept for diagnostics. */
+    readonly rawPower: number;
+    /** Resource ratio that produced `rawPower` (0–1), for diagnostics. */
+    readonly ratio?: number;
+    /** Bottleneck resource when `ratio` was computed. */
+    readonly bottleneck?: string | null;
     readonly requiredPower: number;
     readonly feasible: boolean;
     readonly switchCost: number;

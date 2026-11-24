@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-23 against build `2.0.8-salta.312`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (122 files / 995 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-24 against build `2.0.9-salta.314`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (122 files / 1016 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.8-salta.312`)
+## Current completion snapshot (build `2.0.9-salta.314`)
 
 | Metric | Value |
 |---|---|
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 122 files / 995 tests pass
-- `npm run build` — pass, `2.0.8-salta.312`
+- `npm test` — 122 files / 1016 tests pass
+- `npm run build` — pass, `2.0.9-salta.314`
 
 ---
 
@@ -1443,3 +1443,44 @@ Market refresh used `RouteExecutor` directly. The executor always walked interme
 - The reconciler releases an aged (15 minutes) unconfirmed completion when the remote row is claimable, clears the fallback barrier and marks the record ready-to-claim; only an unknown fallback or a recent barrier stays pending.
 - The completion store gains `clearUnconfirmed` so one fallback barrier can be released without touching completion records or other resets.
 - Verification: 122 files / 995 tests, including transient-retry, already-completed, claimable-recovery, force-run and barrier-clear coverage.
+
+---
+
+# Part 71 — Market data provenance, decrypt requirement and claimable barrier release (2.0.9-salta)
+
+Root causes and fixes recorded from real user logs (`B.log`, `C.log`, `A.log`) and a raw `loadout.json` capture.
+
+## Market data provenance (HOME never refreshing)
+
+- `V2_MARKET_CACHE_UPDATED` / `V2_MARKET_CACHE` now carry `source: jobs | options | lots`. A merged snapshot alone cannot prove the job list is fresh because options/lots responses reuse the previously cached jobs.
+- `AutoJobsCoordinator.applyMarketCacheSnapshot` always refreshes the market cache view, but only a `jobs` observation replaces the Auto Jobs job list, `resetAt` and `updatedAt`.
+- `mergeAutoJobsSnapshot` keeps a previously known `resetAt` when a successful payload omits `nextJobsResetAt`.
+- When no market needs a refresh, the coordinator logs each market's reset state, `updatedAt` and age at debug level, so a starved market is diagnosable from an exported log.
+- Rationale: the Overview credits poll (`market.options` every 60 s) used to bump HOME's `updatedAt`, so the scheduler treated HOME as freshly synced and never fetched its jobs.
+
+## Decrypt requirement derivation
+
+- `JobExecutionService` no longer uses `analysis.decryptPower` as `requiredPower`. With `canDecrypt: false`, `decryptPower` is the **current** power; the real requirement is strictly greater.
+- The planning floor is now `max(1, floor(decryptPower) + 1)`; `null` becomes 1 instead of 0 so the optimizer is not disabled.
+- Traces record `observedDecryptPower` vs `requiredPower`, and `Decrypt loadout ready` records `requirementSource: derived-from-current`.
+- Verified against the game: `resources.softwarePower` gives `5CRYPt0L 09` `computedPower: 36` (our floor formula agrees), and `Lyapun AA8` on the failing hardware computes 20.697 → 20. With the new floor the same inventory reaches 33.
+
+## Completion barrier release
+
+- Auto Finish releases claimable completion barriers on every run, not only on an explicit force retry.
+- Safety boundaries kept: only records written by the explicit `unconfirmed` path are released; legacy `unknown` records are not backfilled; reset identities must match exactly; a failed Job State write or a non-unconfirmed record keeps the Completion Store barrier.
+- A fresh `alreadyTaken && canComplete` row is positive evidence that the reward is still unclaimed, so it can release a timed-out Complete.
+
+## Loadout diagnostics and selection
+
+- `abilityPowerDetails()` is the single power evaluator and exposes `rawPower`; `LoadoutPlan` carries `rawPower`, `ratio` and `bottleneck`.
+- When no plan is feasible, the optimizer reports the true maximum power (`bestAvailablePower`) and `shortfall` instead of keeping the current hardware.
+- The runtime fingerprint now covers software abilities/consuming and all hardware specs, so same-id definition changes invalidate cached plans.
+- The job tag view is derived by `jobTagView()` and `normalizeJobStatus()`; `ready` / `ready to claim` / `claim pending` collapse into one green `claimable` tag, `completed` maps to `done`, and `invalid`/`unsupported` map to `skipped`. A real failure keeps its primary tag plus a green claimable secondary tag.
+- Decrypt loadouts pass `maximize: true`; when the real requirement is unknown (failed analysis), the optimizer selects the strongest attainable plan instead of keeping hardware that merely satisfies the derived +1 floor. A raw `loadout.json` check: `requiredPower=1` keeps 23 without maximize and reaches 33 with it.
+- Market cache pushes without a `source` (pre-313 content script) no longer advance jobs freshness and warn once. Every non-manual cycle logs a per-market selection (`state`/`ageMs`/`due`/`forced`/`selected`), and `auto-jobs.status` exposes it. A stale-jobs watchdog forces a market whose last jobs observation exceeds `max(2×TTL, min(interval, 10 min))` while other markets keep the cycle alive; the interval alarm still decides when a cycle runs. `useJobs` applies only newer snapshots.
+
+## Verification
+
+- `npm run typecheck`, `npm run lint`, `npm run build`.
+- `npm test`: 122 files / 1016 tests, including new coverage for options-vs-jobs freshness, reset preservation, decrypt requirement derivation, non-force barrier release, legacy/null-reset safety, tag matrix, infeasible true maximum and same-id definition invalidation.

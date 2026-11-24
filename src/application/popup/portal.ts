@@ -16,11 +16,12 @@ import type { ExpeditionDecisionOption } from '../../domains/expeditions/model.j
 
 import type { DroneState } from '../../domains/drone/model.js';
 import type { LoadoutView } from '../loadout/view.js';
+import type { LoadoutDumpFile } from '../../contracts/loadout.js';
 
 export type { LoadoutView } from '../loadout/view.js';
 
 import type { AutoFinishFailure, AutoFinishLastRun, AutoFinishMarketResult, AutoFinishRunResult, AutoFinishUnknownJob } from '../../contracts/auto-finish.js';
-import type { AutoJobsSnapshot } from '../../contracts/auto-jobs.js';
+import type { AutoJobsMarketSelection, AutoJobsSnapshot } from '../../contracts/auto-jobs.js';
 import type { MarketCompletedJobsState } from '../../contracts/market-completed-jobs.js';
 import type { UpdateCheckResult } from '../../contracts/update-check.js';
 
@@ -371,6 +372,9 @@ export interface AutoJobsStatus {
     readonly locks: Readonly<Record<string, number>>;
     /** Per-job retry budget for the current reset, keyed by market-scoped identity. */
     readonly retryAttempts: Readonly<Record<string, { readonly count: number; readonly lastAttemptAt: number }>>;
+    /** Due/forced decision for every known market on the next refresh. */
+    readonly marketSelection: readonly AutoJobsMarketSelection[];
+    readonly lastSkipReason: string | null;
 }
 
 export interface AutoFinishStatus {
@@ -584,6 +588,7 @@ export interface PopupPortal {
     disableAutoDaily(): Promise<BridgeResult<unknown>>;
     claimPendingMail(): Promise<BridgeResult<MailClaimResult>>;
     loadoutView(): Promise<BridgeResult<LoadoutView>>;
+    dumpLoadout(): Promise<BridgeResult<LoadoutDumpFile>>;
     applyLoadout(ability: 'HACK' | 'DECRYPT' | 'SEARCH', target: string, requiredPower: number, strategy?: 'best' | 'weakest'): Promise<BridgeResult<LoadoutApplyResult>>;
     equipLoadoutHardware(moduleConfigId: string): Promise<BridgeResult<void>>;
     equipLoadoutSoftware(moduleConfigId: string): Promise<BridgeResult<void>>;

@@ -32,12 +32,18 @@ function publishReadiness(value: unknown): void {
     }
 }
 
-function publishMarketCache(value: unknown, marketId: unknown): void {
+function publishMarketCache(value: unknown, marketId: unknown, source: unknown): void {
     if (typeof marketId !== 'string') return;
     const parsed = rawMarketSnapshotSchema.safeParse(value);
     if (!parsed.success) return;
+    const component = source === 'jobs' || source === 'options' || source === 'lots' ? source : undefined;
     try {
-        sendToBackground({ type: 'V2_MARKET_CACHE', marketId, snapshot: parsed.data });
+        sendToBackground({
+            type: 'V2_MARKET_CACHE',
+            marketId,
+            snapshot: parsed.data,
+            ...(component !== undefined ? { source: component } : {}),
+        });
     } catch {
         // The content script may outlive an extension reload.
     }
@@ -45,10 +51,10 @@ function publishMarketCache(value: unknown, marketId: unknown): void {
 
 window.addEventListener('message', (event) => {
     if (event.source !== window) return;
-    const data = event.data as { version?: unknown; type?: unknown; readiness?: unknown; marketId?: unknown; snapshot?: unknown; level?: unknown; message?: unknown; data?: unknown; decisions?: unknown } | null;
+    const data = event.data as { version?: unknown; type?: unknown; readiness?: unknown; marketId?: unknown; snapshot?: unknown; source?: unknown; level?: unknown; message?: unknown; data?: unknown; decisions?: unknown } | null;
     if (data?.version !== undefined && data.version !== 2) return;
     if (data?.type === 'V2_GAME_READINESS_CHANGED') publishReadiness(data.readiness);
-    if (data?.type === 'V2_MARKET_CACHE_UPDATED') publishMarketCache(data.snapshot, data.marketId);
+    if (data?.type === 'V2_MARKET_CACHE_UPDATED') publishMarketCache(data.snapshot, data.marketId, data.source);
     if (data?.type === 'V2_EXPEDITION_DECISIONS' && Array.isArray(data.decisions)) {
         try {
             sendToBackground({ type: 'V2_EXPEDITION_DECISIONS', decisions: data.decisions });

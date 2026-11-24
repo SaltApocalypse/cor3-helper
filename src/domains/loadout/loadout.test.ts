@@ -236,6 +236,120 @@ describe('Loadout optimizer', () => {
         expect(result.feasible).toBe(false);
         expect(result.plan?.feasible).toBe(false);
     });
+
+    it('reports the true maximum power when nothing satisfies the requirement', () => {
+        const weakCpu: HardwareDefinition = { id: 'cpu-weak', name: 'CPU Weak', slot: 'cpu', specs: { cpuFrequency: 10, cpuCores: 4, cpuConsuming: 10 } };
+        const strongCpu: HardwareDefinition = { id: 'cpu-strong', name: 'CPU Strong', slot: 'cpu', specs: { cpuFrequency: 30, cpuCores: 4, cpuConsuming: 10 } };
+        const scaling: SoftwareDefinition = {
+            id: 'sw-scale',
+            name: 'Scaling hack',
+            abilities: [{ type: 'HACK', minPower: 10, maxPower: 20, serverTypes: ['CEDRT'] }],
+            consuming: { cpu_frequency: [0, 5, 25] },
+        };
+        const scalingCatalog: ItemCatalog = {
+            catalogVersion: '1',
+            gameVersion: 'test',
+            hardware: [weakCpu, strongCpu, gpu, ram, psu200],
+            software: [scaling],
+        };
+        const result = optimizeLoadout({
+            catalog: scalingCatalog,
+            inventory: {
+                ownedHardwareIds: new Set(['cpu-weak', 'cpu-strong', 'gpu1', 'ram1', 'psu200']),
+                ownedSoftwareIds: new Set(['sw-scale']),
+                equippedHardware: { cpu: 'cpu-weak', gpu: 'gpu1', ram: 'ram1', psu: 'psu200' },
+                equippedSoftwareIds: ['sw-scale'],
+                capturedAt: 1,
+            },
+            ability: 'HACK',
+            target: 'CEDRT',
+            requiredPower: 21,
+            strategy: 'best',
+        });
+        expect(result.feasible).toBe(false);
+        expect(result.plan?.hardware.cpu.id).toBe('cpu-strong');
+        expect(result.plan?.power).toBe(20);
+        expect(result.bestAvailablePower).toBe(20);
+        expect(result.shortfall).toBe(1);
+    });
+
+    it('keeps the unrounded power for diagnostics', () => {
+        const weakCpu: HardwareDefinition = { id: 'cpu-weak', name: 'CPU Weak', slot: 'cpu', specs: { cpuFrequency: 10, cpuCores: 4, cpuConsuming: 10 } };
+        const scaling: SoftwareDefinition = {
+            id: 'sw-scale',
+            name: 'Scaling hack',
+            abilities: [{ type: 'HACK', minPower: 10, maxPower: 20, serverTypes: ['CEDRT'] }],
+            consuming: { cpu_frequency: [0, 5, 25] },
+        };
+        const result = optimizeLoadout({
+            catalog: {
+                catalogVersion: '1',
+                gameVersion: 'test',
+                hardware: [weakCpu, gpu, ram, psu200],
+                software: [scaling],
+            },
+            inventory: {
+                ownedHardwareIds: new Set(['cpu-weak', 'gpu1', 'ram1', 'psu200']),
+                ownedSoftwareIds: new Set(['sw-scale']),
+                equippedHardware: {},
+                equippedSoftwareIds: [],
+                capturedAt: 1,
+            },
+            ability: 'HACK',
+            target: 'CEDRT',
+            requiredPower: 0,
+        });
+        expect(result.plan?.power).toBe(12);
+        expect(result.plan?.rawPower).toBeCloseTo(12.5, 5);
+        expect(result.plan?.ratio).toBeCloseTo(0.25, 5);
+        expect(result.plan?.bottleneck).toBe('cpu_frequency');
+    });
+
+    it('maximizes power even when the current hardware satisfies a low requirement', () => {
+        const weakCpu: HardwareDefinition = { id: 'cpu-weak', name: 'CPU Weak', slot: 'cpu', specs: { cpuFrequency: 10, cpuCores: 4, cpuConsuming: 10 } };
+        const strongCpu: HardwareDefinition = { id: 'cpu-strong', name: 'CPU Strong', slot: 'cpu', specs: { cpuFrequency: 30, cpuCores: 4, cpuConsuming: 10 } };
+        const scaling: SoftwareDefinition = {
+            id: 'sw-scale',
+            name: 'Scaling hack',
+            abilities: [{ type: 'HACK', minPower: 10, maxPower: 20, serverTypes: ['CEDRT'] }],
+            consuming: { cpu_frequency: [0, 5, 25] },
+        };
+        const scalingCatalog: ItemCatalog = {
+            catalogVersion: '1',
+            gameVersion: 'test',
+            hardware: [weakCpu, strongCpu, gpu, ram, psu200],
+            software: [scaling],
+        };
+        const inventory: InventorySnapshot = {
+            ownedHardwareIds: new Set(['cpu-weak', 'cpu-strong', 'gpu1', 'ram1', 'psu200']),
+            ownedSoftwareIds: new Set(['sw-scale']),
+            equippedHardware: { cpu: 'cpu-weak', gpu: 'gpu1', ram: 'ram1', psu: 'psu200' },
+            equippedSoftwareIds: ['sw-scale'],
+            capturedAt: 1,
+        };
+        const kept = optimizeLoadout({
+            catalog: scalingCatalog,
+            inventory,
+            ability: 'HACK',
+            target: 'CEDRT',
+            requiredPower: 1,
+            strategy: 'best',
+        });
+        expect(kept.plan?.hardware.cpu.id).toBe('cpu-weak');
+        expect(kept.plan?.power).toBe(12);
+
+        const maximized = optimizeLoadout({
+            catalog: scalingCatalog,
+            inventory,
+            ability: 'HACK',
+            target: 'CEDRT',
+            requiredPower: 1,
+            strategy: 'best',
+            maximize: true,
+        });
+        expect(maximized.plan?.hardware.cpu.id).toBe('cpu-strong');
+        expect(maximized.plan?.power).toBe(20);
+    });
 });
 
 describe('Loadout target matching', () => {

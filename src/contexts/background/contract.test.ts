@@ -78,6 +78,7 @@ const EXPECTED_BRIDGE_TYPES = [
     'job.syncMarket',
     'job.take',
     'loadout.apply',
+    'loadout.dump',
     'loadout.equipHardware',
     'loadout.equipSoftware',
     'loadout.unequipSoftware',

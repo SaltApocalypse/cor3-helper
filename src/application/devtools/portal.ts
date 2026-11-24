@@ -1,3 +1,5 @@
+import type { LoadoutDumpFile } from '../../contracts/loadout.js';
+
 export interface DevToolsLogLine {
     readonly at: number;
     readonly level: string;
@@ -48,6 +50,8 @@ export interface DevToolsPortal {
     clear(category: DevToolsClearCategory): Promise<void>;
     sendWs(message: string): Promise<void>;
     inspectStorage(): Promise<DevToolsStorageInspection>;
+    /** Reads the raw loadout payload for the static catalog workflow. */
+    exportLoadout(): Promise<LoadoutDumpFile>;
     download(filename: string, text: string, mimeType: string): void;
     language(): Promise<DevToolsLanguage>;
 }

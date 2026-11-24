@@ -30,3 +30,11 @@ export const rawLoadoutSchema = z.object({    ownedHardware: z.array(rawHardware
 export type RawLoadout = z.infer<typeof rawLoadoutSchema>;
 export type RawHardware = z.infer<typeof rawHardwareSchema>;
 export type RawSoftware = z.infer<typeof rawSoftwareSchema>;
+
+/** Downloadable raw loadout dump produced by the devtools export tool. */
+export const loadoutDumpFileSchema = z.object({
+    fileName: z.string().min(1),
+    json: z.string().min(1),
+}).strict();
+
+export type LoadoutDumpFile = z.infer<typeof loadoutDumpFileSchema>;

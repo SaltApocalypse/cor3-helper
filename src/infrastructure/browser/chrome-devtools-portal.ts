@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { settingsV1Schema } from '../../contracts/storage.js';
+import { loadoutDumpFileSchema, type LoadoutDumpFile } from '../../contracts/loadout.js';
 import type { BridgeClient } from '../bridge/bridge-client.js';
 import type {
     DevToolsBridgeLine,
@@ -54,6 +55,12 @@ export class ChromeDevToolsPortal implements DevToolsPortal {
     async sendWs(message: string): Promise<void> {
         const response = await this.client.request('devtools.wsSend', { message }, z.unknown(), 10000);
         if (!response.ok) throw new Error(response.error.message);
+    }
+
+    async exportLoadout(): Promise<LoadoutDumpFile> {
+        const response = await this.client.request('loadout.dump', {}, loadoutDumpFileSchema, 60000);
+        if (!response.ok) throw new Error(response.error.message);
+        return response.value;
     }
 
     inspectStorage(): Promise<DevToolsStorageInspection> {

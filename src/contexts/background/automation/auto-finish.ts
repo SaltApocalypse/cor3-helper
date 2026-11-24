@@ -16,7 +16,7 @@ import { humanDelay as defaultHumanDelay } from './delay.js';
 import { failureOf, jobLocation, outcomeInputOf, countsAgainstRetryBudget } from './job-outcome.js';
 import { resolveAutoFinishRunState, shouldUsePrefetched, type AutoFinishRunOptions } from './auto-finish-options.js';
 import { isCompletedForMarketReset } from '../../../application/auto-job/market-completion.js';
-import { isCompletionUncertainRecord, jobActiveKey, jobStateKeyId, JOB_STATE_UNKNOWN_RESET, type JobStateRecord } from '../../../contracts/job-state.js';
+import { isCompletionUncertainRecord, jobActiveKey, jobStateKeyId, JOB_STATE_UNKNOWN_RESET, normalizeJobStateResetAt, type JobStateRecord } from '../../../contracts/job-state.js';
 import { CompletionRecordWriter } from '../../../application/auto-job/completion-record.js';
 import { EMPTY_MARKET_COMPLETED_JOBS, type MarketCompletedJobsState } from '../../../contracts/market-completed-jobs.js';
 import type { JobMarketSyncEntry } from './job-market-sync.js';
@@ -348,10 +348,14 @@ export class AutoFinishCoordinator {
     }
 
     /**
-     * Force run: a remote claimable row proves the reward is still unclaimed.
+     * A fresh remote claimable row proves the reward is still unclaimed.
      * Release stale Complete-Unknown barriers for those identities only, then
      * let the normal claim-only path run. Non-claimable/ambiguous jobs stay
      * blocked, and a failed retry recreates the barrier through the normal path.
+     *
+     * This runs on every Auto Finish pass (not only an explicit force retry):
+     * a timed-out Complete is exactly the case that leaves a claimable row
+     * behind, and without this the job would stay "unknown" until the reset.
      */
     private async releaseClaimableCompletionBarriers(
         jobs: readonly JobOffer[],
@@ -383,11 +387,16 @@ export class AutoFinishCoordinator {
         let released = 0;
         for (const job of claimable) {
             const resetAt = resetByMarket.get(job.marketKey) ?? null;
-            const record = records.find((entry) =>
+            const normalizedReset = normalizeJobStateResetAt(resetAt);
+            const matchingRecords = records.filter((entry) =>
                 entry.marketKey === job.marketKey
                 && entry.jobId === job.id
-                && (entry.resetAt === resetAt || (resetAt !== null && entry.resetAt === null))
-                && isCompletionUncertainRecord(entry));
+                && normalizeJobStateResetAt(entry.resetAt) === normalizedReset);
+            // Only records created by this extension's explicit "unconfirmed"
+            // path may be released. Legacy unknown records stay blocked (the
+            // reconciler owns them) and are never rewritten here.
+            const record = matchingRecords.find((entry) => entry.unconfirmed === true);
+            if (matchingRecords.length > 0 && !record) continue;
             if (record && jobStates) {
                 try {
                     await jobStates.upsert({
@@ -426,7 +435,7 @@ export class AutoFinishCoordinator {
             }
         }
         if (released > 0) {
-            this.deps.logger.info('auto-jobs', `Force retry released ${released} claimable completion barrier(s)`, { released });
+            this.deps.logger.info('auto-jobs', `Released ${released} claimable completion barrier(s)`, { released });
         }
         return released;
     }
@@ -481,9 +490,11 @@ export class AutoFinishCoordinator {
                     preResets.set(market.marketKey, market.resetAt);
                 }
             }
-            if (options.forceRefresh === true) {
-                await this.releaseClaimableCompletionBarriers(prefetched.jobs, preResets);
-            }
+            // A fresh claimable row proves the reward is still unclaimed, even
+            // when the previous Complete was unconfirmed. Release the unsafe
+            // latch on every run, not only on an explicit force refresh, or a
+            // timed-out Complete strands a claimable job until the reset.
+            await this.releaseClaimableCompletionBarriers(prefetched.jobs, preResets);
             const preUnconfirmed = await this.loadCompletionBarrier();
             if (preState.clearAttempts) this.deps.locks.clearAttempts();
             if (preState.clearLocks) this.deps.locks.clearLocks();
@@ -648,9 +659,9 @@ export class AutoFinishCoordinator {
                     resetByMarket.set(market.marketKey, market.resetAt);
                 }
             }
-            if (options.forceRefresh === true) {
-                await this.releaseClaimableCompletionBarriers(synced.jobs, resetByMarket);
-            }
+            // See the prefetched path: claimable evidence must be able to
+            // release a timed-out Complete barrier on every run.
+            await this.releaseClaimableCompletionBarriers(synced.jobs, resetByMarket);
             const unconfirmed = await this.loadCompletionBarrier();
             if (state.clearAttempts) this.deps.locks.clearAttempts();
             if (state.clearLocks) this.deps.locks.clearLocks();

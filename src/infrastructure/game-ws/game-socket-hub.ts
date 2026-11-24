@@ -550,7 +550,13 @@ export class GameSocketHub {
         entry.updatedAt = Date.now();
         this.marketCache.set(marketId, entry);
         const snapshot = this.cachedMarket(marketId);
-        if (snapshot) window.postMessage({ version: 2, type: 'V2_MARKET_CACHE_UPDATED', marketId, snapshot, updatedAt: entry.updatedAt }, '*');
+        if (snapshot) {
+            // Tell the background which component was actually observed. A
+            // merged snapshot alone cannot prove that the job list is fresh;
+            // options/lots responses reuse the previously cached jobs.
+            const source = action === 'get.jobs' ? 'jobs' : action === 'get.options' ? 'options' : 'lots';
+            window.postMessage({ version: 2, type: 'V2_MARKET_CACHE_UPDATED', marketId, snapshot, updatedAt: entry.updatedAt, source }, '*');
+        }
     }
 
     private notifyReadiness(): void {

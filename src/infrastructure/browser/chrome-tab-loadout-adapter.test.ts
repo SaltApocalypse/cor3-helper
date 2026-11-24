@@ -38,4 +38,66 @@ describe('ChromeTabLoadoutAdapter', () => {
         expect(await adapter.equipSoftware('sw1')).toEqual({ ok: true, value: undefined });
         expect(sent).toEqual([{ type: 'V2_EQUIP_SOFTWARE', moduleConfigId: 'sw1' }]);
     });
+
+    it('dumps the raw payload with a validation summary', async () => {
+        const adapter = new ChromeTabLoadoutAdapter({
+            findCor3Tab: async () => 1,
+            send: async () => ({ ok: true, value: rawLoadout }),
+        }, { now: () => 7 });
+        const result = await adapter.dump();
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.value.capturedAt).toBe(7);
+        expect(result.value.raw).toEqual(rawLoadout);
+        expect(result.value.validation).toEqual({
+            ok: true,
+            hardware: 4,
+            software: 1,
+            equippedHardware: 4,
+            equippedSoftware: 1,
+            unmappedHardware: [],
+            softwareWithoutAbilities: [],
+        });
+    });
+
+    it('keeps the raw dump when the payload fails schema validation', async () => {
+        const payload = { ownedHardware: [{ category: 'CPU' }] };
+        const adapter = new ChromeTabLoadoutAdapter({
+            findCor3Tab: async () => 1,
+            send: async () => ({ ok: true, value: payload }),
+        });
+        const result = await adapter.dump();
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.value.raw).toEqual(payload);
+        expect(result.value.validation.ok).toBe(false);
+    });
+
+    it('reports software whose ability specs could not be parsed', async () => {
+        const payload = {
+            ...rawLoadout,
+            ownedSoftware: [
+                ...rawLoadout.ownedSoftware,
+                { id: 'sw-map-shaped', name: 'Map shaped', specs: { HACK: { power: [1, 2] } }, consuming: {} },
+            ],
+        };
+        const adapter = new ChromeTabLoadoutAdapter({
+            findCor3Tab: async () => 1,
+            send: async () => ({ ok: true, value: payload }),
+        });
+        const result = await adapter.dump();
+        expect(result.ok).toBe(true);
+        if (!result.ok || !result.value.validation.ok) return;
+        expect(result.value.validation.softwareWithoutAbilities).toEqual(['sw-map-shaped']);
+    });
+
+    it('shares one tab request between get() and dump()', async () => {
+        let requests = 0;
+        const adapter = new ChromeTabLoadoutAdapter({
+            findCor3Tab: async () => 1,
+            send: async () => { requests += 1; return { ok: true, value: rawLoadout }; },
+        });
+        await Promise.all([adapter.get(), adapter.dump()]);
+        expect(requests).toBe(1);
+    });
 });

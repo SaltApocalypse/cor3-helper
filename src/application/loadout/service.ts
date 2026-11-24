@@ -1,4 +1,4 @@
-import type { LoadoutPlan, HardwareSlot } from '../../domains/loadout/model.js';
+import type { LoadoutPlan, HardwareSlot, HardwareSpecs, SoftwareDefinition } from '../../domains/loadout/model.js';
 import { optimizeLoadout, type LoadoutOptimizationResult } from '../../domains/loadout/optimizer.js';
 import { MaxPowerPsuPolicy, MinPowerPsuPolicy } from '../../domains/loadout/psu-policy.js';
 import type { AbilityType } from '../../domains/loadout/model.js';
@@ -12,6 +12,12 @@ export interface LoadoutRequest {
     readonly requiredPower: number;
     readonly fallbackToAnyAbility?: boolean;
     readonly strategy?: 'best' | 'weakest';
+    /**
+     * Pick the highest achievable power instead of keeping the current
+     * hardware when it merely satisfies `requiredPower`. Used when the real
+     * requirement is unknown (a failed decrypt tells us only the current power).
+     */
+    readonly maximize?: boolean;
 }
 
 export interface LoadoutServiceError {
@@ -24,6 +30,10 @@ export interface LoadoutServiceError {
     readonly message: string;
     /** True when some hardware/software commands succeeded before the failure. */
     readonly partial?: boolean;
+    /** Highest power the owned inventory could reach (INFEASIBLE only). */
+    readonly bestAvailablePower?: number;
+    /** Required power minus bestAvailablePower (INFEASIBLE only). */
+    readonly shortfall?: number;
 }
 
 export interface LoadoutCapability {
@@ -57,12 +67,43 @@ function isRateLimitFailure(message: string): boolean {
     return /too many requests|rate[\s-]?limit|busy|processing|try again|cooldown/i.test(message);
 }
 
+function specsFingerprint(specs: HardwareSpecs): string {
+    return Object.entries(specs as Record<string, number | undefined>)
+        .filter(([, value]) => value !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, value]) => `${key}=${value}`)
+        .join(',');
+}
+
+function softwareFingerprint(item: SoftwareDefinition): string {
+    const abilities = item.abilities
+        .map((ability) => [
+            ability.type,
+            ability.minPower,
+            ability.maxPower,
+            (ability.serverTypes ?? []).join('+'),
+            (ability.fileTypes ?? []).join('+'),
+        ].join(':'))
+        .sort()
+        .join('/');
+    const consuming = Object.entries(item.consuming)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, values]) => `${key}=${values.join(',')}`)
+        .join(';');
+    return `${item.id}|${abilities}|${consuming}`;
+}
+
 function runtimeFingerprint(runtime: LoadoutRuntime): string {
     const inventory = runtime.inventory;
     return [
         runtime.catalog.catalogVersion,
-        runtime.catalog.hardware.map((item) => `${item.id}:${item.specs.cpuConsuming ?? ''}/${item.specs.gpuConsuming ?? ''}/${item.specs.psuPower ?? ''}`).sort().join(','),
-        runtime.catalog.software.map((item) => item.id).sort().join(','),
+        runtime.catalog.hardware
+            .map((item) => `${item.id}:${item.slot}:${specsFingerprint(item.specs)}`)
+            .sort()
+            .join(','),
+        // Definition changes (power ranges, targets, consuming) must invalidate
+        // cached plans even when the software id stays the same.
+        runtime.catalog.software.map(softwareFingerprint).sort().join(','),
         [...inventory.ownedHardwareIds].sort().join(','),
         [...inventory.ownedSoftwareIds].sort().join(','),
         inventory.equippedHardware.cpu ?? '',
@@ -210,6 +251,7 @@ export class LoadoutService {
             request.requiredPower,
             request.fallbackToAnyAbility === true ? 'fallback' : 'exact',
             strategy,
+            request.maximize === true ? 'max' : 'normal',
             policy.id,
             String(policy.version),
         ].join('|');
@@ -238,6 +280,7 @@ export class LoadoutService {
             target: request.target,
             requiredPower: request.requiredPower,
             ...(request.fallbackToAnyAbility ? { fallbackToAnyAbility: true } : {}),
+            ...(request.maximize === true ? { maximize: true } : {}),
             strategy,
             policy,
         });
@@ -299,6 +342,7 @@ export class LoadoutService {
             request.requiredPower,
             request.fallbackToAnyAbility === true ? 'fallback' : 'exact',
             strategy,
+            request.maximize === true ? 'max' : 'normal',
             policy.id,
             policy.version,
         ].join('|');
@@ -314,6 +358,7 @@ export class LoadoutService {
                 target: request.target,
                 requiredPower: request.requiredPower,
                 ...(request.fallbackToAnyAbility ? { fallbackToAnyAbility: true } : {}),
+                ...(request.maximize === true ? { maximize: true } : {}),
                 strategy,
                 policy,
             });
@@ -327,7 +372,30 @@ export class LoadoutService {
             return err({ code: 'INFEASIBLE', message: 'Fallback software cannot satisfy a positive power requirement' });
         }
         if (!optimized.feasible) {
-            return err({ code: 'INFEASIBLE', message: 'Best available loadout is still below the required power' });
+            const bestAvailablePower = optimized.bestAvailablePower ?? optimized.plan.power;
+            const shortfall = optimized.shortfall ?? Math.max(0, request.requiredPower - bestAvailablePower);
+            this.trace?.('Loadout infeasible', {
+                ability: request.ability,
+                target: request.target,
+                requiredPower: request.requiredPower,
+                bestAvailablePower,
+                shortfall,
+                power: optimized.plan.power,
+                rawPower: optimized.plan.rawPower,
+                ratio: optimized.plan.ratio ?? null,
+                bottleneck: optimized.plan.bottleneck ?? null,
+                software: optimized.plan.software.name,
+                cpu: optimized.plan.hardware.cpu.name,
+                gpu: optimized.plan.hardware.gpu.name,
+                ram: optimized.plan.hardware.ram.name,
+                psu: optimized.plan.hardware.psu.name,
+            });
+            return err({
+                code: 'INFEASIBLE',
+                message: 'Best available loadout is still below the required power',
+                bestAvailablePower,
+                shortfall,
+            });
         }
         const plan = optimized.plan;
         this.trace?.('Loadout plan selected', {
@@ -340,6 +408,9 @@ export class LoadoutService {
             fallbackUsed: optimized.fallbackUsed,
             requiredPower: plan.requiredPower,
             power: plan.power,
+            rawPower: plan.rawPower,
+            ratio: plan.ratio ?? null,
+            bottleneck: plan.bottleneck ?? null,
             software: plan.software.name,
             cpu: plan.hardware.cpu.name,
             gpu: plan.hardware.gpu.name,

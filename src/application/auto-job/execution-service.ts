@@ -492,9 +492,19 @@ export class JobExecutionService implements JobExecutionPort {
         // This avoids a burst of equip/unequip commands for files that are
         // already decryptable, which was a major source of rate limiting.
         if (!analysis.ok || analysis.value.canDecrypt !== true) {
-            const requiredPower = analysis.ok && analysis.value.canDecrypt === false
-                ? analysis.value.decryptPower ?? undefined
-                : undefined;
+            // `decryptPower` is the power the current setup already has for this
+            // file, not the power the file requires. When the game says
+            // `canDecrypt: false`, the real requirement is strictly greater
+            // than this value; planning for the value itself makes the current
+            // hardware look sufficient forever. Use the next integer as the
+            // planning floor so the optimizer is allowed to swap hardware.
+            const observedDecryptPower = analysis.ok && analysis.value.canDecrypt === false
+                ? analysis.value.decryptPower
+                : null;
+            const observedPower = typeof observedDecryptPower === 'number' && Number.isFinite(observedDecryptPower)
+                ? Math.floor(observedDecryptPower)
+                : null;
+            const requiredPower = observedPower === null ? undefined : Math.max(1, observedPower + 1);
             if (this.beforeDecrypt) {
                 const ready = await this.beforeDecrypt(job, file, requiredPower);
                 if (!ready.ok) {
@@ -512,6 +522,7 @@ export class JobExecutionService implements JobExecutionPort {
                         jobId: job.id,
                         fileId: file.id,
                         fileName: file.name,
+                        observedDecryptPower: observedPower,
                         requiredPower: requiredPower ?? null,
                         canDecrypt: analysis.ok ? analysis.value.canDecrypt : null,
                         decryptPower: analysis.ok ? analysis.value.decryptPower : null,

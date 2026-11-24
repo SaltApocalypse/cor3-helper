@@ -358,4 +358,103 @@ describe('LoadoutService', () => {
         await service.canSatisfy({ ability: 'HACK', target: 'CEDRT', requiredPower: 20 });
         expect(getCalls).toBeGreaterThan(before);
     });
+
+    it('re-optimizes when the software definition changes under the same id', async () => {
+        const weakCpu: HardwareDefinition = { id: 'cpu1', name: 'CPU', slot: 'cpu', specs: { cpuFrequency: 10, cpuConsuming: 10 } };
+        const baseGpu: HardwareDefinition = { id: 'gpu1', name: 'GPU', slot: 'gpu', specs: { gpuPower: 10, gpuConsuming: 20 } };
+        const baseRam: HardwareDefinition = { id: 'ram1', name: 'RAM', slot: 'ram', specs: { ramFrequency: 10, ramMemory: 10 } };
+        const basePsu: HardwareDefinition = { id: 'psu100', name: 'PSU100', slot: 'psu', specs: { psuPower: 100 } };
+        const makeSoftware = (maxPower: number): SoftwareDefinition => ({
+            id: 'sw1',
+            name: 'Hack',
+            abilities: [{ type: 'HACK', minPower: 10, maxPower, serverTypes: ['CEDRT'] }],
+            consuming: { cpu_frequency: [0, 5, 25] },
+        });
+        let softwareDef = makeSoftware(20);
+        let inventory: InventorySnapshot = {
+            ownedHardwareIds: new Set(['cpu1', 'gpu1', 'ram1', 'psu100']),
+            ownedSoftwareIds: new Set(['sw1']),
+            equippedHardware: { cpu: 'cpu1', gpu: 'gpu1', ram: 'ram1', psu: 'psu100' },
+            equippedSoftwareIds: ['sw1'],
+            capturedAt: 1,
+        };
+        const service = new LoadoutService({
+            get: async () => ({
+                ok: true,
+                value: {
+                    catalog: { catalogVersion: '1', gameVersion: 'test', hardware: [weakCpu, baseGpu, baseRam, basePsu], software: [softwareDef] },
+                    inventory,
+                },
+            }),
+        }, {
+            equipHardware: async () => ({ ok: true, value: undefined }),
+            equipSoftware: async (id) => {
+                inventory = { ...inventory, equippedSoftwareIds: [id] };
+                return { ok: true, value: undefined };
+            },
+            unequipSoftware: async () => ({ ok: true, value: undefined }),
+        }, async () => undefined);
+
+        const first = await service.ensure({ ability: 'HACK', target: 'CEDRT', requiredPower: 10 });
+        if (!first.ok) throw new Error(first.error.message);
+        expect(first.value.power).toBe(12);
+
+        // Same ids, different definition: the cached plan must not be reused.
+        softwareDef = makeSoftware(40);
+        const second = await service.ensure({ ability: 'HACK', target: 'CEDRT', requiredPower: 10 });
+        if (!second.ok) throw new Error(second.error.message);
+        expect(second.value.power).toBe(17);
+    });
+
+    it('honors maximize by switching to the strongest hardware even when the current setup satisfies the request', async () => {
+        const weakCpu: HardwareDefinition = { id: 'cpu-weak', name: 'CPU Weak', slot: 'cpu', specs: { cpuFrequency: 10, cpuConsuming: 10 } };
+        const strongCpu: HardwareDefinition = { id: 'cpu-strong', name: 'CPU Strong', slot: 'cpu', specs: { cpuFrequency: 30, cpuConsuming: 10 } };
+        const gpu: HardwareDefinition = { id: 'gpu1', name: 'GPU', slot: 'gpu', specs: { gpuPower: 10, gpuConsuming: 20 } };
+        const ram: HardwareDefinition = { id: 'ram1', name: 'RAM', slot: 'ram', specs: { ramFrequency: 10, ramMemory: 10 } };
+        const psu: HardwareDefinition = { id: 'psu100', name: 'PSU100', slot: 'psu', specs: { psuPower: 100 } };
+        const scaling: SoftwareDefinition = {
+            id: 'sw1',
+            name: 'Hack',
+            abilities: [{ type: 'HACK', minPower: 10, maxPower: 20, serverTypes: ['CEDRT'] }],
+            consuming: { cpu_frequency: [0, 5, 25] },
+        };
+        let inventory: InventorySnapshot = {
+            ownedHardwareIds: new Set(['cpu-weak', 'cpu-strong', 'gpu1', 'ram1', 'psu100']),
+            ownedSoftwareIds: new Set(['sw1']),
+            equippedHardware: { cpu: 'cpu-weak', gpu: 'gpu1', ram: 'ram1', psu: 'psu100' },
+            equippedSoftwareIds: ['sw1'],
+            capturedAt: 1,
+        };
+        const calls: string[] = [];
+        const service = new LoadoutService({
+            get: async () => ({
+                ok: true,
+                value: {
+                    catalog: { catalogVersion: '1', gameVersion: 'test', hardware: [weakCpu, strongCpu, gpu, ram, psu], software: [scaling] },
+                    inventory,
+                },
+            }),
+        }, {
+            equipHardware: async (id) => {
+                calls.push(`equip-hardware:${id}`);
+                if (id.startsWith('cpu')) inventory = { ...inventory, equippedHardware: { ...inventory.equippedHardware, cpu: id } };
+                return { ok: true, value: undefined };
+            },
+            equipSoftware: async (id) => {
+                inventory = { ...inventory, equippedSoftwareIds: [id] };
+                return { ok: true, value: undefined };
+            },
+            unequipSoftware: async () => {
+                inventory = { ...inventory, equippedSoftwareIds: [] };
+                return { ok: true, value: undefined };
+            },
+        }, async () => undefined);
+
+        const result = await service.ensure({ ability: 'HACK', target: 'CEDRT', requiredPower: 1, maximize: true });
+        if (!result.ok) throw new Error(result.error.message);
+        expect(result.value.hardware.cpu.id).toBe('cpu-strong');
+        expect(result.value.power).toBe(20);
+        expect(inventory.equippedHardware.cpu).toBe('cpu-strong');
+        expect(calls).toContain('equip-hardware:cpu-strong');
+    });
 });

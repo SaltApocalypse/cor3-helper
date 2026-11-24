@@ -359,6 +359,27 @@ describe('JobExecutionService', () => {
         expect(fake.calls).toEqual(['take']);
     });
 
+    it('plans for the next integer when the current decrypt power is insufficient', async () => {
+        const fake = actions();
+        // `decryptPower` is the current power. With canDecrypt=false the real
+        // requirement is strictly greater, so the loadout must be planned for
+        // at least current + 1 instead of treating the current value as enough.
+        fake.port.getFileAnalysis = async () => ({ ok: true as const, value: { canDecrypt: false, decryptPower: 20, tags: [], source: null } });
+        let seen: number | undefined;
+        const service = new JobExecutionService(
+            fake.port,
+            undefined,
+            async (_job, _file, requiredPower) => {
+                seen = requiredPower;
+                return { ok: false as const, error: { code: 'DECRYPT_POWER_INSUFFICIENT', message: 'stop after hook' } };
+            },
+        );
+        const result = await service.executeDetailed(job('File Decryption'));
+        expect(seen).toBe(21);
+        expect(result.ok).toBe(false);
+        if (!result.ok) expect(result.error.code).toBe('DECRYPT_POWER_INSUFFICIENT');
+    });
+
     it('reports an unsolved minigame without completing the job', async () => {
         const fake = actions();
         const service = new JobExecutionService(fake.port, undefined, undefined, {

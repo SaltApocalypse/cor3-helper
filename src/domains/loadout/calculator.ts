@@ -15,7 +15,10 @@ export interface ParsedConsuming {
 
 export interface AbilityAnalysis {
     readonly type: string;
+    /** Integer power used for feasibility (floor of `rawPower`). */
     readonly computedPower: number;
+    /** Unrounded power, kept for diagnostics and game parity checks. */
+    readonly rawPower: number;
     readonly minPower: number;
     readonly maxPower: number;
     readonly serverTypes?: readonly string[];
@@ -107,29 +110,38 @@ export function calculateLoadout(hardware: HardwareSet, software: readonly Softw
             name: sw.name,
             ratio: lowestRatio,
             bottleneck,
-            abilities: sw.abilities.map((ability) => ({
-                type: ability.type,
-                computedPower: Math.floor(ability.minPower + lowestRatio * (ability.maxPower - ability.minPower)),
-                minPower: ability.minPower,
-                maxPower: ability.maxPower,
-                ...(ability.serverTypes ? { serverTypes: ability.serverTypes } : {}),
-                ...(ability.fileTypes ? { fileTypes: ability.fileTypes } : {}),
-            })),
+            abilities: sw.abilities.map((ability) => {
+                const rawPower = ability.minPower + lowestRatio * (ability.maxPower - ability.minPower);
+                return {
+                    type: ability.type,
+                    computedPower: Math.floor(rawPower),
+                    rawPower,
+                    minPower: ability.minPower,
+                    maxPower: ability.maxPower,
+                    ...(ability.serverTypes ? { serverTypes: ability.serverTypes } : {}),
+                    ...(ability.fileTypes ? { fileTypes: ability.fileTypes } : {}),
+                };
+            }),
         };
     }
 
     return { supply, demand, canBoot, software: analysis };
 }
 
-export function abilityPower(
+export interface AbilityPower {
+    readonly power: number;
+    readonly rawPower: number;
+}
+
+export function abilityPowerDetails(
     analysis: LoadoutAnalysis,
     softwareId: string,
     abilityType: string,
     target?: string,
-): number {
+): AbilityPower {
     const software = analysis.software[softwareId];
-    if (!software) return 0;
-    let best = 0;
+    if (!software) return { power: 0, rawPower: 0 };
+    let best: AbilityPower = { power: 0, rawPower: 0 };
     for (const ability of software.abilities) {
         if (ability.type !== abilityType) continue;
         if (target) {
@@ -140,9 +152,20 @@ export function abilityPower(
                 (hasFile && ability.fileTypes?.some((value) => matchesTargetValue(value, target)) === true);
             if (!matches) continue;
         }
-        best = Math.max(best, ability.computedPower);
+        if (ability.computedPower > best.power) {
+            best = { power: ability.computedPower, rawPower: ability.rawPower };
+        }
     }
     return best;
+}
+
+export function abilityPower(
+    analysis: LoadoutAnalysis,
+    softwareId: string,
+    abilityType: string,
+    target?: string,
+): number {
+    return abilityPowerDetails(analysis, softwareId, abilityType, target).power;
 }
 
 export function hardwareSwitchCost(current: Partial<Record<string, string>>, next: HardwareSet): number {

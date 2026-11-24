@@ -4,6 +4,26 @@
 definitions from a maxed account. It is **not committed** yet because it must
 come from real game data, not from hand-written fixtures.
 
+## Capture from the extension
+
+The side panel Developer page has a "Loadout dump" tool that exports the raw
+`loadout:get.options` payload, so a WebSocket capture is no longer required:
+
+1. Open cor3.gg, then open the side panel and enable **Settings → Developer tools**.
+2. Go to **Developer → Loadout dump** and click **Export loadout dump**.
+3. The downloaded `cor3-loadout-*.json` already contains
+   `ownedHardware` / `ownedSoftware` at the top level. `_meta` is informational
+   and is ignored by the passthrough `rawLoadoutSchema`.
+4. Feed it to the CLI:
+
+```bash
+npm run catalog -- from-loadout --input ~/Downloads/cor3-loadout-*.json \
+  --output catalog/item-catalog.json --game-version <game-version>
+```
+
+The same export is also available in the Chrome DevTools panel. A normal
+account only captures owned items; use a maxed account for a complete catalog.
+
 ## Generate
 
 1. Capture a raw module dump with `ownedHardware` / `ownedSoftware` arrays in

@@ -192,12 +192,84 @@ export function buildUnknownJobIds(
     return unknown;
 }
 
+/**
+ * Canonical statuses shown by the job list. Backend and market-mapper values
+ * are normalized into this set so duplicate labels (`ready` / `ready to claim`,
+ * `completed` / `done`, `invalid` / `unsupported`) cannot drift apart.
+ */
+export type JobDisplayStatus =
+    | 'pending'
+    | 'running'
+    | 'retry'
+    | 'claimable'
+    | 'done'
+    | 'failed'
+    | 'expired'
+    | 'skipped'
+    | 'unknown';
+
+const JOB_DISPLAY_STATUSES: ReadonlySet<JobDisplayStatus> = new Set([
+    'pending', 'running', 'retry', 'claimable', 'done', 'failed', 'expired', 'skipped', 'unknown',
+]);
+
+export function normalizeJobStatus(status: string | undefined): JobDisplayStatus | undefined {
+    if (!status) return undefined;
+    if (status === 'ready' || status === 'ready to claim') return 'claimable';
+    if (status === 'completed') return 'done';
+    if (status === 'invalid' || status === 'unsupported') return 'skipped';
+    return JOB_DISPLAY_STATUSES.has(status as JobDisplayStatus)
+        ? status as JobDisplayStatus
+        : undefined;
+}
+
 /** Claimable is a second dimension and must not replace Unknown/Failed/Done. */
 export function showClaimableBadge(
     job: Pick<JobOffer, 'alreadyTaken' | 'canComplete'>,
     status: string | undefined,
 ): boolean {
-    return job.alreadyTaken && job.canComplete && status !== 'ready' && status !== 'done';
+    const normalized = normalizeJobStatus(status);
+    return job.alreadyTaken && job.canComplete && normalized !== 'claimable' && normalized !== 'done';
+}
+
+export interface JobTagView {
+    /** The single tag shown as the primary state. */
+    readonly primary: JobDisplayStatus;
+    readonly tone: 'ok' | 'warn' | 'error' | 'neutral';
+    /** Optional secondary tag; never a contradicting primary state. */
+    readonly secondary?: JobDisplayStatus;
+    /** Tooltip source string (translated by the caller). */
+    readonly title?: string;
+}
+
+/**
+ * Single source of truth for the per-job tag. Claimable rows collapse into one
+ * green "ready to claim" tag (no separate "unknown + claimable" pair); a real
+ * failure keeps its primary tag and shows claimability as a secondary tag.
+ */
+export function jobTagView(
+    job: Pick<JobOffer, 'alreadyTaken' | 'canComplete'>,
+    status: string | undefined,
+): JobTagView | null {
+    const normalized = normalizeJobStatus(status);
+    const claimable = job.alreadyTaken && job.canComplete;
+    if (normalized === 'done') return { primary: 'done', tone: 'ok' };
+    if (claimable) {
+        if (normalized === 'failed') {
+            return { primary: 'failed', tone: 'error', secondary: 'claimable' };
+        }
+        return {
+            primary: 'claimable',
+            tone: 'ok',
+            ...(normalized === 'unknown'
+                ? { title: 'The previous completion result was unconfirmed. The next Auto Finish run will claim it.' }
+                : {}),
+        };
+    }
+    if (!normalized) return null;
+    const tone = normalized === 'failed'
+        ? 'error'
+        : normalized === 'skipped' ? 'neutral' : 'warn';
+    return { primary: normalized, tone };
 }
 
 /** Stable order for the Unknown projection; never affects the underlying records. */
@@ -351,7 +423,7 @@ export function buildJobStatusById(
         for (const job of jobs) {
             const key = jobStatusKey(marketKey, job.id);
             if (result[key] !== undefined) continue;
-            if (job.alreadyTaken && job.canComplete) setStatusKey(marketKey, job.id, 'ready');
+            if (job.alreadyTaken && job.canComplete) setStatusKey(marketKey, job.id, 'claimable');
         }
     }
     return result;

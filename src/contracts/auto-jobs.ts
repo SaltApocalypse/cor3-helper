@@ -47,6 +47,23 @@ export const autoJobsScheduleStateSchema = z.enum([
     'disabled',
 ]);
 
+export const autoJobsMarketStateSchema = z.enum(['future', 'past', 'missing', 'invalid', 'stale', 'unavailable']);
+
+/** Why a market was (or was not) selected for the next jobs refresh. */
+export const autoJobsMarketSelectionSchema = z.object({
+    marketKey: z.string().min(1),
+    state: autoJobsMarketStateSchema,
+    /** Milliseconds since the last jobs observation; null when never observed. */
+    ageMs: z.number().nullable(),
+    /** Normal TTL / recovery decision. */
+    due: z.boolean(),
+    /** True when the stale-jobs watchdog overrode the normal decision. */
+    forced: z.boolean(),
+    selected: z.boolean(),
+}).strict();
+
+export type AutoJobsMarketSelection = z.infer<typeof autoJobsMarketSelectionSchema>;
+
 /** Background Auto Jobs status returned by `auto-jobs.status`. */
 export const autoJobsStatusSchema = z.object({
     enabled: z.boolean(),
@@ -64,6 +81,8 @@ export const autoJobsStatusSchema = z.object({
         count: z.number().int().nonnegative(),
         lastAttemptAt: z.number(),
     }).strict()).default({}),
+    marketSelection: z.array(autoJobsMarketSelectionSchema).default([]),
+    lastSkipReason: z.string().nullable().default(null),
 }).strict();
 
 export interface AutoJobsSkippedJob {

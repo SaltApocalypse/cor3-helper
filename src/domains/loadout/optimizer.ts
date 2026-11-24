@@ -9,7 +9,7 @@ import type {
     SoftwareDefinition,
 } from './model.js';
 import { matchesTargetValue } from './model.js';
-import { abilityPower, calculateLoadout, hardwareSwitchCost } from './calculator.js';
+import { abilityPowerDetails, calculateLoadout, hardwareSwitchCost } from './calculator.js';
 import { MaxPowerPsuPolicy, MinPowerPsuPolicy, type PsuPolicyContext, type PsuSelectionPolicy } from './psu-policy.js';
 
 export interface LoadoutOptimizationRequest {
@@ -25,6 +25,8 @@ export interface LoadoutOptimizationRequest {
     readonly fallbackToAnyAbility?: boolean;
     /** 'best' keeps current sufficient hardware, otherwise maximizes power; 'weakest' minimizes power. */
     readonly strategy?: 'best' | 'weakest';
+    /** Rank by achievable power first, even when the current hardware already satisfies the request. */
+    readonly maximize?: boolean;
 }
 
 export type LoadoutInfeasibleReason =
@@ -38,6 +40,10 @@ export interface LoadoutOptimizationResult {
     readonly reason: LoadoutInfeasibleReason | null;
     /** True when the candidate software came from fallbackToAnyAbility. */
     readonly fallbackUsed: boolean;
+    /** Highest power the owned inventory can reach, even when infeasible. */
+    readonly bestAvailablePower?: number;
+    /** Positive when `bestAvailablePower` is below `requiredPower`. */
+    readonly shortfall?: number;
 }
 
 const SLOTS: readonly HardwareSlot[] = ['cpu', 'gpu', 'ram', 'psu'];
@@ -97,11 +103,13 @@ export function optimizeLoadout(request: LoadoutOptimizationRequest): LoadoutOpt
     const currentSoftwareIds = request.currentSoftwareIds ?? request.inventory.equippedSoftwareIds;
     const currentHardware = request.currentHardware ?? request.inventory.equippedHardware;
     const strategy = request.strategy ?? 'best';
+    const maximize = request.maximize === true;
     const policy = effectivePolicy(strategy, request.policy);
     const context = policyContext(currentHardware);
     const better = (plan: LoadoutPlan, incumbent: LoadoutPlan): boolean => isBetterPlan(plan, incumbent, {
         requiredPower,
         strategy,
+        maximize,
         policy,
         context,
         currentSoftwareIds,
@@ -122,13 +130,17 @@ export function optimizeLoadout(request: LoadoutOptimizationRequest): LoadoutOpt
                         const set: HardwareSet = { cpu, gpu, ram, psu };
                         const analysis = calculateLoadout(set, [sw]);
                         if (!analysis.canBoot) continue;
-                        const power = abilityPower(analysis, sw.id, request.ability, request.target);
+                        const details = abilityPowerDetails(analysis, sw.id, request.ability, request.target);
+                        const power = details.power;
+                        const softwareAnalysis = analysis.software[sw.id];
                         const plan: LoadoutPlan = {
                             software: sw,
                             hardware: set,
                             ability: request.ability,
                             target: request.target,
                             power,
+                            rawPower: details.rawPower,
+                            ...(softwareAnalysis ? { ratio: softwareAnalysis.ratio, bottleneck: softwareAnalysis.bottleneck } : {}),
                             requiredPower,
                             feasible: requiredPower === 0 || power >= requiredPower,
                             switchCost: hardwareSwitchCost(currentHardware, set),
@@ -155,13 +167,21 @@ export function optimizeLoadout(request: LoadoutOptimizationRequest): LoadoutOpt
         if (!keepCurrentHardware) best = applyPsuPolicy(best, hardware.psu, policy, currentHardware, context);
     }
     return best
-        ? { feasible: best.feasible, plan: best, reason: null, fallbackUsed }
+        ? {
+            feasible: best.feasible,
+            plan: best,
+            reason: null,
+            fallbackUsed,
+            bestAvailablePower: best.power,
+            shortfall: requiredPower > 0 ? Math.max(0, requiredPower - best.power) : 0,
+        }
         : { feasible: false, plan: null, reason: 'NO_BOOTABLE_COMBINATION', fallbackUsed };
 }
 
 interface BetterContext {
     readonly requiredPower: number;
     readonly strategy: 'best' | 'weakest';
+    readonly maximize: boolean;
     readonly policy: PsuSelectionPolicy;
     readonly context: PsuPolicyContext;
     readonly currentSoftwareIds: readonly string[];
@@ -174,10 +194,28 @@ function isCurrentSoftware(softwareId: string, currentSoftwareIds: readonly stri
 function isBetterPlan(plan: LoadoutPlan, best: LoadoutPlan, ctx: BetterContext): boolean {
     if (ctx.requiredPower > 0 && plan.feasible !== best.feasible) return plan.feasible;
 
+    // When nothing can satisfy the requirement, report the true maximum power.
+    // v1 did this too; keeping the current hardware here made the "best" value
+    // depend on what was already equipped instead of what is attainable.
+    if (ctx.requiredPower > 0 && !plan.feasible && !best.feasible) {
+        if (plan.power !== best.power) return plan.power > best.power;
+    }
+
     const planCurrent = isCurrentSoftware(plan.software.id, ctx.currentSoftwareIds);
     const bestCurrent = isCurrentSoftware(best.software.id, ctx.currentSoftwareIds);
     const planCurrentHardware = plan.switchCost === 0;
     const bestCurrentHardware = best.switchCost === 0;
+
+    // Explicit maximize: the real requirement is unknown (e.g. a failed
+    // decrypt), so "current hardware is good enough" is not a valid reason to
+    // stop. Pick the highest power first.
+    if (ctx.maximize) {
+        if (plan.power !== best.power) return plan.power > best.power;
+        if (planCurrent !== bestCurrent) return planCurrent;
+        if (plan.switchCost !== best.switchCost) return plan.switchCost < best.switchCost;
+        const psuCmp = ctx.policy.compare(plan.hardware.psu, best.hardware.psu, ctx.context);
+        return psuCmp > 0;
+    }
 
     if (ctx.strategy === 'best') {
         // Job-driven loadouts should not churn hardware when the current
@@ -235,11 +273,15 @@ function applyPsuPolicy(
     if (selected === null) return plan;
     const set: HardwareSet = { ...plan.hardware, psu: selected };
     const analysis = calculateLoadout(set, [plan.software]);
-    const power = abilityPower(analysis, plan.software.id, plan.ability, plan.target);
+    const details = abilityPowerDetails(analysis, plan.software.id, plan.ability, plan.target);
+    const power = details.power;
+    const softwareAnalysis = analysis.software[plan.software.id];
     return {
         ...plan,
         hardware: set,
         power,
+        rawPower: details.rawPower,
+        ...(softwareAnalysis ? { ratio: softwareAnalysis.ratio, bottleneck: softwareAnalysis.bottleneck } : {}),
         feasible: plan.requiredPower === 0 || power >= plan.requiredPower,
         switchCost: hardwareSwitchCost(currentHardware, set),
     };

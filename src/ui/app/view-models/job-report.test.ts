@@ -18,6 +18,8 @@ import {
     resolveUnknownJobs,
     selectShownJobReport,
     showClaimableBadge,
+    jobTagView,
+    normalizeJobStatus,
     sortUnknownJobs,
     toggleJobSelection,
 } from './job-report.js';
@@ -241,7 +243,7 @@ describe('buildJobStatusById', () => {
         const result = buildJobStatusById(false, [], {}, {
             jobsByMarket: { home: [offer({ id: 'a', marketKey: 'home', alreadyTaken: true, canComplete: true })] },
         });
-        expect(result[jobStatusKey('home', 'a')]).toBe('ready');
+        expect(result[jobStatusKey('home', 'a')]).toBe('claimable');
     });
 
     it('does not let a completed home job tag the same id in another market', () => {
@@ -434,7 +436,7 @@ describe('D0-1B unknown and ready dimensions', () => {
             },
         });
         expect(status[jobStatusKey('home', 'shared')]).toBe('unknown');
-        expect(status[jobStatusKey('dark', 'shared')]).toBe('ready');
+        expect(status[jobStatusKey('dark', 'shared')]).toBe('claimable');
     });
 
     it('T09 ignores a legacy failure without marketKey', () => {
@@ -746,5 +748,52 @@ describe('Manual Queue Unknown integration', () => {
         });
         expect(resolved.unknownByIdentity.has(jobStatusKey('home', 'shared'))).toBe(true);
         expect(manual.statuses[jobStatusKey('home', 'shared')]).toBe('unknown');
+    });
+});
+
+describe('jobTagView', () => {
+    const claimable = offer({ id: 'a', marketKey: 'home', alreadyTaken: true, canComplete: true });
+    const blocked = offer({ id: 'a', marketKey: 'home', alreadyTaken: true, canComplete: false });
+
+    it('shows one green claimable tag for an unconfirmed claimable job', () => {
+        expect(jobTagView(claimable, 'unknown')).toEqual({
+            primary: 'claimable',
+            tone: 'ok',
+            title: 'The previous completion result was unconfirmed. The next Auto Finish run will claim it.',
+        });
+    });
+
+    it('collapses ready / ready-to-claim / retry into claimable', () => {
+        expect(jobTagView(claimable, undefined)).toEqual({ primary: 'claimable', tone: 'ok' });
+        expect(jobTagView(claimable, 'ready')).toEqual({ primary: 'claimable', tone: 'ok' });
+        expect(jobTagView(claimable, 'retry')).toEqual({ primary: 'claimable', tone: 'ok' });
+    });
+
+    it('keeps a real failure primary and claimability secondary', () => {
+        expect(jobTagView(claimable, 'failed')).toEqual({
+            primary: 'failed',
+            tone: 'error',
+            secondary: 'claimable',
+        });
+    });
+
+    it('never shows claimability on Done and never shows a tag without status', () => {
+        expect(jobTagView(claimable, 'done')).toEqual({ primary: 'done', tone: 'ok' });
+        expect(jobTagView(blocked, undefined)).toBeNull();
+    });
+
+    it('keeps Unknown when the row is not claimable', () => {
+        expect(jobTagView(blocked, 'unknown')).toEqual({ primary: 'unknown', tone: 'warn' });
+    });
+});
+
+describe('normalizeJobStatus', () => {
+    it('merges duplicate market-mapper labels into the canonical set', () => {
+        expect(normalizeJobStatus('ready')).toBe('claimable');
+        expect(normalizeJobStatus('ready to claim')).toBe('claimable');
+        expect(normalizeJobStatus('completed')).toBe('done');
+        expect(normalizeJobStatus('invalid')).toBe('skipped');
+        expect(normalizeJobStatus('unsupported')).toBe('skipped');
+        expect(normalizeJobStatus('not-a-status')).toBeUndefined();
     });
 });

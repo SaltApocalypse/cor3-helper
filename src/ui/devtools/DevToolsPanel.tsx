@@ -23,6 +23,8 @@ export function DevToolsPanel({ portal }: DevToolsPanelProps) {
     const [wsDirection, setWsDirection] = useState<'all' | 'in' | 'out'>('all');
     const [wsSendText, setWsSendText] = useState('');
     const [actionStatus, setActionStatus] = useState('');
+    const [loadoutDumpBusy, setLoadoutDumpBusy] = useState(false);
+    const [loadoutDumpStatus, setLoadoutDumpStatus] = useState('');
 
     const refresh = useCallback(async () => {
         try {
@@ -86,6 +88,20 @@ export function DevToolsPanel({ portal }: DevToolsPanelProps) {
         const info: DevToolsStorageInspection = await portal.inspectStorage();
         setStorageInfo({ databases: [...info.databases], localStorageKeys: [...info.localStorageKeys], error: info.error });
     }, [portal]);
+
+    const exportLoadout = useCallback(async () => {
+        setLoadoutDumpBusy(true);
+        setLoadoutDumpStatus(tr('Reading loadout...'));
+        try {
+            const dump = await portal.exportLoadout();
+            portal.download(dump.fileName, dump.json, 'application/json');
+            setLoadoutDumpStatus(`${tr('Loadout dump exported')} · ${dump.fileName}`);
+        } catch (error) {
+            setLoadoutDumpStatus(error instanceof Error ? error.message : String(error));
+        } finally {
+            setLoadoutDumpBusy(false);
+        }
+    }, [portal, tr]);
 
     useEffect(() => {
         void refresh();
@@ -208,6 +224,17 @@ export function DevToolsPanel({ portal }: DevToolsPanelProps) {
                         </div>
                     )
                 ) : <p class="devtools-status">{tr('Not inspected')}</p>}
+            </section>
+            <section class="devtools-json">
+                <h2>{tr('Loadout dump')}</h2>
+                <p class="devtools-status">{tr('Exports the raw loadout:get.options payload for the static catalog. The file keeps ownedHardware/ownedSoftware with specs and consuming values.')}</p>
+                <div class="devtools-actions">
+                    <button type="button" disabled={loadoutDumpBusy} onClick={() => void exportLoadout()}>
+                        {loadoutDumpBusy ? tr('Reading loadout...') : tr('Export loadout dump')}
+                    </button>
+                </div>
+                {loadoutDumpStatus ? <p class="devtools-status">{loadoutDumpStatus}</p> : null}
+                <p class="devtools-status">{tr('A normal account only captures owned items; use a maxed account for a complete static catalog.')}</p>
             </section>
             <section class="devtools-json">
                 <h2>{tr('Raw snapshot')}</h2>

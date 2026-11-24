@@ -14,6 +14,7 @@ import type { ExpeditionOverview } from '../../domains/expeditions/model.js';
 import type { DroneState } from '../../domains/drone/model.js';
 import type { JobMarketDefinition } from '../../domains/jobs/markets.js';
 import { jobOfferSchema } from '../../contracts/jobs.js';
+import { loadoutDumpFileSchema, type LoadoutDumpFile } from '../../contracts/loadout.js';
 import { marketCompletedJobsSchema } from '../../contracts/market-completed-jobs.js';
 import { autoJobsScheduleStateSchema, autoJobsStatusSchema } from '../../contracts/auto-jobs.js';
 import { autoFinishLastRunSchema, autoFinishMarketSchema, autoFinishRunResultSchema, autoFinishUnknownJobSchema } from '../../contracts/auto-finish.js';
@@ -1007,6 +1008,10 @@ export class ChromePopupPortal implements PopupPortal {
 
     loadoutView(): Promise<{ ok: true; value: LoadoutView } | { ok: false; error: { code: string; message: string } }> {
         return this.client.request('loadout.view', {}, loadoutViewSchema, 30000) as Promise<{ ok: true; value: LoadoutView } | { ok: false; error: { code: string; message: string } }>;
+    }
+
+    dumpLoadout(): Promise<{ ok: true; value: LoadoutDumpFile } | { ok: false; error: { code: string; message: string } }> {
+        return this.client.request('loadout.dump', {}, loadoutDumpFileSchema, 90000) as Promise<{ ok: true; value: LoadoutDumpFile } | { ok: false; error: { code: string; message: string } }>;
     }
 
     applyLoadout(ability: 'HACK' | 'DECRYPT' | 'SEARCH', target: string, requiredPower: number, strategy: 'best' | 'weakest' = 'best'): Promise<{ ok: true; value: LoadoutApplyResult } | { ok: false; error: { code: string; message: string } }> {

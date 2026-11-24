@@ -111,6 +111,16 @@ describe('mergeAutoJobsSnapshot', () => {
         expect(result.markets[0]).toMatchObject({ stale: true, updatedAt: 10, error: 'timeout' });
     });
 
+    it('keeps a known reset when a successful update omits it', () => {
+        const previous = snapshot(1, ['home'], [job('home-1', 'home')]);
+        const result = mergeAutoJobsSnapshot(previous, {
+            at: 2,
+            jobs: [],
+            markets: [{ marketKey: 'home', label: 'HOME', ok: true, skipped: 0, resetAt: null }],
+        });
+        expect(result.markets[0]?.resetAt).toBe('reset-home');
+    });
+
     it('keeps the same job id independently in two markets', () => {
         const previous = snapshot(1, ['home', 'dark'], [job('shared', 'home'), job('shared', 'dark')]);
         const update: AutoJobsSnapshot = {

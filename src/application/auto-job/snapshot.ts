@@ -26,8 +26,13 @@ export function mergeAutoJobsSnapshot(
 
     const markets: AutoJobsMarket[] = update.markets.map((market) => {
         if (market.ok) {
+            // A successful payload without `nextJobsResetAt` must not erase a
+            // known reset: the scheduler uses it to pick the next wake-up and
+            // the completion state is keyed by it.
+            const previousMarket = previous?.markets.find((entry) => entry.marketKey === market.marketKey);
             return {
                 ...market,
+                resetAt: market.resetAt ?? previousMarket?.resetAt ?? null,
                 updatedAt: market.updatedAt ?? update.at,
                 stale: false,
             };

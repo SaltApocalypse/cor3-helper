@@ -27,8 +27,8 @@ function makeCoordinator(overrides: Partial<SettingsV1>, now: number | (() => nu
         runLogs: { add: vi.fn() },
         clock: { now: clockNow },
         store: { get: vi.fn(async () => null), set: vi.fn(async () => undefined) },
-        locks: { persist: vi.fn(async () => undefined) },
-        markets: { syncAll: vi.fn() },
+        locks: { persist: vi.fn(async () => undefined), locksSnapshot: () => ({}), attemptsSnapshot: () => ({}) },
+        markets: { syncAll: vi.fn(), cacheSnapshotView: vi.fn(async () => undefined) },
         networkOps,
         tabs,
         isAutoRefreshRunning: () => false,
@@ -41,6 +41,7 @@ function makeCoordinator(overrides: Partial<SettingsV1>, now: number | (() => nu
         scheduler,
         events,
         markets: deps.markets,
+        logger: deps.logger,
     };
 }
 
@@ -467,5 +468,100 @@ describe('AutoJobsCoordinator reset completion', () => {
         expect(scheduler.create).toHaveBeenCalledWith(AUTO_JOBS_INFO_ALARM, {
             when: Date.parse(resetAt) + 30_000,
         });
+    });
+});
+
+describe('AutoJobsCoordinator market cache pushes', () => {
+    const home = JOB_MARKETS.find((market) => market.key === 'home')!;
+    const row = { id: 'job1', name: 'IP Injection', jobType: 'IP Injection', relatedServers: [{ id: 'server1', serverName: 'Server' }] };
+    const rawSnapshot = (jobs: readonly unknown[]) => ({
+        options: { market: { id: home.marketId, marketName: 'CORE' }, userCredits: 10, reputation: { level: 1 } },
+        lots: [],
+        jobs: { jobs, nextJobsResetAt: '2030-01-01T00:00:00.000Z' },
+    });
+
+    it('does not treat an options push as a jobs refresh', () => {
+        const made = makeCoordinator({ helperMode: false, autoJobsEnabled: true }, 5_000);
+
+        made.coordinator.applyMarketCacheSnapshot(home.marketId, rawSnapshot([row]), 'options');
+        expect(made.coordinator.snapshotView()).toBeNull();
+
+        made.coordinator.applyMarketCacheSnapshot(home.marketId, rawSnapshot([row]), 'jobs');
+        const synced = made.coordinator.snapshotView();
+        expect(synced?.jobs.map((entry) => entry.id)).toEqual(['job1']);
+        expect(synced?.markets[0]).toMatchObject({ marketKey: 'home', updatedAt: 5_000 });
+
+        made.coordinator.applyMarketCacheSnapshot(home.marketId, rawSnapshot([row]), 'options');
+        expect(made.coordinator.snapshotView()?.markets[0]?.updatedAt).toBe(5_000);
+        expect(made.coordinator.snapshotView()?.jobs.map((entry) => entry.id)).toEqual(['job1']);
+    });
+
+    it('ignores pre-313 pushes without a source for freshness and warns once', () => {
+        const made = makeCoordinator({ helperMode: false, autoJobsEnabled: true }, 5_000);
+
+        made.coordinator.applyMarketCacheSnapshot(home.marketId, rawSnapshot([row]), undefined);
+        expect(made.coordinator.snapshotView()).toBeNull();
+        const warn = made.logger.warn as unknown as ReturnType<typeof vi.fn>;
+        expect(warn).toHaveBeenCalledTimes(1);
+
+        made.coordinator.applyMarketCacheSnapshot(home.marketId, rawSnapshot([row]), undefined);
+        expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('forces a future market whose jobs are older than the stale window', async () => {
+        const now = 2_000_000;
+        const made = makeCoordinator({ helperMode: false, autoJobsEnabled: true, autoFinishEnabled: false }, now);
+        (made.networkOps.enqueue as ReturnType<typeof vi.fn>).mockImplementation(async (_request: unknown, run: () => Promise<unknown>) => ({ ok: true, value: await run() }));
+        (made.markets.syncAll as ReturnType<typeof vi.fn>).mockImplementation(async () => ({ jobs: [], markets: [] }));
+        const future = new Date(now + 3_600_000).toISOString();
+        made.coordinator.publishSnapshot({
+            at: 1,
+            jobs: [],
+            markets: JOB_MARKETS.map((market) => ({
+                marketKey: market.key,
+                label: market.label,
+                ok: true,
+                skipped: 0,
+                resetAt: future,
+                updatedAt: market.key === 'home' ? now - 11 * 60_000 : now,
+            })),
+        });
+
+        await made.coordinator.ensureInfo('scheduled', true, 1);
+
+        const call = (made.markets.syncAll as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+        const targets = call?.[2] as readonly { readonly key: string }[] | undefined;
+        expect(targets?.map((market) => market.key)).toContain('home');
+        const debug = made.logger.debug as unknown as ReturnType<typeof vi.fn>;
+        expect(debug).toHaveBeenCalledWith(
+            'auto-jobs',
+            'Market forced after stale jobs window',
+            expect.objectContaining({ market: 'home' }),
+        );
+    });
+
+    it('exposes the per-market selection in status', async () => {
+        const now = 5_000;
+        const made = makeCoordinator({ helperMode: false, autoJobsEnabled: true }, now);
+        made.coordinator.publishSnapshot({
+            at: 1,
+            jobs: [],
+            markets: [{
+                marketKey: 'home',
+                label: 'HOME',
+                ok: true,
+                skipped: 0,
+                resetAt: new Date(now + 3_600_000).toISOString(),
+                updatedAt: now,
+            }],
+        });
+
+        const status = await made.coordinator.status();
+        expect(status.marketSelection).toHaveLength(JOB_MARKETS.length);
+        expect(status.marketSelection.find((entry) => entry.marketKey === 'home')).toMatchObject({
+            state: 'future',
+            selected: false,
+        });
+        expect(status.lastSkipReason).toBeNull();
     });
 });

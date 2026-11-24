@@ -3,7 +3,7 @@ import type { JobMarketDefinition } from '../../domains/jobs/markets.js';
 import type { JobOffer } from '../../domains/jobs/model.js';
 import { useT } from '../i18n-context.js';
 import { jobIdentityKey } from '../../contracts/jobs.js';
-import { showClaimableBadge } from '../app/view-models/job-report.js';
+import { jobTagView, normalizeJobStatus } from '../app/view-models/job-report.js';
 
 export interface JobMarketView {
     readonly market: JobMarketDefinition;
@@ -57,22 +57,32 @@ function statusKey(marketKey: string, jobId: string): string {
 }
 
 function statusRank(status: string | undefined): number {
-    if (status === 'running') return 0;
-    if (status === 'pending') return 1;
-    if (status === 'ready') return 2;
-    if (status === 'retry') return 3;
-    if (status === 'unknown') return 4;
-    if (status === 'failed') return 5;
-    if (status === 'expired') return 6;
-    if (status === 'done') return 7;
-    if (status === 'skipped') return 8;
-    return 1;
+    switch (normalizeJobStatus(status)) {
+        case 'running': return 0;
+        case 'pending': return 1;
+        case 'claimable': return 2;
+        case 'retry': return 3;
+        case 'unknown': return 4;
+        case 'failed': return 5;
+        case 'expired': return 6;
+        case 'done': return 7;
+        case 'skipped': return 8;
+        default: return 1;
+    }
 }
 
 function statusClass(status: string | undefined): string {
-    if (status === 'failed') return 'v2-tag-error';
-    if (status === 'done') return 'v2-tag-ok';
-    if (status === 'unknown' || status === 'ready' || status === 'running' || status === 'pending' || status === 'retry' || status === 'expired') return 'v2-tag-warn';
+    const normalized = normalizeJobStatus(status);
+    if (normalized === 'failed') return 'v2-tag-error';
+    if (normalized === 'done' || normalized === 'claimable') return 'v2-tag-ok';
+    if (normalized === 'skipped' || normalized === undefined) return '';
+    return 'v2-tag-warn';
+}
+
+function tagToneClass(tone: 'ok' | 'warn' | 'error' | 'neutral'): string {
+    if (tone === 'error') return 'v2-tag-error';
+    if (tone === 'ok') return 'v2-tag-ok';
+    if (tone === 'warn') return 'v2-tag-warn';
     return '';
 }
 
@@ -161,6 +171,7 @@ export function JobMarketList({
                     {sortedJobs.map((job) => {
                         const status = statusFor(job.id);
                         const selected = selectedIds?.has(jobIdentityKey(active.market.key, job.id)) ?? false;
+                        const tag = jobTagView(job, status);
                         const content = (
                             <span class="v2-job-main">
                                 <strong>{job.name} — {job.serverName ?? tr('N/A')}</strong>
@@ -183,22 +194,24 @@ export function JobMarketList({
                                         {content}
                                     </label>
                                 ) : content}
-                                {status ? (
+                                {tag ? (
                                     <span
-                                        class={`v2-tag ${statusClass(status)}`}
-                                        title={statusReasonFor(job.id)}
+                                        class={`v2-tag ${tagToneClass(tag.tone)}`}
+                                        title={tag.title ? tr(tag.title) : statusReasonFor(job.id)}
                                     >
-                                        {tr(status)}
+                                        {tr(tag.primary)}
                                     </span>
                                 ) : null}
-                                {showClaimableBadge(job, status) ? (
-                                    <span class="v2-tag v2-tag-warn">{tr('ready to claim')}</span>
+                                {tag?.secondary ? (
+                                    <span class="v2-tag v2-tag-ok">{tr(tag.secondary)}</span>
                                 ) : null}
                             </li>
                         );
                     })}
                     {active.skippedJobs.map((job) => {
-                        const displayStatus = job.expired ? 'expired' : job.status;
+                        const displayStatus = job.expired
+                            ? 'expired'
+                            : normalizeJobStatus(job.status) ?? 'skipped';
                         return (
                             <li key={`skipped-${job.id}`} class="v2-job-skipped">
                                 <span class="v2-job-main">
@@ -212,7 +225,7 @@ export function JobMarketList({
                                                 : ''}
                                     </span>
                                 </span>
-                                <span class={`v2-tag ${statusClass(displayStatus)}`}>{tr(displayStatus)}</span>
+                                <span class={`v2-tag ${statusClass(displayStatus)}`} title={job.reason}>{tr(displayStatus)}</span>
                             </li>
                         );
                     })}

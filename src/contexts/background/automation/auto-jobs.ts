@@ -1,4 +1,4 @@
-import type { AutoJobsMarket, AutoJobsSnapshot } from '../../../contracts/auto-jobs.js';
+import type { AutoJobsMarket, AutoJobsMarketSelection, AutoJobsSnapshot } from '../../../contracts/auto-jobs.js';
 import type { AutoFinishLastRun, AutoFinishRunResult } from '../../../contracts/auto-finish.js';
 import type { SettingsV1 } from '../../../contracts/storage.js';
 import type { RawMarketSnapshot } from '../../../contracts/market.js';
@@ -70,6 +70,9 @@ export interface AutoJobsStatus {
     readonly locks: Readonly<Record<string, number>>;
     /** Per-job retry budget for the current reset. */
     readonly retryAttempts: Readonly<Record<string, { readonly count: number; readonly lastAttemptAt: number }>>;
+    /** Due/forced decision for every known market on the next refresh. */
+    readonly marketSelection: readonly AutoJobsMarketSelection[];
+    readonly lastSkipReason: string | null;
 }
 
 const AUTO_JOBS_MIN_INTERVAL_MS = 15_000;
@@ -82,6 +85,8 @@ const AUTO_JOBS_RESET_GRACE_MS = 30_000;
 const AUTO_JOBS_FALLBACK_REFRESH_MS = 2 * 60 * 60 * 1000;
 /** When every known reset time is already past, poll sooner than the full interval. */
 const AUTO_JOBS_STALE_RESET_MAX_WAIT_MS = 10 * 60_000;
+/** Hard cap: a market whose jobs were not observed for this long is forced. */
+const AUTO_JOBS_STALE_JOBS_FORCE_MS = 10 * 60_000;
 /** Bounded recovery backoff for past/missing/invalid/stale markets. */
 const AUTO_JOBS_RECOVERY_BASE_MS = 60_000;
 const AUTO_JOBS_RECOVERY_MAX_MS = AUTO_JOBS_STALE_RESET_MAX_WAIT_MS;
@@ -133,6 +138,7 @@ export class AutoJobsCoordinator {
     private repairAttempts = 0;
     private lastError: string | null = null;
     private lastSkipReason: string | null = null;
+    private warnedMissingMarketSource = false;
     private bootstrapAt = 0;
     private lastAttemptAt = 0;
     private pendingEnsure: { readonly reason: string; readonly tabIdHint?: number } | null = null;
@@ -202,6 +208,8 @@ export class AutoJobsCoordinator {
 
     async status(): Promise<AutoJobsStatus> {
         const current = await this.deps.settings.get();
+        const now = this.deps.clock.now();
+        const selection = this.marketSelection(now, current.autoJobsIntervalMinutes);
         return {
             enabled: current.autoJobsEnabled,
             intervalMinutes: current.autoJobsIntervalMinutes,
@@ -220,6 +228,8 @@ export class AutoJobsCoordinator {
                     { count: entry.count, lastAttemptAt: entry.lastAttemptAt },
                 ]),
             ),
+            marketSelection: selection.detail,
+            lastSkipReason: this.lastSkipReason,
         };
     }
 
@@ -288,14 +298,32 @@ export class AutoJobsCoordinator {
         }
     }
 
-    applyMarketCacheSnapshot(marketId: string, snapshot: RawMarketSnapshot): void {
-        const market = JOB_MARKETS.find((entry) => entry.marketId === marketId);
+    private warnMissingMarketSource(marketId: string): void {
+        if (this.warnedMissingMarketSource) return;
+        this.warnedMissingMarketSource = true;
+        this.deps.logger.warn('auto-jobs', 'Market cache push without source; ignoring for jobs freshness', { marketId });
+    }
+
+    applyMarketCacheSnapshot(marketId: string, snapshot: RawMarketSnapshot, source?: 'jobs' | 'options' | 'lots'): void {        const market = JOB_MARKETS.find((entry) => entry.marketId === marketId);
         if (!market) return;
-        const mapped = mapMarketSnapshotJobs(snapshot, marketId, market.key, market.completionServerId ?? market.routeServerId);
-        const previous = this.snapshot;
         // Keep the persisted market cache in sync with game-pushed refreshes so
         // the Progress page does not depend on a second network round trip.
+        // This is safe for every component: options update credits/reputation,
+        // jobs update the job list inside the cached view.
         void this.deps.markets.cacheSnapshotView(marketId, snapshot).catch(() => undefined);
+        // Only a `get.jobs` response proves that the job list is fresh.
+        // Options/lots pushes reuse the previously cached jobs, so treating
+        // them as a full market sync kept the freshness clock moving and made
+        // the scheduler skip the market forever (HOME not refreshing).
+        // Pushes without `source` come from a pre-313 content script; ignore
+        // them for freshness (the next Auto Jobs cycle fetches jobs directly)
+        // and warn once so a mixed deployment is visible in the log.
+        if (source !== 'jobs') {
+            if (source === undefined) this.warnMissingMarketSource(marketId);
+            return;
+        }
+        const mapped = mapMarketSnapshotJobs(snapshot, marketId, market.key, market.completionServerId ?? market.routeServerId);
+        const previous = this.snapshot;
         this.publishSnapshot({
             at: this.deps.clock.now(),
             jobs: [
@@ -433,7 +461,27 @@ export class AutoJobsCoordinator {
         // Manual enable is a user request and always refreshes every market.
         // Everything else only refreshes markets whose data is older than
         // their TTL; a recent game push therefore makes the pass a no-op.
-        const targets = manual ? undefined : this.marketsToRefresh(now);
+        // The selection detail is logged every cycle so a starved market is
+        // diagnosable from an exported log (HOME skip reports). The stale-jobs
+        // watchdog forces a market that has not been observed for too long.
+        const selection = manual ? undefined : this.marketSelection(now, current.autoJobsIntervalMinutes);
+        const targets = selection?.targets;
+        if (selection) {
+            this.deps.logger.debug('auto-jobs', 'Auto Jobs market selection', {
+                reason,
+                force,
+                intervalMinutes: current.autoJobsIntervalMinutes,
+                markets: selection.detail,
+            });
+            for (const entry of selection.detail) {
+                if (!entry.forced) continue;
+                this.deps.logger.debug('auto-jobs', 'Market forced after stale jobs window', {
+                    market: entry.marketKey,
+                    state: entry.state,
+                    ageMs: entry.ageMs,
+                });
+            }
+        }
         if (!manual && targets !== undefined && targets.length === 0) {
             this.lastSkipReason = 'snapshot-fresh';
             // A one-shot reset alarm must still schedule the next wake-up even
@@ -479,21 +527,38 @@ export class AutoJobsCoordinator {
     }
 
     /**
-     * Markets that need a network refresh. A market is fresh when it synced
-     * successfully within its TTL. The TTL shrinks near a known reset so new
-     * claimable jobs appear quickly.
+     * Due/forced decision for every known market. A market is fresh when it
+     * synced successfully within its TTL; near a reset the TTL shrinks. The
+     * stale-jobs watchdog overrides the TTL/recovery decision so a market
+     * (notably HOME) cannot be starved while other markets keep the cycle
+     * alive. The scheduler's interval still decides when a cycle runs.
      */
-    private marketsToRefresh(now: number): readonly JobMarketDefinition[] {
+    private marketSelection(now: number, intervalMinutes: number, selectAll = false): {
+        readonly targets: readonly JobMarketDefinition[];
+        readonly detail: readonly AutoJobsMarketSelection[];
+    } {
         const snapshot = this.snapshot;
-        if (!snapshot) return [...JOB_MARKETS];
-        return JOB_MARKETS.filter((market) => {
-            const entry = snapshot.markets.find((candidate) => candidate.marketKey === market.key);
+        const staleLimitMs = Math.max(
+            AUTO_JOBS_MARKET_TTL_MS * 2,
+            Math.min(intervalMinutes * 60_000, AUTO_JOBS_STALE_JOBS_FORCE_MS),
+        );
+        const targets: JobMarketDefinition[] = [];
+        const detail: AutoJobsMarketSelection[] = [];
+        for (const market of JOB_MARKETS) {
+            const entry = snapshot?.markets.find((candidate) => candidate.marketKey === market.key);
             const state = classifyMarketReset(entry, now);
-            if (state === 'future') {
-                return entry === undefined || entry.updatedAt === undefined || now - entry.updatedAt >= marketTtlMs(entry, now);
-            }
-            return this.recoveryDue(market.key, entry, now);
-        });
+            const ageMs = entry?.updatedAt !== undefined ? now - entry.updatedAt : null;
+            const due = selectAll || !snapshot
+                ? true
+                : state === 'future'
+                    ? entry === undefined || entry.updatedAt === undefined || now - entry.updatedAt >= marketTtlMs(entry, now)
+                    : this.recoveryDue(market.key, entry, now);
+            const forced = !selectAll && snapshot !== null && (ageMs === null || ageMs >= staleLimitMs);
+            const selected = due || forced;
+            if (selected) targets.push(market);
+            detail.push({ marketKey: market.key, state, ageMs, due, forced, selected });
+        }
+        return { targets, detail };
     }
 
     private recoveryDue(marketKey: string, entry: AutoJobsMarket | undefined, now: number): boolean {
