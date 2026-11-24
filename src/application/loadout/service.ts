@@ -13,11 +13,11 @@ export interface LoadoutRequest {
     readonly fallbackToAnyAbility?: boolean;
     readonly strategy?: 'best' | 'weakest';
     /**
-     * Pick the highest achievable power instead of keeping the current
-     * hardware when it merely satisfies `requiredPower`. Used when the real
-     * requirement is unknown (a failed decrypt tells us only the current power).
+     * How `requiredPower` should be interpreted: `none` (keep current),
+     * `known` (hard threshold) or `unknown` (select the strongest plan).
+     * Defaults from `requiredPower`.
      */
-    readonly maximize?: boolean;
+    readonly requirement?: 'none' | 'known' | 'unknown';
 }
 
 export interface LoadoutServiceError {
@@ -244,6 +244,7 @@ export class LoadoutService {
     async canSatisfy(request: LoadoutRequest): Promise<Result<LoadoutCapability, LoadoutServiceError>> {
         this.pruneCapabilityCache();
         const strategy = request.strategy ?? 'best';
+        const requirement = request.requirement ?? (request.requiredPower > 0 ? 'known' : 'none');
         const policy = policyFor(request);
         const key = [
             request.ability,
@@ -251,7 +252,7 @@ export class LoadoutService {
             request.requiredPower,
             request.fallbackToAnyAbility === true ? 'fallback' : 'exact',
             strategy,
-            request.maximize === true ? 'max' : 'normal',
+            requirement,
             policy.id,
             String(policy.version),
         ].join('|');
@@ -280,11 +281,11 @@ export class LoadoutService {
             target: request.target,
             requiredPower: request.requiredPower,
             ...(request.fallbackToAnyAbility ? { fallbackToAnyAbility: true } : {}),
-            ...(request.maximize === true ? { maximize: true } : {}),
+            ...(request.requirement !== undefined ? { requirement: request.requirement } : {}),
             strategy,
             policy,
         });
-        const fallbackBlocked = optimized.fallbackUsed && request.requiredPower > 0;
+        const fallbackBlocked = optimized.fallbackUsed && requirement === 'known' && request.requiredPower > 0;
         const value: LoadoutCapability = {
             feasible: optimized.feasible && optimized.plan !== null && !fallbackBlocked,
             reason: fallbackBlocked ? 'NO_SOFTWARE' : optimized.reason,
@@ -334,6 +335,7 @@ export class LoadoutService {
             return err({ code: 'RUNTIME_UNAVAILABLE', message: runtime.error.message });
         }
         const strategy = request.strategy ?? 'best';
+        const requirement = request.requirement ?? (request.requiredPower > 0 ? 'known' : 'none');
         const policy = policyFor(request);
         const fingerprint = runtimeFingerprint(runtime.value);
         const cacheKey = [
@@ -342,7 +344,7 @@ export class LoadoutService {
             request.requiredPower,
             request.fallbackToAnyAbility === true ? 'fallback' : 'exact',
             strategy,
-            request.maximize === true ? 'max' : 'normal',
+            requirement,
             policy.id,
             policy.version,
         ].join('|');
@@ -358,7 +360,7 @@ export class LoadoutService {
                 target: request.target,
                 requiredPower: request.requiredPower,
                 ...(request.fallbackToAnyAbility ? { fallbackToAnyAbility: true } : {}),
-                ...(request.maximize === true ? { maximize: true } : {}),
+                ...(request.requirement !== undefined ? { requirement: request.requirement } : {}),
                 strategy,
                 policy,
             });
@@ -368,7 +370,7 @@ export class LoadoutService {
         if (!optimized.plan) {
             return err({ code: 'NO_PLAN', message: optimized.reason ?? 'No loadout plan' });
         }
-        if (optimized.fallbackUsed && request.requiredPower > 0) {
+        if (optimized.fallbackUsed && requirement === 'known' && request.requiredPower > 0) {
             return err({ code: 'INFEASIBLE', message: 'Fallback software cannot satisfy a positive power requirement' });
         }
         if (!optimized.feasible) {
@@ -378,6 +380,7 @@ export class LoadoutService {
                 ability: request.ability,
                 target: request.target,
                 requiredPower: request.requiredPower,
+                requirement,
                 bestAvailablePower,
                 shortfall,
                 power: optimized.plan.power,
@@ -407,6 +410,7 @@ export class LoadoutService {
             fallbackToAnyAbility: request.fallbackToAnyAbility === true,
             fallbackUsed: optimized.fallbackUsed,
             requiredPower: plan.requiredPower,
+            requirement: plan.requirement ?? null,
             power: plan.power,
             rawPower: plan.rawPower,
             ratio: plan.ratio ?? null,

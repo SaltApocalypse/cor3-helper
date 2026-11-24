@@ -406,7 +406,7 @@ describe('LoadoutService', () => {
         expect(second.value.power).toBe(17);
     });
 
-    it('honors maximize by switching to the strongest hardware even when the current setup satisfies the request', async () => {
+    it('honors an unknown requirement by switching to the strongest hardware', async () => {
         const weakCpu: HardwareDefinition = { id: 'cpu-weak', name: 'CPU Weak', slot: 'cpu', specs: { cpuFrequency: 10, cpuConsuming: 10 } };
         const strongCpu: HardwareDefinition = { id: 'cpu-strong', name: 'CPU Strong', slot: 'cpu', specs: { cpuFrequency: 30, cpuConsuming: 10 } };
         const gpu: HardwareDefinition = { id: 'gpu1', name: 'GPU', slot: 'gpu', specs: { gpuPower: 10, gpuConsuming: 20 } };
@@ -450,7 +450,7 @@ describe('LoadoutService', () => {
             },
         }, async () => undefined);
 
-        const result = await service.ensure({ ability: 'HACK', target: 'CEDRT', requiredPower: 1, maximize: true });
+        const result = await service.ensure({ ability: 'HACK', target: 'CEDRT', requiredPower: 1, requirement: 'unknown' });
         if (!result.ok) throw new Error(result.error.message);
         expect(result.value.hardware.cpu.id).toBe('cpu-strong');
         expect(result.value.power).toBe(20);

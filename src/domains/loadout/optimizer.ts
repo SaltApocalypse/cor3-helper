@@ -25,8 +25,15 @@ export interface LoadoutOptimizationRequest {
     readonly fallbackToAnyAbility?: boolean;
     /** 'best' keeps current sufficient hardware, otherwise maximizes power; 'weakest' minimizes power. */
     readonly strategy?: 'best' | 'weakest';
-    /** Rank by achievable power first, even when the current hardware already satisfies the request. */
-    readonly maximize?: boolean;
+    /**
+     * How `requiredPower` should be interpreted:
+     * - `none`: no requirement; keep the current plan.
+     * - `known`: `requiredPower` is a hard threshold.
+     * - `unknown`: the real requirement is unknown (e.g. a failed decrypt);
+     *   select the strongest attainable plan.
+     * Defaults to `known` when requiredPower > 0, otherwise `none`.
+     */
+    readonly requirement?: 'none' | 'known' | 'unknown';
 }
 
 export type LoadoutInfeasibleReason =
@@ -103,13 +110,13 @@ export function optimizeLoadout(request: LoadoutOptimizationRequest): LoadoutOpt
     const currentSoftwareIds = request.currentSoftwareIds ?? request.inventory.equippedSoftwareIds;
     const currentHardware = request.currentHardware ?? request.inventory.equippedHardware;
     const strategy = request.strategy ?? 'best';
-    const maximize = request.maximize === true;
+    const requirement = request.requirement ?? (requiredPower > 0 ? 'known' : 'none');
     const policy = effectivePolicy(strategy, request.policy);
     const context = policyContext(currentHardware);
     const better = (plan: LoadoutPlan, incumbent: LoadoutPlan): boolean => isBetterPlan(plan, incumbent, {
         requiredPower,
+        requirement,
         strategy,
-        maximize,
         policy,
         context,
         currentSoftwareIds,
@@ -142,7 +149,8 @@ export function optimizeLoadout(request: LoadoutOptimizationRequest): LoadoutOpt
                             rawPower: details.rawPower,
                             ...(softwareAnalysis ? { ratio: softwareAnalysis.ratio, bottleneck: softwareAnalysis.bottleneck } : {}),
                             requiredPower,
-                            feasible: requiredPower === 0 || power >= requiredPower,
+                            requirement,
+                            feasible: requirement === 'known' ? power >= requiredPower : true,
                             switchCost: hardwareSwitchCost(currentHardware, set),
                             policyId: policy.id,
                             policyVersion: policy.version,
@@ -173,15 +181,15 @@ export function optimizeLoadout(request: LoadoutOptimizationRequest): LoadoutOpt
             reason: null,
             fallbackUsed,
             bestAvailablePower: best.power,
-            shortfall: requiredPower > 0 ? Math.max(0, requiredPower - best.power) : 0,
+            shortfall: requirement === 'known' && requiredPower > 0 ? Math.max(0, requiredPower - best.power) : 0,
         }
         : { feasible: false, plan: null, reason: 'NO_BOOTABLE_COMBINATION', fallbackUsed };
 }
 
 interface BetterContext {
     readonly requiredPower: number;
+    readonly requirement: 'none' | 'known' | 'unknown';
     readonly strategy: 'best' | 'weakest';
-    readonly maximize: boolean;
     readonly policy: PsuSelectionPolicy;
     readonly context: PsuPolicyContext;
     readonly currentSoftwareIds: readonly string[];
@@ -192,12 +200,13 @@ function isCurrentSoftware(softwareId: string, currentSoftwareIds: readonly stri
 }
 
 function isBetterPlan(plan: LoadoutPlan, best: LoadoutPlan, ctx: BetterContext): boolean {
-    if (ctx.requiredPower > 0 && plan.feasible !== best.feasible) return plan.feasible;
+    if (ctx.requirement === 'known' && plan.feasible !== best.feasible) return plan.feasible;
 
-    // When nothing can satisfy the requirement, report the true maximum power.
-    // v1 did this too; keeping the current hardware here made the "best" value
-    // depend on what was already equipped instead of what is attainable.
-    if (ctx.requiredPower > 0 && !plan.feasible && !best.feasible) {
+    // When nothing can satisfy a known requirement, report the true maximum
+    // power. v1 did this too; keeping the current hardware here made the
+    // "best" value depend on what was already equipped instead of what is
+    // attainable.
+    if (ctx.requirement === 'known' && !plan.feasible && !best.feasible) {
         if (plan.power !== best.power) return plan.power > best.power;
     }
 
@@ -206,10 +215,10 @@ function isBetterPlan(plan: LoadoutPlan, best: LoadoutPlan, ctx: BetterContext):
     const planCurrentHardware = plan.switchCost === 0;
     const bestCurrentHardware = best.switchCost === 0;
 
-    // Explicit maximize: the real requirement is unknown (e.g. a failed
-    // decrypt), so "current hardware is good enough" is not a valid reason to
-    // stop. Pick the highest power first.
-    if (ctx.maximize) {
+    // Unknown requirement: the current plan is not proven sufficient, so
+    // "keep current hardware" is not a valid reason to stop. Pick the highest
+    // power first.
+    if (ctx.requirement === 'unknown') {
         if (plan.power !== best.power) return plan.power > best.power;
         if (planCurrent !== bestCurrent) return planCurrent;
         if (plan.switchCost !== best.switchCost) return plan.switchCost < best.switchCost;
@@ -282,7 +291,7 @@ function applyPsuPolicy(
         power,
         rawPower: details.rawPower,
         ...(softwareAnalysis ? { ratio: softwareAnalysis.ratio, bottleneck: softwareAnalysis.bottleneck } : {}),
-        feasible: plan.requiredPower === 0 || power >= plan.requiredPower,
+        feasible: plan.requirement === 'known' ? power >= plan.requiredPower : true,
         switchCost: hardwareSwitchCost(currentHardware, set),
     };
 }

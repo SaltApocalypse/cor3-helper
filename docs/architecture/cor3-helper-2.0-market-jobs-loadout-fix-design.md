@@ -690,3 +690,15 @@ ACTION_FAILED: Best available loadout is still below the required power (route)
 说明：watchdog 作用于「周期内选择」，不改变 `computeSchedule` 的 interval 语义；当所有市场 reset 都在未来时，仍然按 `autoJobsIntervalMinutes` 唤醒（默认 60 分钟）。313 的日志场景里其他市场处于 recovery、周期约 68 秒，因此 HOME 在 60 秒 TTL 后会被正常选中。
 
 检查：`typecheck` / `lint` / `build` / `vitest`（122 文件 / 1016 测试）全绿；构建号 314。
+
+### 13.7 第五批（2026-11-24，目标访问预检与需求三态，构建 315）
+
+| 类别 | 改动 | 文件 |
+|---|---|---|
+| 预检 SAI | 对目标服务器做只读登录状态探测（30 秒缓存）；已有访问直接通过；无访问且防御值 > 0 时，要求一套真正能达到该功率的 HACK 方案，否则接取前跳过；探测失败不阻断 | `contexts/background/automation/job-preflight.ts`、`infrastructure/browser/chrome-tab-server-access-adapter.ts`、`contexts/background/composition/automation.ts` |
+| 路由访问恢复 | 路由失败且错误与 HACK/访问相关时，先直接确保目标访问（换 HACK 配装 + 入侵），再重试一次路由；端点切换后再次确保登录 | `contexts/background/automation/job-routing.ts` |
+| HACK 重试 | 换装重试新增 `sai-hack-not-available` 及 hack/access 文本；防御值缺失时按 `unknown` 需求选最强方案 | `infrastructure/browser/chrome-tab-server-access-adapter.ts` |
+| 需求三态 | `maximize` 合并为 `requirement: none / known / unknown`；`best` 在已知需求满足时保留当前，否则最强；未知需求直接最强；解密改为传观察值与 `unknown`，不再用 `current + 1` | `domains/loadout/optimizer.ts`、`application/loadout/service.ts`、`application/auto-job/execution-service.ts`、`contexts/background/composition/automation.ts` |
+| 测试 | 预检无访问阻断/有访问放行/探测失败放行；路由访问恢复成功与失败；`sai-hack-not-available`；未知需求最大化；防御值缺失 | `job-preflight.test.ts`、`job-routing-refresh.test.ts`、`chrome-tab-server-access-adapter.test.ts`、`loadout.test.ts`、`service.test.ts` |
+
+检查：`typecheck` / `lint` / `build` / `vitest`（122 文件 / 1024 测试）全绿；构建号 315。

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { JobOffer } from '../../../domains/jobs/model.js';
+import type { NetworkServer, NetworkSnapshot } from '../../../domains/network/model.js';
+import { asEdgeId, asServerId } from '../../../kernel/ids.js';
+import { ok } from '../../../kernel/result.js';
 import type { JobRoutingDeps } from './job-routing.js';
 import { JobRouting } from './job-routing.js';
 
@@ -88,5 +91,90 @@ describe('JobRouting.refreshJobAfterTake', () => {
             .refreshJobAfterTake(job({ marketServerId: null }));
 
         expect(result).toMatchObject({ ok: true, value: { status: 'unavailable' } });
+    });
+});
+
+const homeId = asServerId('home');
+const targetId = asServerId('server-1');
+
+function server(id: ReturnType<typeof asServerId>, typeName: string): NetworkServer {
+    return {
+        id,
+        name: id,
+        ip: null,
+        typeName,
+        cluster: null,
+        faction: null,
+        maintenance: { active: false, endsAt: null, timeUntil: null },
+        access: { kind: 'none', active: false },
+        endpointCapable: true,
+        reachableNow: true,
+    };
+}
+
+function targetSnapshot(): NetworkSnapshot {
+    return {
+        version: 1,
+        capturedAt: 1,
+        homeId,
+        endpointId: homeId,
+        servers: new Map([
+            [homeId, server(homeId, 'Home')],
+            [targetId, server(targetId, 'D4RK')],
+        ]),
+        edges: [{ id: asEdgeId('e0'), a: homeId, b: targetId, hidden: false }],
+        maintenanceFingerprint: '',
+    };
+}
+
+function targetRouting(
+    execute: ReturnType<typeof vi.fn>,
+    ensureAccess: ReturnType<typeof vi.fn>,
+) {
+    return new JobRouting({
+        snapshots: { get: async () => ok(targetSnapshot()) },
+        endpointCommands: { setEndpoint: async () => ok(undefined) },
+        endpointMutex: { run: async (run: () => Promise<unknown>) => run() },
+        routeExecutor: { execute },
+        serverAccess: { ensureAccess },
+        tabs: { findCor3Tab: async () => 1, send: async () => ({}) },
+        logger: { debug: () => undefined, info: () => undefined, warn: () => undefined, error: () => undefined },
+    } as unknown as JobRoutingDeps);
+}
+
+describe('JobRouting.routeJobToTarget access recovery', () => {
+    const hackFailure = {
+        ok: false as const,
+        error: { code: 'ROUTE_FAILED', message: 'All route attempts failed (direct: GAME_HACK_FAILED sai-hack-not-available)', attempts: [] },
+    };
+    const routeSuccess = {
+        ok: true as const,
+        route: { nodes: [{ id: homeId, name: 'home' }, { id: targetId, name: 'server-1' }], edgeIds: [], hiddenEdgeCount: 0, maintenanceFree: true, blocker: null },
+        direct: true,
+        finalEndpoint: targetId,
+    };
+
+    it('hacks the target and retries the route after a hack-related failure', async () => {
+        const execute = vi.fn()
+            .mockResolvedValueOnce(hackFailure)
+            .mockResolvedValueOnce(hackFailure)
+            .mockResolvedValueOnce(routeSuccess);
+        const ensureAccess = vi.fn(async () => ok(undefined));
+        const result = await targetRouting(execute, ensureAccess).routeJobToTarget(job());
+
+        expect(result.ok).toBe(true);
+        expect(ensureAccess).toHaveBeenCalledTimes(2);
+        expect(execute).toHaveBeenCalledTimes(3);
+    });
+
+    it('does not retry the route when target access recovery fails', async () => {
+        const execute = vi.fn().mockResolvedValue(hackFailure);
+        const ensureAccess = vi.fn(async () => ({ ok: false as const, error: { code: 'NO_ACCESS', message: 'No access granted after hack' } }));
+        const result = await targetRouting(execute, ensureAccess).routeJobToTarget(job());
+
+        expect(result.ok).toBe(false);
+        if (!result.ok) expect(result.error.code).toBe('ROUTE_FAILED');
+        expect(ensureAccess).toHaveBeenCalledTimes(1);
+        expect(execute).toHaveBeenCalledTimes(2);
     });
 });

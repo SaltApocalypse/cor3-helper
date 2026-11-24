@@ -359,11 +359,11 @@ describe('JobExecutionService', () => {
         expect(fake.calls).toEqual(['take']);
     });
 
-    it('plans for the next integer when the current decrypt power is insufficient', async () => {
+    it('passes the observed decrypt power to the hook for unknown-requirement planning', async () => {
         const fake = actions();
-        // `decryptPower` is the current power. With canDecrypt=false the real
-        // requirement is strictly greater, so the loadout must be planned for
-        // at least current + 1 instead of treating the current value as enough.
+        // `decryptPower` is the current power, not the requirement. The hook
+        // receives it as an observation and plans with requirement 'unknown',
+        // so the loadout selects the strongest plan.
         fake.port.getFileAnalysis = async () => ({ ok: true as const, value: { canDecrypt: false, decryptPower: 20, tags: [], source: null } });
         let seen: number | undefined;
         const service = new JobExecutionService(
@@ -375,7 +375,7 @@ describe('JobExecutionService', () => {
             },
         );
         const result = await service.executeDetailed(job('File Decryption'));
-        expect(seen).toBe(21);
+        expect(seen).toBe(20);
         expect(result.ok).toBe(false);
         if (!result.ok) expect(result.error.code).toBe('DECRYPT_POWER_INSUFFICIENT');
     });

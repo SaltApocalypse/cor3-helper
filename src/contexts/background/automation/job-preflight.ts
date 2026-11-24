@@ -10,11 +10,17 @@ import type { JobLockRegistry } from './job-locks.js';
 import { asServerId } from '../../../kernel/ids.js';
 import { err, ok, type Result } from '../../../kernel/result.js';
 
+export interface JobAccessProbe {
+    inspect(serverId: string): Promise<Result<{ readonly hasAccess: boolean; readonly defenceRate: number | null }, GameError>>;
+}
+
 export interface JobPreflightDeps {
     readonly snapshots: Pick<NetworkSnapshotService, 'get'>;
     readonly loadout: Pick<LoadoutService, 'canSatisfy'>;
     /** Per-job minigame locks. Only the current job's lock is consulted. */
     readonly locks?: Pick<JobLockRegistry, 'isLocked' | 'lockUntil'>;
+    /** Read-only SAI probe; absent in tests that do not need access checks. */
+    readonly access?: JobAccessProbe;
     readonly logger: AutomationLogger;
     readonly now?: () => number;
 }
@@ -89,9 +95,36 @@ function lockMessage(expiresAt: number, now: number): string {
 export class JobPreflight {
     private lastMapRefreshAt = 0;
     private readonly now: () => number;
+    private readonly accessCache = new Map<string, { readonly at: number; readonly value: { readonly hasAccess: boolean; readonly defenceRate: number | null } }>();
 
     constructor(private readonly deps: JobPreflightDeps) {
         this.now = deps.now ?? (() => Date.now());
+    }
+
+    private async inspectAccess(serverId: string): Promise<{ readonly hasAccess: boolean; readonly defenceRate: number | null } | null> {
+        const access = this.deps.access;
+        if (!access) return null;
+        const cached = this.accessCache.get(serverId);
+        if (cached && this.now() - cached.at < 30_000) return cached.value;
+        try {
+            const result = await access.inspect(serverId);
+            if (!result.ok) {
+                this.deps.logger.debug('auto-job', 'Target access probe failed', {
+                    serverId,
+                    code: result.error.code,
+                    message: result.error.message,
+                });
+                return null;
+            }
+            this.accessCache.set(serverId, { at: this.now(), value: result.value });
+            return result.value;
+        } catch (error) {
+            this.deps.logger.debug('auto-job', 'Target access probe threw', {
+                serverId,
+                message: error instanceof Error ? error.message : String(error),
+            });
+            return null;
+        }
     }
 
     private async checkCapability(snapshot: NetworkSnapshot | null, job: JobOffer): Promise<Result<void, GameError>> {
@@ -180,6 +213,42 @@ export class JobPreflight {
                     }
                 }
                 if (!hasCapableRoute && missingByRoute.length > 0) missing.push(...missingByRoute);
+            }
+
+            // Read-only SAI check for the target itself. A route can be
+            // planned while the target still has no access grant; in that case
+            // the job would be taken and fail later at `set.endpoint`. Block it
+            // before take only when a hack is required and the owned loadout
+            // cannot reach the server's defence rate.
+            const targetServer = snapshot.servers.get(target);
+            const probe = await this.inspectAccess(targetId);
+            if (
+                targetServer
+                && targetServer.id !== snapshot.homeId
+                && probe
+                && !probe.hasAccess
+                && probe.defenceRate !== null
+                && probe.defenceRate > 0
+                && targetServer.typeName
+            ) {
+                const requiredPower = probe.defenceRate;
+                const capability = await this.deps.loadout.canSatisfy({
+                    ability: 'HACK',
+                    target: targetServer.typeName,
+                    requiredPower,
+                });
+                if (!capability.ok) {
+                    this.deps.logger.warn('auto-job', `Target access capability check unavailable for ${targetServer.name}`, {
+                        message: capability.error.message,
+                    });
+                } else if (!capability.value.feasible) {
+                    missing.push(`HACK ${targetServer.typeName} (${requiredPower})`);
+                } else {
+                    this.deps.logger.debug('auto-job', `Target ${targetServer.name} needs a hack; loadout available`, {
+                        jobId: job.id,
+                        requiredPower,
+                    });
+                }
             }
         }
 

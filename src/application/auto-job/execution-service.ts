@@ -504,7 +504,10 @@ export class JobExecutionService implements JobExecutionPort {
             const observedPower = typeof observedDecryptPower === 'number' && Number.isFinite(observedDecryptPower)
                 ? Math.floor(observedDecryptPower)
                 : null;
-            const requiredPower = observedPower === null ? undefined : Math.max(1, observedPower + 1);
+            // The observed value is only a lower bound. The decrypt hook plans
+            // with `requirement: 'unknown'`, so it selects the strongest plan
+            // instead of treating this value as the target.
+            const requiredPower = observedPower ?? undefined;
             if (this.beforeDecrypt) {
                 const ready = await this.beforeDecrypt(job, file, requiredPower);
                 if (!ready.ok) {

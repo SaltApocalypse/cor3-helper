@@ -2,13 +2,18 @@ import type { ServerAccessPort, ServerAccessContext } from '../../application/ne
 import type { GameError } from '../../application/game/ports.js';
 import { unwrapTabResult } from './tab-response.js';
 import { err, ok, type Result } from '../../kernel/result.js';
-import type { ServerId } from '../../kernel/ids.js';
+import { asServerId, type ServerId } from '../../kernel/ids.js';
 import type { TabMessagePort } from '../auth/chrome-tab-auth-adapter.js';
 
 type Sleep = (ms: number) => Promise<void>;
 
 interface HackLoadoutPort {
-    ensure(request: { ability: 'HACK'; target: string; requiredPower: number }): Promise<Result<unknown, { code: string; message: string }>>;
+    ensure(request: {
+        ability: 'HACK';
+        target: string;
+        requiredPower: number;
+        requirement?: 'none' | 'known' | 'unknown';
+    }): Promise<Result<unknown, { code: string; message: string }>>;
 }
 
 interface AccessData {
@@ -19,6 +24,11 @@ interface MinigamePort {
     solve(timeoutMs?: number): Promise<Result<unknown, GameError>>;
 }
 
+export interface ServerAccessProbe {
+    readonly hasAccess: boolean;
+    readonly defenceRate: number | null;
+}
+
 export class ChromeTabServerAccessAdapter implements ServerAccessPort {
     constructor(
         private readonly tabs: TabMessagePort,
@@ -26,6 +36,24 @@ export class ChromeTabServerAccessAdapter implements ServerAccessPort {
         private readonly loadout?: HackLoadoutPort,
         private readonly minigames?: MinigamePort,
     ) {}
+
+    /**
+     * Read-only access probe for preflight. Returns whether an active access
+     * grant exists and the server defence rate, without hacking or changing
+     * the loadout.
+     */
+    async inspect(serverId: string): Promise<Result<ServerAccessProbe, GameError>> {
+        const tabId = await this.tabs.findCor3Tab();
+        if (tabId === null) return err({ code: 'NO_COR3_TAB', message: 'No cor3.gg tab found' });
+        const status = await this.loginStatus(tabId, asServerId(serverId));
+        if (!status.ok) return status;
+        const value = status.value as { activeAccesses?: unknown; serverDefenceRate?: unknown } | null;
+        const active = Array.isArray(value?.activeAccesses) ? value.activeAccesses : [];
+        const defenceRate = typeof value?.serverDefenceRate === 'number' && Number.isFinite(value.serverDefenceRate)
+            ? value.serverDefenceRate
+            : null;
+        return ok({ hasAccess: active.length > 0, defenceRate });
+    }
 
     async ensureAccess(serverId: ServerId, context?: ServerAccessContext): Promise<Result<void, GameError>> {
         const tabId = await this.tabs.findCor3Tab();
@@ -101,6 +129,9 @@ export class ChromeTabServerAccessAdapter implements ServerAccessPort {
             ability: 'HACK',
             target: context.serverTypeName,
             requiredPower,
+            // No defence rate means the target is unknown; ask for the
+            // strongest plan instead of treating 0 as "anything works".
+            ...(requiredPower > 0 ? {} : { requirement: 'unknown' as const }),
         });
         if (!equipped.ok) {
             return err({ code: `LOADOUT_${equipped.error.code}`, message: equipped.error.message });
@@ -111,7 +142,8 @@ export class ChromeTabServerAccessAdapter implements ServerAccessPort {
     private isRetryableHack(code: string, message: string): boolean {
         return code === 'sai-hack-impossible'
             || code === 'sai-no-hack-software'
-            || /sai-(?:no-hack-software|hack-impossible)|hack software/i.test(message);
+            || code === 'sai-hack-not-available'
+            || /sai-(?:no-hack-software|hack-impossible|hack-not-available)|hack software|not enough hack/i.test(message);
     }
 
     private async loginStatus(tabId: number, serverId: ServerId): Promise<Result<unknown, GameError>> {

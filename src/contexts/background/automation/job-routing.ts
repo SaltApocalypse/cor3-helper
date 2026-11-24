@@ -33,6 +33,10 @@ export interface JobRoutingDeps {
     readonly logger: AutomationLogger;
 }
 
+function isHackAccessFailure(text: string): boolean {
+    return /sai-|hack|no[-_ ]?access|access[-_ ]?denied|not enough hack|loadout/i.test(text);
+}
+
 export class JobRouting {
     constructor(private readonly deps: JobRoutingDeps) {}
 
@@ -75,33 +79,68 @@ export class JobRouting {
         if (!snapshot.ok) return { ok: false as const, error: { code: 'SNAPSHOT_FAILED', message: snapshot.error.message } };
         let graph = new NetworkGraph(snapshot.value);
         let target = graph.getServer(targetId);
-        let route = await this.deps.routeExecutor.execute(graph, targetId, {
+        const runRoute = () => this.deps.routeExecutor.execute(graph, targetId, {
             owner: 'auto-job',
             reason: `job:${job.id}:target`,
             now: Date.now(),
-            currentEndpoint: snapshot.value.endpointId,
+            currentEndpoint: snapshot.ok ? snapshot.value.endpointId : null,
         });
+        const ensureTargetAccess = () => this.deps.serverAccess.ensureAccess(targetId, {
+            ...(target?.typeName ? { serverTypeName: target.typeName } : {}),
+        });
+        let route = await runRoute();
         if (!route.ok && (route.error?.code === 'NO_ROUTE' || route.error?.code === 'ROUTE_FAILED')) {
             const refreshed = await this.deps.snapshots.get(true);
             if (refreshed.ok) {
                 snapshot = refreshed;
                 graph = new NetworkGraph(snapshot.value);
                 target = graph.getServer(targetId);
-                route = await this.deps.routeExecutor.execute(graph, targetId, {
-                    owner: 'auto-job',
-                    reason: `job:${job.id}:target`,
-                    now: Date.now(),
-                    currentEndpoint: snapshot.value.endpointId,
-                });
+                route = await runRoute();
             }
         }
         if (!route.ok) {
+            // A target whose endpoint requires access can make every route
+            // attempt fail at `set.endpoint` before `ensureAccess` is reached.
+            // Recover the target access directly (this is where a HACK loadout
+            // is applied) and retry the route once.
+            const failureText = [
+                route.error?.code,
+                route.error?.message,
+                route.error?.directError?.code,
+                route.error?.directError?.message,
+            ].filter((entry): entry is string => typeof entry === 'string').join(' ');
+            if (isHackAccessFailure(failureText)) {
+                this.deps.logger.info('auto-job', 'Target route needs access; attempting hack before retry', {
+                    jobId: job.id,
+                    serverId: job.serverId,
+                    message: route.error?.message ?? null,
+                });
+                const access = await ensureTargetAccess();
+                if (access.ok) {
+                    const retried = await runRoute();
+                    if (retried.ok) {
+                        if (retried.accessEnsured) return ok(undefined);
+                        // Log in at the target after the endpoint change (the
+                        // pre-route hack/login happened while still elsewhere).
+                        const finalAccess = await ensureTargetAccess();
+                        return finalAccess.ok
+                            ? ok(undefined)
+                            : { ok: false as const, error: { code: finalAccess.error.code, message: finalAccess.error.message } };
+                    }
+                    route = retried;
+                } else {
+                    this.deps.logger.warn('auto-job', 'Target access recovery failed', {
+                        jobId: job.id,
+                        serverId: job.serverId,
+                        code: access.error.code,
+                        message: access.error.message,
+                    });
+                }
+            }
             return { ok: false as const, error: { code: route.error?.code ?? 'ROUTE_FAILED', message: route.error?.message ?? 'No route to job server' } };
         }
         if (route.accessEnsured) return ok(undefined);
-        const access = await this.deps.serverAccess.ensureAccess(targetId, {
-            ...(target?.typeName ? { serverTypeName: target.typeName } : {}),
-        });
+        const access = await ensureTargetAccess();
         return access.ok
             ? ok(undefined)
             : { ok: false as const, error: { code: access.error.code, message: access.error.message } };

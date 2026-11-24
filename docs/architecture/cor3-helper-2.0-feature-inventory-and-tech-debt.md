@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-24 against build `2.0.9-salta.314`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (122 files / 1016 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-25 against build `2.0.10-salta.315`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (122 files / 1024 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.9-salta.314`)
+## Current completion snapshot (build `2.0.10-salta.315`)
 
 | Metric | Value |
 |---|---|
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 122 files / 1016 tests pass
-- `npm run build` — pass, `2.0.9-salta.314`
+- `npm test` — 122 files / 1024 tests pass
+- `npm run build` — pass, `2.0.10-salta.315`
 
 ---
 
@@ -1483,4 +1483,14 @@ Root causes and fixes recorded from real user logs (`B.log`, `C.log`, `A.log`) a
 ## Verification
 
 - `npm run typecheck`, `npm run lint`, `npm run build`.
-- `npm test`: 122 files / 1016 tests, including new coverage for options-vs-jobs freshness, reset preservation, decrypt requirement derivation, non-force barrier release, legacy/null-reset safety, tag matrix, infeasible true maximum and same-id definition invalidation.
+- `npm test`: 122 files / 1024 tests, including new coverage for options-vs-jobs freshness, reset preservation, decrypt requirement derivation, non-force barrier release, legacy/null-reset safety, tag matrix, infeasible true maximum and same-id definition invalidation.
+
+---
+
+# Part 72 — Target access preflight, route access recovery and requirement modes (2.0.10-salta)
+
+- Preflight now performs a read-only SAI probe for jobs with a target server (30 s cache). Existing access passes. Without access, a positive defence rate requires an owned HACK plan that can actually reach that rate; otherwise the job is skipped before `take`. Probe failures do not block.
+- Route failures that look hack/access-related now ensure target access directly (which applies a HACK loadout and hacks) and retry the route once. After the endpoint change the target access/login is ensured again.
+- HACK loadout recovery also recognizes `sai-hack-not-available` and hack/access text, not only `sai-no-hack-software` / `sai-hack-impossible`.
+- `maximize` was replaced by a requirement mode: `none` (keep current), `known` (hard threshold), `unknown` (strongest attainable). Decrypt passes the observed current power and `unknown` instead of `current + 1`; HACK uses `known` when a defence rate exists, otherwise `unknown`.
+- Verification: 122 files / 1024 tests, including new preflight access-block/allow/probe-failure cases, route access recovery, `sai-hack-not-available`, unknown-requirement planning and empty-defence-rate planning.

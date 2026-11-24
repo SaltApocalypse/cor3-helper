@@ -104,4 +104,75 @@ describe('ChromeTabServerAccessAdapter', () => {
         expect(result).toEqual({ ok: false, error: { code: 'LOADOUT_NO_PLAN', message: 'NO_SOFTWARE' } });
         expect(loadout.ensure).toHaveBeenCalledTimes(1);
     });
+
+    it('inspects access and defence rate without hacking', async () => {
+        const adapter = new ChromeTabServerAccessAdapter({
+            findCor3Tab: async () => 1,
+            send: async (_tab, message) => {
+                const type = (message as { type: string }).type;
+                if (type === 'V2_LOGIN_STATUS') return ok({ activeAccesses: [], serverDefenceRate: 25 });
+                return ok(undefined);
+            },
+        });
+
+        const result = await adapter.inspect('server-1');
+
+        expect(result).toEqual({ ok: true, value: { hasAccess: false, defenceRate: 25 } });
+    });
+
+    it('retries the hack loadout for sai-hack-not-available', async () => {
+        let hacked = false;
+        let hackCalls = 0;
+        const loadout = { ensure: vi.fn(async () => ok({})) };
+        const adapter = new ChromeTabServerAccessAdapter({
+            findCor3Tab: async () => 1,
+            send: async (_tab, message) => {
+                const type = (message as { type: string }).type;
+                if (type === 'V2_LOGIN_STATUS') return hacked ? accessResponse() : ok({ activeAccesses: [] });
+                if (type === 'V2_HACK_START') {
+                    hackCalls += 1;
+                    if (hackCalls === 1) return err({ code: 'GAME_HACK_FAILED', message: 'sai-hack-not-available' });
+                    hacked = true;
+                    return ok({ autoHacked: true });
+                }
+                return ok(undefined);
+            },
+        }, async () => undefined, loadout);
+
+        const result = await adapter.ensureAccess(serverId, { serverTypeName: 'URM7-M' });
+
+        expect(result.ok).toBe(true);
+        expect(loadout.ensure).toHaveBeenCalledTimes(1);
+        expect(hackCalls).toBe(2);
+    });
+
+    it('plans with an unknown requirement when the defence rate is missing', async () => {
+        let hacked = false;
+        let hackCalls = 0;
+        const loadout = { ensure: vi.fn(async () => ok({})) };
+        const adapter = new ChromeTabServerAccessAdapter({
+            findCor3Tab: async () => 1,
+            send: async (_tab, message) => {
+                const type = (message as { type: string }).type;
+                if (type === 'V2_LOGIN_STATUS') return hacked ? accessResponse() : ok({ activeAccesses: [], serverDefenceRate: 0 });
+                if (type === 'V2_HACK_START') {
+                    hackCalls += 1;
+                    if (hackCalls === 1) return err({ code: 'sai-hack-impossible', message: 'not enough power' });
+                    hacked = true;
+                    return ok({ autoHacked: true });
+                }
+                return ok(undefined);
+            },
+        }, async () => undefined, loadout);
+
+        const result = await adapter.ensureAccess(serverId, { serverTypeName: 'URM7-M' });
+
+        expect(result.ok).toBe(true);
+        expect(loadout.ensure).toHaveBeenCalledWith(expect.objectContaining({
+            ability: 'HACK',
+            target: 'URM7-M',
+            requiredPower: 0,
+            requirement: 'unknown',
+        }));
+    });
 });

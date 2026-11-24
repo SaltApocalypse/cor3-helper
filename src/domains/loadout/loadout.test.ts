@@ -345,7 +345,7 @@ describe('Loadout optimizer', () => {
             target: 'CEDRT',
             requiredPower: 1,
             strategy: 'best',
-            maximize: true,
+            requirement: 'unknown',
         });
         expect(maximized.plan?.hardware.cpu.id).toBe('cpu-strong');
         expect(maximized.plan?.power).toBe(20);

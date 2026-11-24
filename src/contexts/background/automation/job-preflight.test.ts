@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { JobOffer } from '../../../domains/jobs/model.js';
 import type { NetworkServer, NetworkSnapshot } from '../../../domains/network/model.js';
 import { asEdgeId, asServerId } from '../../../kernel/ids.js';
-import { ok } from '../../../kernel/result.js';
+import { err, ok } from '../../../kernel/result.js';
 import { JobPreflight, type JobPreflightDeps } from './job-preflight.js';
 
 const home = asServerId('home');
@@ -71,6 +71,7 @@ function preflight(
     options: {
         readonly lockedJobId?: string;
         readonly lockUntil?: number;
+        readonly access?: JobPreflightDeps['access'];
     } = {},
 ): JobPreflight {
     const logger = {
@@ -86,6 +87,7 @@ function preflight(
             isLocked: (_marketKey, jobId) => jobId === options.lockedJobId,
             lockUntil: (_marketKey, jobId) => jobId === options.lockedJobId ? (options.lockUntil ?? 60_000) : undefined,
         },
+        ...(options.access ? { access: options.access } : {}),
         logger,
         now: () => 1,
     });
@@ -237,5 +239,52 @@ describe('JobPreflight', () => {
             }));
         expect(result.ok).toBe(false);
         if (!result.ok) expect(result.error.code).toBe('PREFLIGHT_FAILED');
+    });
+
+    it('blocks a target job when access is missing and the HACK plan cannot reach the defence rate', async () => {
+        const snap = snapshot(
+            [server(home, 'Home', { access: true }), server(target, 'D4RK')],
+            [['home', 'target']],
+        );
+        const result = await preflight(snap, async (request) => {
+            if (request.ability === 'HACK' && request.requiredPower === 25) {
+                return ok({ feasible: false, reason: null });
+            }
+            return ok({ feasible: true, reason: null });
+        }, {
+            access: { inspect: async () => ok({ hasAccess: false, defenceRate: 25 }) },
+        }).preflight(job());
+
+        expect(result.ok).toBe(false);
+        if (!result.ok) expect(result.error.message).toContain('HACK D4RK (25)');
+    });
+
+    it('passes a target job when access already exists', async () => {
+        const snap = snapshot(
+            [server(home, 'Home', { access: true }), server(target, 'D4RK', { access: true })],
+            [['home', 'target']],
+        );
+        let hackChecks = 0;
+        const result = await preflight(snap, async (request) => {
+            if (request.ability === 'HACK') hackChecks += 1;
+            return ok({ feasible: false, reason: 'NO_SOFTWARE' });
+        }, {
+            access: { inspect: async () => ok({ hasAccess: true, defenceRate: 25 }) },
+        }).preflight(job());
+
+        expect(result.ok).toBe(true);
+        expect(hackChecks).toBe(0);
+    });
+
+    it('does not block when the access probe is unavailable', async () => {
+        const snap = snapshot(
+            [server(home, 'Home', { access: true }), server(target, 'D4RK')],
+            [['home', 'target']],
+        );
+        const result = await preflight(snap, async () => ok({ feasible: true, reason: null }), {
+            access: { inspect: async () => err({ code: 'GAME_TIMEOUT', message: 'timed out' }) },
+        }).preflight(job());
+
+        expect(result.ok).toBe(true);
     });
 });

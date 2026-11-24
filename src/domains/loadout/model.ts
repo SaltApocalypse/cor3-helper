@@ -80,6 +80,8 @@ export interface LoadoutPlan {
     /** Bottleneck resource when `ratio` was computed. */
     readonly bottleneck?: string | null;
     readonly requiredPower: number;
+    /** How `requiredPower` was interpreted for this plan. */
+    readonly requirement?: 'none' | 'known' | 'unknown';
     readonly feasible: boolean;
     readonly switchCost: number;
     readonly policyId: string;
