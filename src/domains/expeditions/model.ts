@@ -53,9 +53,19 @@ export interface ExpeditionDecision {
     readonly options: readonly ExpeditionDecisionOption[];
 }
 
+export interface ExpeditionLootItem {
+    readonly name: string;
+    readonly quantity: number;
+    readonly tier: string | null;
+    readonly imageUrl: string | null;
+    readonly isCollected: boolean | null;
+    readonly isDeleted: boolean | null;
+}
+
 export interface ActiveExpedition {
     readonly id: string;
     readonly status: string;
+    readonly outcome: string | null;
     readonly locationName: string;
     readonly mercenaryName: string | null;
     readonly totalCost: number | null;
@@ -63,6 +73,8 @@ export interface ActiveExpedition {
     readonly lootScore: number | null;
     readonly hasInsurance: boolean | null;
     readonly endsAt: string | null;
+    readonly completedAt: string | null;
+    readonly loot: readonly ExpeditionLootItem[];
 }
 
 export interface ExpeditionOverview {

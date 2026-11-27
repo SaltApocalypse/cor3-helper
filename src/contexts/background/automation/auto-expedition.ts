@@ -1,8 +1,11 @@
 import type { SettingsV1 } from '../../../contracts/storage.js';
+import { expeditionMysteryEggSchema } from '../../../contracts/expedition.js';
+import type { ActiveExpedition } from '../../../domains/expeditions/model.js';
 import type { AutomationState } from '../../../infrastructure/storage/automation-state-store.js';
 import type { Result } from '../../../kernel/result.js';
 import { AUTO_EXPEDITION_ALARM, AUTO_EXPEDITION_RETRY_ALARM } from './alarm-ids.js';
 import { ExpeditionCycle } from './expedition-cycle.js';
+import { MYSTERY_EGG_STATE_KEY } from './expedition-types.js';
 import type { AutoExpeditionDeps, AutoExpeditionLast, ExpeditionDecisionState, ExpeditionPreparation, ExpeditionRunState } from './expedition-types.js';
 
 export type { AutoExpeditionLast, ExpeditionPreparation } from './expedition-types.js';
@@ -87,6 +90,9 @@ export class AutoExpeditionCoordinator {
 
     async status() {
         const current = await this.deps.settings.get();
+        const storedEgg = await this.deps.state.get(MYSTERY_EGG_STATE_KEY);
+        const parsedEgg = expeditionMysteryEggSchema.safeParse(storedEgg.payload.egg);
+        const stored = parsedEgg.success ? parsedEgg.data : null;
         return {
             enabled: current.autoExpeditionEnabled,
             intervalMinutes: current.autoExpeditionIntervalMinutes,
@@ -95,7 +101,19 @@ export class AutoExpeditionCoordinator {
             preparation: this.state.preparation,
             last: this.state.last,
             decision: this.state.lastDecision,
+            egg: stored,
         };
+    }
+
+    /** Hide the easter egg once a new expedition has actually started. */
+    async clearMysteryEggIfExpeditionStarted(expeditions: readonly ActiveExpedition[]): Promise<void> {
+        const stored = await this.deps.state.get(MYSTERY_EGG_STATE_KEY);
+        const parsed = expeditionMysteryEggSchema.safeParse(stored.payload.egg);
+        if (!parsed.success) return;
+        const started = expeditions.some((entry) =>
+            entry.id !== parsed.data.expeditionId
+            && /PREPAR|IN_PROGRESS|RUNNING|ACTIVE/.test(entry.status.toUpperCase()));
+        if (started) await this.deps.state.clear(MYSTERY_EGG_STATE_KEY);
     }
 
     async enable(intervalMinutes?: number): Promise<Result<SettingsV1, { readonly code: string; readonly message: string }>> {

@@ -1,4 +1,3 @@
-import type { PopupPage } from '../AppShell.js';
 import type { GameStatusState } from '../hooks/useGameStatus.js';
 import type { NetworkState } from '../hooks/useNetwork.js';
 import type { PortalConnection } from '../hooks/usePortalConnection.js';
@@ -10,16 +9,9 @@ export interface SettingsPanelProps {
     readonly connection: PortalConnection;
     readonly network: NetworkState;
     readonly gameStatus: GameStatusState;
-    readonly onOpenDeveloper: (page: PopupPage) => void;
 }
 
-export function SettingsPanel({
-    settings,
-    connection,
-    network,
-    gameStatus,
-    onOpenDeveloper,
-}: SettingsPanelProps) {
+export function SettingsPanel({ settings, connection, network, gameStatus }: SettingsPanelProps) {
     return (
         <SettingsPage
             language={settings.language}
@@ -32,14 +24,17 @@ export function SettingsPanel({
             gameTabReady={gameStatus.gameTabReady}
             panelOpen={settings.panelOpen}
             onPanelOpenChange={settings.updatePanelOpen}
+            panelOrder={settings.panelOrder}
+            onReorderPanels={settings.reorderPanels}
+            onResetPanelOrder={settings.resetPanelOrder}
             onChangeLanguage={settings.changeLanguage}
             onChangeHelperMode={settings.changeHelperMode}
             onChangeDeveloperMode={settings.changeDeveloperMode}
+            onChangeMysteryEgg={settings.changeMysteryEgg}
             onChangeQol={settings.changeQol}
             onExportSettings={settings.exportSettings}
             onImportSettings={settings.importSettings}
             onResetSettings={settings.resetSettings}
-            onOpenDeveloper={() => onOpenDeveloper('developer')}
             updateResult={settings.updateResult}
             updateStatusError={settings.updateStatusError}
             updateChecking={settings.updateChecking}

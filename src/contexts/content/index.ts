@@ -51,7 +51,7 @@ function publishMarketCache(value: unknown, marketId: unknown, source: unknown):
 
 window.addEventListener('message', (event) => {
     if (event.source !== window) return;
-    const data = event.data as { version?: unknown; type?: unknown; readiness?: unknown; marketId?: unknown; snapshot?: unknown; source?: unknown; level?: unknown; message?: unknown; data?: unknown; decisions?: unknown } | null;
+    const data = event.data as { version?: unknown; type?: unknown; readiness?: unknown; marketId?: unknown; snapshot?: unknown; source?: unknown; level?: unknown; message?: unknown; data?: unknown; decisions?: unknown; serverId?: unknown; reason?: unknown } | null;
     if (data?.version !== undefined && data.version !== 2) return;
     if (data?.type === 'V2_GAME_READINESS_CHANGED') publishReadiness(data.readiness);
     if (data?.type === 'V2_MARKET_CACHE_UPDATED') publishMarketCache(data.snapshot, data.marketId, data.source);
@@ -69,6 +69,17 @@ window.addEventListener('message', (event) => {
                 level: typeof data.level === 'string' ? data.level : 'info',
                 message: data.message,
                 ...(data.data !== undefined ? { data: data.data } : {}),
+            });
+        } catch {
+            // The content script may outlive an extension reload.
+        }
+    }
+    if (data?.type === 'V2_MAINTENANCE_STARTED') {
+        try {
+            sendToBackground({
+                type: 'V2_MAINTENANCE_STARTED',
+                ...(typeof data.serverId === 'string' && data.serverId.length > 0 ? { serverId: data.serverId } : {}),
+                ...(typeof data.reason === 'string' ? { reason: data.reason } : {}),
             });
         } catch {
             // The content script may outlive an extension reload.

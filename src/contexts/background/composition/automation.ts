@@ -124,6 +124,8 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
 
     const valuable = new ValuableCoordinator({
         seller: game.valuableSeller,
+        snapshots: game.snapshots,
+        maintenance: game.maintenanceMonitor,
         state: stores.automationState,
         networkOps,
         events,

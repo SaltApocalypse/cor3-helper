@@ -16,14 +16,7 @@ export interface DeveloperPanelProps {
     readonly debugLive: boolean;
 }
 
-export function DeveloperPanel({
-    portal,
-    connection,
-    network,
-    debug,
-    settings,
-    debugLive,
-}: DeveloperPanelProps) {
+export function DeveloperPanel({ portal, connection, network, debug, settings, debugLive }: DeveloperPanelProps) {
     const [loadoutDumpBusy, setLoadoutDumpBusy] = useState(false);
     const [loadoutDumpStatus, setLoadoutDumpStatus] = useState('');
 
@@ -64,9 +57,10 @@ export function DeveloperPanel({
             }}
             onCopyAutoJobsSnapshot={async () => {
                 const snapshot = await portal.autoJobsSnapshot();
-                const value = snapshot.ok && snapshot.value !== null
-                    ? snapshot.value
-                    : { snapshot: null, autoJobsDiagnostics: network.diagnostics?.autoJobs ?? null };
+                const value =
+                    snapshot.ok && snapshot.value !== null
+                        ? snapshot.value
+                        : { snapshot: null, autoJobsDiagnostics: network.diagnostics?.autoJobs ?? null };
                 await portal.copyText(JSON.stringify(value, null, 2));
             }}
             onExportLoadout={exportLoadout}
@@ -75,12 +69,16 @@ export function DeveloperPanel({
             debugLines={debug.debugLogs}
             debugLoading={debug.debugLogsLoading}
             debugLive={debugLive}
-            onOpenDebug={async () => { await debug.loadDebugLogs(); }}
+            onOpenDebug={async () => {
+                await debug.loadDebugLogs();
+            }}
             onRefreshDebug={debug.refreshDebugLogs}
             onCopyDebug={debug.copyDebugLogs}
             onExportDebug={debug.exportDebugLogs}
             panelOpen={settings.panelOpen}
             onPanelOpenChange={settings.updatePanelOpen}
+            panelOrder={settings.panelOrder}
+            onReorderPanels={settings.reorderPanels}
         />
     );
 }

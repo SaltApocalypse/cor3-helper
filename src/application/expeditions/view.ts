@@ -4,15 +4,32 @@ import { droneChargeSecondsForMission, type DroneMission, type DroneState } from
 
 export { DRONE_EXPEDITION_PROFILE, MERC_EXPEDITION_PROFILES, mercProfileKeyForMarket };
 
-export function partitionExpeditions(overview: ExpeditionOverview | null): {
+export interface ExpeditionPartition {
     readonly active: readonly ExpeditionOverview['active'][number][];
+    /** Ready-but-unpaid expeditions shown in the active stage list. */
     readonly completed: readonly ExpeditionOverview['active'][number][];
-} {
-    const all = [...(overview?.active ?? []), ...(overview?.archived ?? [])];
-    const unique = [...new Map(all.map((entry) => [entry.id, entry])).values()];
+    /** Archived expeditions, shown in the collapsible history section. */
+    readonly history: readonly ExpeditionOverview['active'][number][];
+}
+
+export function partitionExpeditions(overview: ExpeditionOverview | null): ExpeditionPartition {
+    const unique = (entries: readonly ExpeditionOverview['active'][number][]) =>
+        [...new Map(entries.map((entry) => [entry.id, entry])).values()];
+    const active = unique(overview?.active ?? []);
+    const archived = unique(overview?.archived ?? []);
+    const activeIds = new Set(active.map((entry) => entry.id));
+    const completedAt = (entry: ExpeditionOverview['active'][number]) =>
+        entry.completedAt ? Date.parse(entry.completedAt) : Number.NaN;
     return {
-        active: unique.filter((entry) => !isExpeditionReady(entry)),
-        completed: unique.filter(isExpeditionReady),
+        active: active.filter((entry) => !isExpeditionReady(entry)),
+        completed: active.filter(isExpeditionReady),
+        history: archived
+            .filter((entry) => !activeIds.has(entry.id))
+            .sort((left, right) => {
+                const leftAt = completedAt(left);
+                const rightAt = completedAt(right);
+                return (Number.isFinite(rightAt) ? rightAt : 0) - (Number.isFinite(leftAt) ? leftAt : 0);
+            }),
     };
 }
 

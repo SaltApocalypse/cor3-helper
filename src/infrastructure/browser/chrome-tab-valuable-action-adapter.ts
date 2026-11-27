@@ -41,12 +41,12 @@ function firstNumber(values: readonly unknown[], fallback = 0): number {
 export class ChromeTabValuableActionAdapter implements ValuableServerPort, ValuableMarketPort {
     constructor(private readonly tabs: TabMessagePort) {}
 
-    async searchFiles(serverId: string): Promise<Result<ValuableSearchResult, GameError>> {
-        return this.search('searchFiles', serverId);
+    async searchFiles(serverId: string, timeoutMs?: number): Promise<Result<ValuableSearchResult, GameError>> {
+        return this.search('searchFiles', serverId, timeoutMs);
     }
 
-    async searchLogs(serverId: string): Promise<Result<ValuableSearchResult, GameError>> {
-        return this.search('searchLogs', serverId);
+    async searchLogs(serverId: string, timeoutMs?: number): Promise<Result<ValuableSearchResult, GameError>> {
+        return this.search('searchLogs', serverId, timeoutMs);
     }
 
     async getFiles(serverId: string): Promise<Result<readonly ValuableFile[], GameError>> {
@@ -150,8 +150,11 @@ export class ChromeTabValuableActionAdapter implements ValuableServerPort, Valua
         return ok({ sold, credits, reputation });
     }
 
-    private async search(kind: 'searchFiles' | 'searchLogs', serverId: string): Promise<Result<ValuableSearchResult, GameError>> {
-        const result = await this.action(kind, { serverId });
+    private async search(kind: 'searchFiles' | 'searchLogs', serverId: string, timeoutMs?: number): Promise<Result<ValuableSearchResult, GameError>> {
+        const result = await this.action(kind, {
+            serverId,
+            ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        });
         if (!result.ok) return result;
         const data = result.value as { found?: unknown; searchPowerUsed?: unknown } | null;
         const found: ValuableSearchHit[] = [];

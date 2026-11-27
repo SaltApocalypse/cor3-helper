@@ -5,10 +5,13 @@ import { ok } from '../../kernel/result.js';
 import { asServerId } from '../../kernel/ids.js';
 import type { Clock } from '../../kernel/clock.js';
 import { SystemClock } from '../../kernel/clock.js';
+import { sleep as defaultSleep } from '../../kernel/sleep.js';
 import type { GameError } from '../game/ports.js';
 import type { NetworkSnapshotService } from '../network/snapshot-service.js';
 import type { RouteExecutor } from '../network/route-executor.js';
 import { filterValuableFiles, filterValuableLogs, type ValuableFile, type ValuableLog } from '../../domains/valuable/model.js';
+import type { MaintenanceSignalPort } from './maintenance-monitor.js';
+import { isUpcomingMaintenance } from './maintenance.js';
 
 export interface ValuableSearchHit {
     readonly id: string;
@@ -40,8 +43,8 @@ export interface ValuableSaleOutcome {
 }
 
 export interface ValuableServerPort {
-    searchFiles(serverId: string): Promise<Result<ValuableSearchResult, GameError>>;
-    searchLogs(serverId: string): Promise<Result<ValuableSearchResult, GameError>>;
+    searchFiles(serverId: string, timeoutMs?: number): Promise<Result<ValuableSearchResult, GameError>>;
+    searchLogs(serverId: string, timeoutMs?: number): Promise<Result<ValuableSearchResult, GameError>>;
     getFiles(serverId: string): Promise<Result<readonly ValuableFile[], GameError>>;
     getLogs(serverId: string): Promise<Result<readonly ValuableLog[], GameError>>;
     downloadFile(serverId: string, fileId: string): Promise<Result<void, GameError>>;
@@ -79,7 +82,7 @@ export interface ValuableFailure {
     readonly message: string;
 }
 
-export type ValuablePhase = 'server' | 'download' | 'market' | 'sell';
+export type ValuablePhase = 'server' | 'download' | 'market' | 'sell' | 'maintenance';
 
 export interface ValuableProgress {
     readonly phase: ValuablePhase;
@@ -109,7 +112,31 @@ export interface ValuableSaleSummary {
     readonly marketFailures: readonly ValuableFailure[];
 }
 
+export interface ValuableForceMaintenanceRequest {
+    readonly owner: string;
+    readonly reason?: string;
+    readonly serverIds: readonly string[];
+    readonly includeDownloads: boolean;
+}
+
+export interface ValuableForceMaintenanceSummary {
+    readonly stopped: boolean;
+    readonly forcedServers: number;
+    readonly failedServers: readonly ValuableFailure[];
+    readonly downloadedFiles: number;
+    readonly downloadedLogs: number;
+}
+
 export type ValuablePreSearchHook = (serverId: string, serverTypeName: string | null) => Promise<Result<void, GameError>>;
+
+/** v1's force loop: 50 attempts, 15 s response window, human pacing between attempts. */
+const FORCE_MAINTENANCE_MAX_ATTEMPTS = 50;
+const FORCE_MAINTENANCE_REQUEST_TIMEOUT_MS = 15_000;
+const FORCE_MAINTENANCE_ATTEMPT_DELAY_MS = 1_200;
+
+function isAccessDenied(message: string): boolean {
+    return /sai-access-denied|access[-_ ]?denied|no[-_ ]?access/i.test(message);
+}
 
 export interface ValuableRunControl {
     readonly shouldStop?: () => boolean;
@@ -131,6 +158,9 @@ export class ValuableSellerService {
         private readonly beforeSearch?: ValuablePreSearchHook,
         private readonly control: ValuableRunControl = {},
         private readonly access?: ValuableServerAccessPort,
+        private readonly beforeForce?: ValuablePreSearchHook,
+        private readonly maintenance?: MaintenanceSignalPort,
+        private readonly sleep: (ms: number) => Promise<void> = defaultSleep,
     ) {}
 
     /**
@@ -326,6 +356,182 @@ export class ValuableSellerService {
             reputation,
             marketFailures,
         });
+    }
+
+    /**
+     * Force selected upcoming servers into maintenance. v1 used repeated
+     * `file.search-valuable` calls; this implementation keeps the same primary
+     * trigger and adds optional downloads as an extra illegal action. The
+     * maintenance event (or a refreshed map) ends the loop immediately.
+     */
+    async forceMaintenance(
+        request: ValuableForceMaintenanceRequest,
+        control: ValuableRunControl = this.control,
+    ): Promise<Result<ValuableForceMaintenanceSummary, GameError>> {
+        let stopped = false;
+        let forcedServers = 0;
+        let downloadedFiles = 0;
+        let downloadedLogs = 0;
+        const failedServers: ValuableFailure[] = [];
+        const snapshot = await this.snapshots.get(true);
+        if (!snapshot.ok) return { ok: false, error: { code: 'SNAPSHOT_FAILED', message: snapshot.error.message } };
+        const graph = new NetworkGraph(snapshot.value);
+        const targets: NetworkServer[] = [];
+        for (const id of request.serverIds) {
+            const server = snapshot.value.servers.get(asServerId(id));
+            if (!server) {
+                failedServers.push({ target: id, message: 'Server not found' });
+                continue;
+            }
+            if (!isUpcomingMaintenance(server)) {
+                failedServers.push({ target: server.name, message: 'Not scheduled for upcoming maintenance' });
+                continue;
+            }
+            targets.push(server);
+        }
+        targets.sort((left, right) =>
+            routeLength(graph, right.id) - routeLength(graph, left.id)
+            || left.name.localeCompare(right.name));
+        if (targets.length === 0) {
+            return ok({ stopped: false, forcedServers: 0, failedServers, downloadedFiles: 0, downloadedLogs: 0 });
+        }
+
+        for (let index = 0; index < targets.length; index++) {
+            if (control.shouldStop?.()) { stopped = true; break; }
+            const server = targets[index]!;
+            control.onProgress?.({
+                phase: 'maintenance',
+                target: server.name,
+                index: index + 1,
+                total: targets.length,
+                downloadedFiles,
+                downloadedLogs,
+                soldItems: 0,
+            });
+
+            const reached = await this.executor.execute(graph, server.id, {
+                owner: request.owner,
+                reason: request.reason ?? `valuable-force:${server.id}`,
+                now: this.clock.now(),
+            });
+            if (!reached.ok) {
+                failedServers.push({ target: server.name, message: reached.error?.message ?? 'No route' });
+                continue;
+            }
+            if (this.access && !reached.accessEnsured && server.id !== snapshot.value.homeId) {
+                const access = await this.access.ensureAccess(server.id, {
+                    ...(server.typeName ? { serverTypeName: server.typeName } : {}),
+                });
+                if (!access.ok) {
+                    failedServers.push({ target: server.name, message: access.error.message });
+                    continue;
+                }
+            }
+            if (this.beforeForce) {
+                const ready = await this.beforeForce(server.id, server.typeName);
+                if (!ready.ok) {
+                    failedServers.push({ target: server.name, message: ready.error.message });
+                    continue;
+                }
+            }
+            if (this.maintenance?.hasStarted(server.id)) {
+                forcedServers += 1;
+                this.maintenance.clear(server.id);
+                continue;
+            }
+
+            const downloadedFileIds = new Set<string>();
+            const downloadedLogSeqs = new Set<number>();
+            let forced = false;
+            let lastError = 'Maintenance did not start';
+            for (let attempt = 0; attempt < FORCE_MAINTENANCE_MAX_ATTEMPTS; attempt++) {
+                if (control.shouldStop?.()) { stopped = true; break; }
+                if (this.maintenance?.hasStarted(server.id)) { forced = true; break; }
+
+                const search = await this.searchFileWithMaintenance(server.id, FORCE_MAINTENANCE_REQUEST_TIMEOUT_MS);
+                if (search.kind === 'maintenance') { forced = true; break; }
+                if (!search.result.ok) {
+                    lastError = search.result.error.message;
+                    if (isAccessDenied(search.result.error.message)) {
+                        const refreshed = await this.snapshots.get(true);
+                        if (refreshed.ok && this.serverInMaintenance(refreshed.value, server.id)) { forced = true; break; }
+                        if (!this.access) continue;
+                        const access = await this.access.ensureAccess(server.id, {
+                            ...(server.typeName ? { serverTypeName: server.typeName } : {}),
+                        });
+                        if (!access.ok) { lastError = access.error.message; break; }
+                        if (this.beforeForce) {
+                            const ready = await this.beforeForce(server.id, server.typeName);
+                            if (!ready.ok) { lastError = ready.error.message; break; }
+                        }
+                        continue;
+                    }
+                    if (/sai-no-search-software|no[-_ ]?search[-_ ]?software|insufficient.*search/i.test(search.result.error.message)) break;
+                } else if (request.includeDownloads) {
+                    const file = search.result.value.found.find((hit) =>
+                        hit.basePrice > 0 && !downloadedFileIds.has(hit.id));
+                    if (file) {
+                        downloadedFileIds.add(file.id);
+                        const download = await this.servers.downloadFile(server.id, file.id);
+                        if (download.ok) downloadedFiles += 1;
+                    }
+                }
+
+                if (request.includeDownloads && attempt % 5 === 4) {
+                    const logs = await this.servers.searchLogs(server.id, FORCE_MAINTENANCE_REQUEST_TIMEOUT_MS);
+                    if (logs.ok) {
+                        const hit = logs.value.found.find((entry) =>
+                            entry.basePrice > 0 && !downloadedLogSeqs.has(Number(entry.id)));
+                        const seq = hit ? Number(hit.id) : Number.NaN;
+                        if (hit && Number.isFinite(seq) && seq > 0) {
+                            downloadedLogSeqs.add(seq);
+                            const download = await this.servers.downloadLog(server.id, seq);
+                            if (download.ok) downloadedLogs += 1;
+                        }
+                    }
+                }
+
+                if (attempt % 3 === 2) {
+                    const refreshed = await this.snapshots.get(true);
+                    if (refreshed.ok && this.serverInMaintenance(refreshed.value, server.id)) { forced = true; break; }
+                }
+                await this.sleep(FORCE_MAINTENANCE_ATTEMPT_DELAY_MS);
+            }
+
+            if (forced) {
+                forcedServers += 1;
+                this.maintenance?.clear(server.id);
+            } else if (!stopped) failedServers.push({ target: server.name, message: lastError });
+            if (stopped) break;
+        }
+
+        return ok({ stopped, forcedServers, failedServers, downloadedFiles, downloadedLogs });
+    }
+
+    private async searchFileWithMaintenance(
+        serverId: string,
+        timeoutMs: number,
+    ): Promise<{ readonly kind: 'search'; readonly result: Result<ValuableSearchResult, GameError> } | { readonly kind: 'maintenance' }> {
+        if (!this.maintenance) {
+            return { kind: 'search', result: await this.servers.searchFiles(serverId, timeoutMs) };
+        }
+        const search = this.servers.searchFiles(serverId, timeoutMs);
+        const first = await Promise.race([
+            search.then((result) => ({ kind: 'search' as const, result })),
+            this.maintenance.waitForStarted(serverId, timeoutMs).then((started) => ({ kind: 'monitor' as const, started })),
+        ]);
+        if (first.kind === 'monitor') {
+            if (first.started) return { kind: 'maintenance' };
+            return { kind: 'search', result: await search };
+        }
+        return first;
+    }
+
+    private serverInMaintenance(snapshot: NetworkSnapshot, serverId: string): boolean {
+        const server = snapshot.servers.get(asServerId(serverId));
+        const endsAt = server?.maintenance.endsAt;
+        return server?.maintenance.active === true
+            || (typeof endsAt === 'string' && Number.isFinite(Date.parse(endsAt)) && Date.parse(endsAt) > Date.now());
     }
 
     private searchTargets(graph: NetworkGraph, snapshot: NetworkSnapshot): readonly NetworkServer[] {

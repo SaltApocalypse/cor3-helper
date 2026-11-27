@@ -3,6 +3,7 @@ import type { GameReadiness } from '../../application/game/readiness.js';
 import { isGameReady } from '../../application/game/readiness.js';
 import { formatAge, formatRemaining } from '../format.js';
 import { useT, type TranslateSource } from '../i18n-context.js';
+import { PanelCard } from './PanelCard.js';
 import {
     automationTone,
     extensionHealth,
@@ -121,23 +122,23 @@ export function ExtensionStatusCard({
             : `${tr('Next refresh')} ${overview.autoJobs.nextRefreshAt !== null ? formatRemaining(new Date(overview.autoJobs.nextRefreshAt).toISOString(), now) : '--'} · ${tr('Last sync')} ${overview.autoJobs.lastRefreshAt !== null ? formatAge(now - overview.autoJobs.lastRefreshAt) : tr('Never')}`;
 
     return (
-        <section class="v2-card v2-overview-card v2-activity-panel v2-extension-status">
-            <div class="v2-extension-status-head">
-                <h2 class="v2-activity-title">{tr('Extension Status')}</h2>
+        <PanelCard
+            title={tr('Extension Status')}
+            className="v2-overview-card v2-activity-panel v2-extension-status"
+            headerClassName="v2-extension-status-head"
+            bodyClassName="v2-extension-status-body"
+            badge={(
                 <span class={`v2-status-badge is-${overview ? health : 'idle'}`}>
                     {overview ? healthLabel(health, tr) : tr('Loading...')}
                 </span>
-                <button
-                    type="button"
-                    class="v2-collapse-button"
-                    aria-expanded={expanded}
-                    aria-label={expanded ? tr('Hide details') : tr('Show details')}
-                    title={expanded ? tr('Hide details') : tr('Show details')}
-                    onClick={onToggleExpanded}
-                >
-                    <span>{expanded ? '▲' : '▼'}</span>
-                </button>
-            </div>
+            )}
+            collapsible
+            expanded={expanded}
+            onOpenChange={() => onToggleExpanded()}
+            bodyAlwaysRendered
+            collapseLabel={tr('Hide details')}
+            expandLabel={tr('Show details')}
+        >
             <div class="v2-activity-head">
                 <span class={`v2-activity-dot ${activity?.running ? 'active' : ''}`} />
                 <span class="v2-activity-label">{tr(activity?.label ?? 'Idle')}</span>
@@ -222,6 +223,6 @@ export function ExtensionStatusCard({
                     <p class="v2-muted">{tr('Status data is not loaded yet.')}</p>
                 )
             ) : null}
-        </section>
+        </PanelCard>
     );
 }

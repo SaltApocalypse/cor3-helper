@@ -62,8 +62,11 @@ describe('portal response schemas', () => {
     it('accepts a full expedition overview with decisions and active fields', () => {
         const result = expeditionOverviewSchema.safeParse({
             active: [{
-                id: 'exp-1', status: 'IN_PROGRESS', locationName: 'Skylift Remains',
+                id: 'exp-1', status: 'IN_PROGRESS', outcome: null, locationName: 'Skylift Remains',
                 mercenaryName: 'Nova', totalCost: 100, riskScore: 20, lootScore: 30, hasInsurance: false, endsAt: null,
+                completedAt: null, loot: [{
+                    name: 'Artificial milk', quantity: 1, tier: 'RARE', imageUrl: null, isCollected: true, isDeleted: null,
+                }],
             }],
             archived: [],
             mercenaries: [{

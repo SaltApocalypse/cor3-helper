@@ -2,8 +2,8 @@ import type { Result } from '../../kernel/result.js';
 import { sleep as defaultSleep } from '../../kernel/sleep.js';
 import { ok } from '../../kernel/result.js';
 import type { ExpeditionOverview } from '../../domains/expeditions/model.js';
-import { mapExpeditionOverview, mapLocations, mapMercenaries } from './map.js';
-import type { ExpeditionLocation } from '../../domains/expeditions/model.js';
+import type { ExpeditionLocation, ExpeditionLootItem } from '../../domains/expeditions/model.js';
+import { mapExpedition, mapExpeditionOverview, mapLocations, mapMercenaries } from './map.js';
 import {
     chooseDecisionOption,
     chooseExpeditionMercenary,
@@ -23,7 +23,25 @@ export interface ExpeditionPort {
     respond(expeditionId: string, messageId: string, optionId: string): Promise<Result<void, { readonly code: string; readonly message: string }>>;
     configure(config: ExpeditionLaunchConfig): Promise<Result<unknown, { readonly code: string; readonly message: string }>>;
     launch(config: ExpeditionLaunchConfig): Promise<Result<void, { readonly code: string; readonly message: string }>>;
-    openContainer(expeditionId: string): Promise<Result<void, { readonly code: string; readonly message: string }>>;
+    openContainer(expeditionId: string): Promise<Result<unknown, { readonly code: string; readonly message: string }>>;
+}
+
+export interface ExpeditionPayout {
+    readonly expeditionId: string;
+    readonly riskScore: number | null;
+    readonly outcome: string | null;
+    readonly completedAt: string | null;
+    readonly items: readonly ExpeditionLootItem[];
+    readonly opened: boolean;
+    readonly error: string | null;
+}
+
+export interface ExpeditionPayoutResult {
+    readonly ready: number;
+    readonly opened: number;
+    readonly failed: readonly { readonly expeditionId: string; readonly message: string }[];
+    /** Per-expedition payment details, recorded internally but not rendered. */
+    readonly payouts: readonly ExpeditionPayout[];
 }
 
 export interface ExpeditionLaunchConfig {
@@ -245,17 +263,40 @@ export class ExpeditionService {
         return ok(candidates);
     }
 
-    async payout(marketId: string): Promise<Result<{ readonly ready: number; readonly opened: number; readonly failed: readonly { readonly expeditionId: string; readonly message: string }[] }, { readonly code: string; readonly message: string }>> {
+    async payout(marketId: string): Promise<Result<ExpeditionPayoutResult, { readonly code: string; readonly message: string }>> {
         const ready = await this.readyExpeditions(marketId);
         if (!ready.ok) return ready;
         const failed: { expeditionId: string; message: string }[] = [];
+        const payouts: ExpeditionPayout[] = [];
         let opened = 0;
         for (const expedition of ready.value) {
             const result = await this.expeditions.openContainer(expedition.id);
-            if (result.ok) opened++;
-            else failed.push({ expeditionId: expedition.id, message: result.error.message });
+            if (!result.ok) {
+                failed.push({ expeditionId: expedition.id, message: result.error.message });
+                payouts.push({
+                    expeditionId: expedition.id,
+                    riskScore: expedition.riskScore,
+                    outcome: expedition.outcome,
+                    completedAt: expedition.completedAt,
+                    items: [],
+                    opened: false,
+                    error: result.error.message,
+                });
+                continue;
+            }
+            opened++;
+            const response = mapExpedition(result.value);
+            payouts.push({
+                expeditionId: expedition.id,
+                riskScore: response?.riskScore ?? expedition.riskScore,
+                outcome: response?.outcome ?? expedition.outcome,
+                completedAt: response?.completedAt ?? expedition.completedAt,
+                items: response?.loot ?? [],
+                opened: true,
+                error: null,
+            });
         }
-        return ok({ ready: ready.value.length, opened, failed });
+        return ok({ ready: ready.value.length, opened, failed, payouts });
     }
 
     async readyExpeditions(marketId: string): Promise<Result<readonly ActiveExpedition[], { readonly code: string; readonly message: string }>> {
@@ -264,7 +305,7 @@ export class ExpeditionService {
         return ok([...overview.value.active, ...overview.value.archived].filter(isExpeditionReady));
     }
 
-    async openContainer(expeditionId: string): Promise<Result<void, { readonly code: string; readonly message: string }>> {
+    async openContainer(expeditionId: string): Promise<Result<unknown, { readonly code: string; readonly message: string }>> {
         return this.expeditions.openContainer(expeditionId);
     }
 

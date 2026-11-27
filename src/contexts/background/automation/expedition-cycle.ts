@@ -9,9 +9,11 @@ import {
     type DecisionPolicy,
 } from '../../../domains/expeditions/model.js';
 import type { SettingsV1 } from '../../../contracts/storage.js';
+import { isMysteryEggPayout } from '../../../application/expeditions/mystery-egg.js';
 import { AUTO_EXPEDITION_ALARM, AUTO_EXPEDITION_RETRY_ALARM } from './alarm-ids.js';
 import { readWithRetry } from './delay.js';
 import { launchExpedition } from './expedition-launch.js';
+import { EXPEDITION_PAYOUT_STATE_KEY, MYSTERY_EGG_STATE_KEY } from './expedition-types.js';
 import type { AutoExpeditionDeps, ExpeditionDecisionState, ExpeditionRunState } from './expedition-types.js';
 
 const AUTO_EXPEDITION_CONNECTION_RETRY_MS = 30_000;
@@ -130,6 +132,63 @@ export class ExpeditionCycle {
                 });
                 for (const failure of payout.value.failed) {
                     this.deps.logger.warn('auto-expedition', 'Expedition payout failed', { expeditionId: failure.expeditionId, message: failure.message });
+                }
+                // Payment details are recorded for diagnostics and the hidden
+                // easter egg, but never rendered as a loot list.
+                const payoutSummary = payout.value.payouts.map((entry) => ({
+                    expeditionId: entry.expeditionId,
+                    opened: entry.opened,
+                    riskScore: entry.riskScore,
+                    outcome: entry.outcome,
+                    completedAt: entry.completedAt,
+                    items: entry.items.map((item) => ({ name: item.name, quantity: item.quantity })),
+                    error: entry.error,
+                }));
+                if (payoutSummary.length > 0) {
+                    await this.deps.state.set(EXPEDITION_PAYOUT_STATE_KEY, {
+                        phase: 'done',
+                        payload: { at: this.deps.clock.now(), payouts: payoutSummary },
+                    });
+                    this.deps.logger.debug('auto-expedition', 'Expedition payout recorded', { payouts: payoutSummary });
+                }
+                if (current.mysteryEggEnabled) {
+                    const eggPayout = payout.value.payouts.find(isMysteryEggPayout);
+                    if (eggPayout) {
+                        this.state.last = {
+                            at: this.deps.clock.now(),
+                            decisions,
+                            launched: false,
+                            error: null,
+                            paid,
+                            message: 'Mystery egg triggered',
+                        };
+                        await this.deps.state.set(MYSTERY_EGG_STATE_KEY, {
+                            phase: 'done',
+                            payload: {
+                                egg: {
+                                    expeditionId: eggPayout.expeditionId,
+                                    triggeredAt: this.deps.clock.now(),
+                                    riskScore: eggPayout.riskScore,
+                                },
+                            },
+                        });
+                        await this.deps.state.set('auto-expedition', {
+                            phase: 'idle',
+                            runId: null,
+                            nextActionAt: null,
+                            lastError: null,
+                            payload: { last: this.state.last },
+                        });
+                        this.deps.logger.info('auto-expedition', 'Mystery egg triggered', {
+                            expeditionId: eggPayout.expeditionId,
+                            riskScore: eggPayout.riskScore,
+                            outcome: eggPayout.outcome,
+                            items: eggPayout.items.map((item) => item.name),
+                        });
+                        await this.disable('mystery egg triggered');
+                        this.deps.events.publish('expeditions.auto.done', this.state.last);
+                        return;
+                    }
                 }
                 const creditFailure = payout.value.failed.find((entry) => /insufficient|credit|not-enough/i.test(entry.message));
                 if (creditFailure) {

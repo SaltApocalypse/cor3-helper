@@ -316,7 +316,8 @@ CORE/HOME, with total cost ascending and risk ascending as a tie-breaker.
 
 - This is the “pay and send to stash” action.
 - New behavior: loot is delivered to the **mailbox**, not directly to the stash.
-- Response is the updated expedition object (with `containerOpenedAt`, `completedAt`, `containerData`).
+- Response is the updated expedition object (with `containerOpenedAt`, `completedAt`, `containerData`, `riskScore`, `outcome`).
+- `containerData` entries can be either a flat item or `{ item, isCollected, isDeleted }`. The helper reads `name`, `quantity`, `tier`, `imageUrl` and the collection flags.
 
 ### 4.3 Legacy `collect.all`
 

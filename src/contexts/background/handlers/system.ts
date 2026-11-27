@@ -67,13 +67,23 @@ function buildActivityState(deps: SystemHandlerDeps) {
     if (valuable) {
         return {
             key: 'valuable-seller' as const,
-            label: valuable.operation === 'search' ? 'Valuable Search' : 'Valuable Sale',
+            label: valuable.operation === 'search'
+                ? 'Valuable Search'
+                : valuable.operation === 'sell' ? 'Valuable Sale' : 'Force maintenance',
             detail: valuable.progress
                 ? `${valuable.progress.phase} (${valuable.progress.index}/${valuable.progress.total})`
-                : valuable.operation === 'search' ? 'Searching valuable files' : 'Selling valuable files',
+                : valuable.operation === 'search'
+                    ? 'Searching valuable files'
+                    : valuable.operation === 'sell' ? 'Selling valuable files' : 'Forcing server maintenance',
             running: true,
             progress: valuable.progress
-                ? { index: valuable.progress.index, total: valuable.progress.total, label: valuable.operation === 'search' ? 'Servers' : 'Market items' }
+                ? {
+                    index: valuable.progress.index,
+                    total: valuable.progress.total,
+                    label: valuable.operation === 'search'
+                        ? 'Servers'
+                        : valuable.operation === 'sell' ? 'Market items' : 'Servers',
+                }
                 : null,
         };
     }

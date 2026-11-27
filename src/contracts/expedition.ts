@@ -73,6 +73,7 @@ export const rawDecisionSchema = z.object({
 export const rawExpeditionSchema = z.object({
     id: z.string().nullable().optional(),
     status: z.string().nullable().optional(),
+    outcome: z.string().nullable().optional(),
     locationName: z.string().nullable().optional(),
     zoneName: z.string().nullable().optional(),
     mercenary: z.union([z.object({ callsign: z.string().nullable().optional(), name: z.string().nullable().optional() }).passthrough(), z.string()]).nullable().optional(),
@@ -83,6 +84,10 @@ export const rawExpeditionSchema = z.object({
     hasInsurance: z.boolean().nullable().optional(),
     endsAt: z.string().nullable().optional(),
     endTime: z.string().nullable().optional(),
+    completedAt: z.string().nullable().optional(),
+    containerOpenedAt: z.string().nullable().optional(),
+    containerData: z.array(z.unknown()).nullable().optional(),
+    container: z.array(z.unknown()).nullable().optional(),
     decision: z.unknown().optional(),
     messages: z.array(z.unknown()).nullable().optional(),
 }).passthrough();
@@ -91,3 +96,12 @@ export const rawActiveExpeditionsSchema = z.object({
     active: z.array(rawExpeditionSchema).nullable().optional(),
     decisions: z.array(rawDecisionSchema).nullable().optional(),
 }).passthrough();
+
+/** Persisted state for the hidden mercenary-expedition easter egg. */
+export const expeditionMysteryEggSchema = z.object({
+    expeditionId: z.string().min(1),
+    triggeredAt: z.number(),
+    riskScore: z.number().nullable(),
+}).strict();
+
+export type ExpeditionMysteryEgg = z.infer<typeof expeditionMysteryEggSchema>;

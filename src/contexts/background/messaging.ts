@@ -39,6 +39,18 @@ export function registerMessaging(core: CoreRuntime, automation: AutomationRunti
             }
             return false;
         }
+        if (type === 'V2_MAINTENANCE_STARTED') {
+            const serverId = (message as { serverId?: unknown }).serverId;
+            const reason = (message as { reason?: unknown }).reason;
+            if (typeof serverId === 'string' && serverId.length > 0) {
+                automation.valuable.recordMaintenance(serverId);
+            }
+            core.logger.info('network', 'Server maintenance started', {
+                serverId: typeof serverId === 'string' ? serverId : null,
+                reason: typeof reason === 'string' ? reason : null,
+            });
+            return false;
+        }
         if (type === 'V2_WS_NOTICE') {
             const level = (message as { level?: unknown }).level;
             const text = (message as { message?: unknown }).message;

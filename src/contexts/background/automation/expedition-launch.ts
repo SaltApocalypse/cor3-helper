@@ -6,6 +6,7 @@ import { totalCostInfo } from '../../../application/expeditions/service.js';
 import { isExpeditionReady } from '../../../domains/expeditions/model.js';
 import { AUTO_EXPEDITION_RETRY_ALARM } from './alarm-ids.js';
 import { humanDelay, readWithRetry } from './delay.js';
+import { MYSTERY_EGG_STATE_KEY } from './expedition-types.js';
 import type { AutoExpeditionDeps, AutoExpeditionLast, ExpeditionPreparation, ExpeditionRunState } from './expedition-types.js';
 
 const AUTO_EXPEDITION_CONNECTION_RETRY_MS = 30_000;
@@ -260,6 +261,8 @@ export async function launchExpedition(ctx: ExpeditionLaunchContext): Promise<vo
         message: `Launched with ${selected.mercenary.name} (${profile.marketLabel})`,
     };
     state.last = launchedLast;
+    // A new expedition has started; hide the previous easter egg.
+    await deps.state.clear(MYSTERY_EGG_STATE_KEY);
     deps.logger.info('auto-expedition', 'Mercenary expedition launched', {
         mercenary: selected.mercenary.name,
         market: selectedMarket.label,

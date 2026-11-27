@@ -8,6 +8,10 @@ import type { AutomationLogger, EventPublisher, SchedulerPort, SettingsPort } fr
 import type { JobMarketSync } from './job-market-sync.js';
 import type { JobRouting } from './job-routing.js';
 
+/** Persisted keys used by the expedition easter egg and internal payout log. */
+export const MYSTERY_EGG_STATE_KEY = 'auto-expedition-egg';
+export const EXPEDITION_PAYOUT_STATE_KEY = 'auto-expedition-payout';
+
 export interface AutoExpeditionLast {
     readonly at: number;
     readonly decisions: number;

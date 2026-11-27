@@ -1,11 +1,15 @@
 import { JOB_MARKETS } from '../../../domains/jobs/markets.js';
 import type { Result } from '../../../kernel/result.js';
+import { ok } from '../../../kernel/result.js';
 import type { AutomationStateStore } from '../../../infrastructure/storage/automation-state-store.js';
 import type { NetworkOperationQueue } from '../../../application/network/operation-queue.js';
-import type { ValuableProgress, ValuableSaleSummary, ValuableSearchSummary, ValuableSellerService } from '../../../application/valuable/seller.js';
+import type { NetworkSnapshotService } from '../../../application/network/snapshot-service.js';
+import type { ValuableForceMaintenanceRequest, ValuableForceMaintenanceSummary, ValuableProgress, ValuableSaleSummary, ValuableSearchSummary, ValuableSellerService } from '../../../application/valuable/seller.js';
+import type { MaintenanceSignalPort } from '../../../application/valuable/maintenance-monitor.js';
+import { listMaintenanceServers, type ValuableMaintenanceServer } from '../../../application/valuable/maintenance.js';
 import type { EventPublisher, RunLogSink } from '../../../application/automation/ports.js';
 
-export type ValuableOperation = 'search' | 'sell';
+export type ValuableOperation = 'search' | 'sell' | 'force-maintenance';
 export type ValuableRunStatus = 'running' | 'done' | 'cancelled' | 'error';
 
 export interface ValuableRunState {
@@ -23,8 +27,10 @@ export interface ValuableStats {
     soldItems: number;
     credits: number;
     reputation: number;
+    forcedServers: number;
     lastSearchAt: number | null;
     lastSellAt: number | null;
+    lastForceAt: number | null;
 }
 
 export interface ValuableRunRequest {
@@ -32,8 +38,14 @@ export interface ValuableRunRequest {
     readonly owner: string;
 }
 
+export interface ValuableForceRunRequest extends ValuableForceMaintenanceRequest {
+    readonly runId: string;
+}
+
 export interface ValuableDeps {
     readonly seller: ValuableSellerService;
+    readonly snapshots: Pick<NetworkSnapshotService, 'get'>;
+    readonly maintenance: MaintenanceSignalPort;
     readonly state: AutomationStateStore;
     readonly networkOps: NetworkOperationQueue;
     readonly events: EventPublisher;
@@ -139,6 +151,86 @@ export class ValuableCoordinator {
         if (this.runs.get(runId)?.status === 'running') this.cancelled.add(runId);
     }
 
+    /** Maintenance rows for the valuable-seller panel. */
+    async maintenanceServers(force = false): Promise<Result<readonly ValuableMaintenanceServer[], { readonly code: string; readonly message: string }>> {
+        const snapshot = await this.deps.snapshots.get(force);
+        if (!snapshot.ok) return { ok: false, error: { code: snapshot.error.code, message: snapshot.error.message } };
+        return ok(listMaintenanceServers(snapshot.value));
+    }
+
+    /** Called by the background messaging layer when the game reports maintenance. */
+    recordMaintenance(serverId: string): void {
+        this.deps.maintenance.record(serverId);
+        this.deps.events.publish('valuable.maintenance', { serverId, at: Date.now() });
+    }
+
+    /**
+     * Start a force-maintenance run and return immediately. The force loop can
+     * take longer than a normal bridge request, so the UI follows progress via
+     * `valuable.progress`/`valuable.report`.
+     */
+    async startForceMaintenance(
+        request: ValuableForceRunRequest,
+    ): Promise<Result<{ readonly runId: string }, { readonly code: string; readonly message: string }>> {
+        const begun = this.begin(request, 'force-maintenance');
+        if ('ok' in begun) return begun;
+        const state = begun;
+        this.deps.runLogs.add(request.runId, 'info', 'valuable-seller', `Starting force maintenance on ${request.serverIds.length} selected server(s)`);
+        void this.executeForce(request, state);
+        return ok({ runId: request.runId });
+    }
+
+    private async executeForce(request: ValuableForceRunRequest, state: ValuableRunState): Promise<void> {
+        try {
+            const queued = await this.deps.networkOps.enqueue(
+                { owner: request.owner, reason: 'valuable-force-maintenance', priority: 60 },
+                async () => this.deps.seller.forceMaintenance({
+                    owner: request.owner,
+                    reason: 'valuable-force-maintenance',
+                    serverIds: request.serverIds,
+                    includeDownloads: request.includeDownloads,
+                }, this.runControl(request.runId, state)),
+            );
+            if (!queued.ok) {
+                state.status = 'error';
+                state.error = queued.error.message;
+                state.updatedAt = Date.now();
+                this.deps.runLogs.add(request.runId, 'error', 'valuable-seller', `Force maintenance failed: ${queued.error.message}`);
+                return;
+            }
+            const summary = queued.value as ValuableForceMaintenanceSummary;
+            const stats = await this.loadStats();
+            await this.saveStats({
+                ...stats,
+                downloadedFiles: stats.downloadedFiles + summary.downloadedFiles,
+                downloadedLogs: stats.downloadedLogs + summary.downloadedLogs,
+                forcedServers: stats.forcedServers + summary.forcedServers,
+                lastForceAt: Date.now(),
+            });
+            state.status = summary.stopped
+                ? 'cancelled'
+                : summary.forcedServers === 0 && summary.failedServers.length > 0 ? 'error' : 'done';
+            if (state.status === 'error') {
+                state.error = summary.failedServers[0]?.message ?? 'No selected server entered maintenance';
+            }
+            state.updatedAt = Date.now();
+            this.deps.runLogs.add(
+                request.runId,
+                summary.failedServers.length > 0 ? 'warn' : 'info',
+                'valuable-seller',
+                `Force maintenance finished: ${summary.forcedServers} server(s) forced, ${summary.failedServers.length} failed${summary.stopped ? ' (stopped)' : ''}`,
+            );
+        } catch (error) {
+            state.status = 'error';
+            state.error = error instanceof Error ? error.message : String(error);
+            state.updatedAt = Date.now();
+            this.deps.runLogs.add(request.runId, 'error', 'valuable-seller', `Force maintenance error: ${state.error}`);
+        } finally {
+            this.cancelled.delete(request.runId);
+            if (this.activeRunId === request.runId) this.activeRunId = null;
+        }
+    }
+
     progress(runId: string) {
         const state = this.runs.get(runId);
         return state ? runView(state) : null;
@@ -234,8 +326,10 @@ export class ValuableCoordinator {
             soldItems: numberFromPayload(payload.soldItems),
             credits: numberFromPayload(payload.credits),
             reputation: numberFromPayload(payload.reputation),
+            forcedServers: numberFromPayload(payload.forcedServers),
             lastSearchAt: typeof payload.lastSearchAt === 'number' ? payload.lastSearchAt : null,
             lastSellAt: typeof payload.lastSellAt === 'number' ? payload.lastSellAt : null,
+            lastForceAt: typeof payload.lastForceAt === 'number' ? payload.lastForceAt : null,
         };
         return this.stats;
     }
