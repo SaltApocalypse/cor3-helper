@@ -5,15 +5,15 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-27 against build `2.0.10-salta.331`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (128 files / 1065 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-27 against build `2.0.10-salta.332`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (129 files / 1070 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.10-salta.331`)
+## Current completion snapshot (build `2.0.10-salta.332`)
 
 | Metric | Value |
 |---|---|
-| TypeScript/TSX source files | 476 (including 128 test files) |
-| Files under `src/` | 485 (vendored JavaScript is limited to `src/libs/`) |
+| TypeScript/TSX source files | 478 (including 129 test files) |
+| Files under `src/` | 487 (vendored JavaScript is limited to `src/libs/`) |
 | v1 parity rows with a status | 147 |
 | Implemented / improved | 89 |
 | Partial | 37 |
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 128 files / 1065 tests pass
-- `npm run build` — pass, `2.0.10-salta.331`
+- `npm test` — 129 files / 1070 tests pass
+- `npm run build` — pass, `2.0.10-salta.332`
 
 ---
 
@@ -1582,3 +1582,12 @@ Root causes and fixes recorded from real user logs (`B.log`, `C.log`, `A.log`) a
 - **Version:** build counter takes the higher `v2-dev` value (330) and increments for this merge batch, so the merged artifact is `2.0.10-salta.331`.
 - **Verification:** typecheck, lint, build and Vitest (128 files / 1065 tests) pass at build `2.0.10-salta.331`.
 
+---
+
+# Part 81 — Overview alignment, fold headers and the credit floor (2.0.10-salta.332)
+
+- **Overview credits:** the Credits panel body is left-aligned instead of right-aligned.
+- **Fold headers:** `Fold` headers now render the chevron, the title and the `InfoTip` in one row, so the info button sits next to the section title instead of being pushed to the far edge. The row keeps the shared background; the whole title remains the toggle target.
+- **Expedition dividers:** the dashed divider above "Auto pay and send rewards to mailbox" moved below it, so the divider separates auto-pay from "History" as intended.
+- **Credit floor:** `mercMinCredits` is now a post-payment floor. A run starts only when `credits - total cost >= mercMinCredits` (`expeditionCreditBudget` in `src/application/expeditions/credits.ts`). The estimated candidate cost is checked before the preparation window and the configured cost is checked again before launch; a blocked run disables Auto Expedition with the credits, cost, threshold and remaining balance in the diagnostic. A credit read failure postpones the launch instead of guessing. The settings description explains the subtraction rule.
+- **Verification:** typecheck, lint, build and Vitest (129 files / 1070 tests) pass at build `2.0.10-salta.332`.

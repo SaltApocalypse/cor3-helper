@@ -85,6 +85,14 @@ function dronePhaseLabel(phase: string, tr: TranslateSource): string {
 function expeditionMessage(message: string, tr: TranslateSource): string {
     const launched = message.match(/^Launched with (.+) \((.+)\)$/);
     if (launched) return tr('Launched with {name} ({market})', { name: launched[1] ?? '', market: launched[2] ?? '' });
+    const budget = message.match(/^Credits (.+) after paying (.+) would fall below threshold (.+)$/);
+    if (budget) {
+        return tr('Credits {credits} after paying {cost} would fall below threshold {threshold}', {
+            credits: budget[1] ?? '',
+            cost: budget[2] ?? '',
+            threshold: budget[3] ?? '',
+        });
+    }
     return tr(message);
 }
 
@@ -597,7 +605,7 @@ export function AutoExpeditionCard({
                         <div class="v2-expedition-setting-row">
                             <div>
                                 <strong>{tr('Stop below credits')}</strong>
-                                <p class="v2-muted">{tr('Disable Auto Expedition when credits fall below this value.')}</p>
+                                <p class="v2-muted">{tr('Stop when credits minus the expedition total cost would fall below this value.')}</p>
                             </div>
                             <div class="v2-expedition-inline">
                                 <input
@@ -706,7 +714,7 @@ export function AutoExpeditionCard({
                         )}
                     </Fold>
 
-                    <div class="v2-expedition-setting-row">
+                    <div class="v2-expedition-setting-row v2-expedition-row-flush">
                         <div>
                             <strong>{tr('Auto pay and send rewards to mailbox')}</strong>
                         </div>
@@ -716,6 +724,8 @@ export function AutoExpeditionCard({
                             onClick={() => void updateSettings({ mercAutoPayEnabled: !(settings?.mercAutoPayEnabled ?? true) })}
                         />
                     </div>
+
+                    <div class="v2-expedition-divider" aria-hidden="true" />
 
                     <Fold
                         title={tr('History')}

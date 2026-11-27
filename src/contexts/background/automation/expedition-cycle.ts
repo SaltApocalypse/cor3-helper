@@ -443,6 +443,7 @@ export class ExpeditionCycle {
                 selected,
                 scheduleMaintenanceRetry: (alarm) => this.scheduleMaintenanceRetry(alarm),
                 disable: (reason) => this.disable(reason),
+                readCredits: (marketId) => this.readHomeCredits(marketId),
             });
         } finally {
             this.state.running = false;
