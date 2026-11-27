@@ -56,8 +56,8 @@ Inside `Valuable Search & Sale`, below **Status and report**:
 `ValuableSellerService.forceMaintenance` is a deliberate special case that follows
 v1's loop instead of v2's shared network-refresh pipeline:
 
-- **50 attempts / 15 s** request window per server, **400-900 ms human pacing**
-  (v1's `humanDelay`); the earlier fixed 1.2 s pacing was slower than v1.
+- **50 attempts / 15 s** request window per server, **1000-1500 ms human pacing**
+  (v1's `humanDelay` range, raised to reduce burst traffic).
 - SEARCH loadout via a strict `beforeForce` hook; no SEARCH power skips the server.
 - Dynamic route length sorting (furthest first) instead of the v1 static path table.
 - `file.search-valuable` remains the primary trigger.

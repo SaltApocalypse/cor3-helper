@@ -138,13 +138,13 @@ export type ValuablePreSearchHook = (serverId: string, serverTypeName: string | 
 
 /**
  * v1 parity for the force loop: 50 attempts, a 15 s response window and a
- * human-like 400-900 ms pause between attempts. The shared network refresh and
+ * human-like 1000-1500 ms pause between attempts. The shared network refresh and
  * download extras are deliberately not used here.
  */
 const FORCE_MAINTENANCE_MAX_ATTEMPTS = 50;
 const FORCE_MAINTENANCE_REQUEST_TIMEOUT_MS = 15_000;
-const FORCE_MAINTENANCE_ATTEMPT_DELAY_MIN_MS = 400;
-const FORCE_MAINTENANCE_ATTEMPT_DELAY_MAX_MS = 900;
+const FORCE_MAINTENANCE_ATTEMPT_DELAY_MIN_MS = 1_000;
+const FORCE_MAINTENANCE_ATTEMPT_DELAY_MAX_MS = 1_500;
 
 function isAccessDenied(message: string): boolean {
     return /sai-access-denied|access[-_ ]?denied|no[-_ ]?access/i.test(message);
@@ -583,7 +583,7 @@ export class ValuableSellerService {
         return ok({ stopped, forcedServers, failedServers, downloadedFiles: 0, downloadedLogs: 0 });
     }
 
-    /** v1's humanDelay: 400-900 ms between search attempts. */
+    /** v1-style humanDelay: 1000-1500 ms between search attempts. */
     private forceAttemptDelayMs(): number {
         const span = FORCE_MAINTENANCE_ATTEMPT_DELAY_MAX_MS - FORCE_MAINTENANCE_ATTEMPT_DELAY_MIN_MS;
         return FORCE_MAINTENANCE_ATTEMPT_DELAY_MIN_MS + Math.floor(Math.random() * (span + 1));

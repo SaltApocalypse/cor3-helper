@@ -286,9 +286,9 @@ describe('ValuableSellerService forceMaintenance', () => {
         expect(snapshotCalls).toEqual([undefined]);
         expect(bypassFlags.length).toBeGreaterThan(0);
         expect(bypassFlags.every((flag) => flag === true)).toBe(true);
-        // v1 pacing: 400-900 ms between attempts.
+        // Human pacing: 1000-1500 ms between attempts.
         expect(sleeps.length).toBeGreaterThan(0);
-        expect(sleeps.every((ms) => ms >= 400 && ms <= 900)).toBe(true);
+        expect(sleeps.every((ms) => ms >= 1_000 && ms <= 1_500)).toBe(true);
     });
 
     it('refreshes the map only for access recovery, not every few attempts', async () => {
