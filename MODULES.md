@@ -110,7 +110,7 @@ Behavior note: a known decrypt file type (for example `.xvct`) is planned exactl
 
 ## Current verification and known gaps
 
-- Last verified: 2026-11-27, build `2.0.11-salta.334`.
+- Last verified: 2026-11-27, build `2.0.12-salta.334`.
 - `npm run typecheck`, `npm run lint`, `npm test` (130 files / 1091 tests) and `npm run build` pass.
 - No domain/application imports of `chrome`, `window`, `document`, WebSocket, fetch or IndexedDB; an architecture-boundary test enforces this and the UI layer rules.
 - Persisted stores now use versioned envelopes with idempotent migrations (H9).

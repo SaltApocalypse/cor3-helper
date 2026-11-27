@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-27 against build `2.0.11-salta.334`
+- **Last verified:** 2026-11-27 against build `2.0.12-salta.334`
 - **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (130 files / 1091 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.11-salta.334`)
+## Current completion snapshot (build `2.0.12-salta.334`)
 
 | Metric | Value |
 |---|---|
@@ -607,7 +607,7 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 - `npm run typecheck` — pass
 - `npm run lint` — pass
 - `npm test` — 130 files / 1091 tests pass
-- `npm run build` — pass, `2.0.11-salta.334`
+- `npm run build` — pass, `2.0.12-salta.334`
 
 ---
 
@@ -1623,3 +1623,12 @@ Root causes and fixes recorded from real user logs (`B.log`, `C.log`, `A.log`) a
 - **Map fields:** v1 parity for `isDiscovered`/`isAccessible` in the map contract, `NetworkServer` and the persisted snapshot.
 - **Log retention:** the background ring buffer grew from 500 to 6000 entries with a 4 MB byte budget and a 1.5 s persist debounce; per-run automation logs now persist to `chrome.storage.session` (`v2.runLogs`, six newest runs) so a service-worker restart no longer erases the run log; `devtools.logs` accepts up to 6000 lines and `automation.logs` up to 2000; Developer → Export writes the whole retained buffer instead of the 300 rendered lines.
 - **Verification:** typecheck, lint, build and Vitest (130 files / 1091 tests) pass at build `2.0.11-salta.334`.
+
+---
+
+# Part 85 — Release 2.0.12-salta
+
+- **Version:** `package.json` `2.0.12`; release artifact `2.0.12-salta`; local build identity `2.0.12-salta.334`.
+- **Content:** no code changes since 2.0.11-salta; this build carries Parts 81–84 (UI polish, toolbar window menu, credit floor, unreachable-target preflight gate and the larger retained debug log).
+- **Packaging:** draft release only; the tag is created when the release is published.
+- **Verification:** typecheck, lint, build and Vitest (130 files / 1091 tests) pass at build `2.0.12-salta.334`.
