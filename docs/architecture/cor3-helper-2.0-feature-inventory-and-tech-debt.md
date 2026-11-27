@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-27 against build `2.0.10-salta.333`
+- **Last verified:** 2026-11-27 against build `2.0.11-salta.333`
 - **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (130 files / 1078 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.10-salta.333`)
+## Current completion snapshot (build `2.0.11-salta.333`)
 
 | Metric | Value |
 |---|---|
@@ -607,7 +607,7 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 - `npm run typecheck` — pass
 - `npm run lint` — pass
 - `npm test` — 130 files / 1078 tests pass
-- `npm run build` — pass, `2.0.10-salta.333`
+- `npm run build` — pass, `2.0.11-salta.333`
 
 ---
 
@@ -1600,3 +1600,15 @@ Root causes and fixes recorded from real user logs (`B.log`, `C.log`, `A.log`) a
 - **Related links:** a third entry, Founders Portal (`https://community.cor3.gg/`, Chinese label `官方创始人门户`), sits after the Fragmentary Order website.
 - **Fold headers:** the empty part of an Auto Expedition fold header is a sibling click target again, so the whole row toggles. The title button, the info button and its modal stay independent elements, so clicking the info button (or the modal backdrop) cannot collapse the section.
 - **Verification:** typecheck, lint, build and Vitest (130 files / 1078 tests) pass at build `2.0.10-salta.333`.
+
+---
+
+# Part 83 — Release 2.0.11-salta
+
+- **Version:** `package.json` `2.0.11`; release artifact `2.0.11-salta`; local build identity `2.0.11-salta.333`.
+- **Automation recovery:** stuck minigame rooms (decrypt / ICE WALL / terminal hack) reload the game tab at most twice per ten minutes and resume with a full Auto Jobs refresh; pre-Complete timeouts stay retryable while only Complete-stage uncertainty keeps the completion barrier. Auto Finish's `runExclusive()` result contract is fixed.
+- **Auto Expedition:** already-collected containers count as paid, the credit floor now applies after the run cost, and cancellation/configure/price/no-mercenary/launch failures disable the automation instead of looping.
+- **v2-dev merge:** valuable-seller maintenance and force run, sortable page cards with a shared panel shell, expedition payout history and the mystery egg.
+- **UI:** left-aligned Overview credits, expedition fold headers with the info button next to the title and a full-row click target, the reordered divider, and the Founders Portal link.
+- **Toolbar:** an `action` context menu item under the built-in side panel entry opens the detached workspace and follows the UI language.
+- **Verification:** typecheck, lint, build and Vitest (130 files / 1078 tests) pass at build `2.0.11-salta.333`.
