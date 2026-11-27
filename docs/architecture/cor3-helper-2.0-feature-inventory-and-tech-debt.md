@@ -5,21 +5,21 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-25 against build `2.0.10-salta.317`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (123 files / 1033 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-27 against build `2.0.10-salta.331`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (128 files / 1065 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.10-salta.317`)
+## Current completion snapshot (build `2.0.10-salta.331`)
 
 | Metric | Value |
 |---|---|
-| TypeScript/TSX source files | 461 (including 122 test files) |
-| Files under `src/` | 470 (vendored JavaScript is limited to `src/libs/`) |
+| TypeScript/TSX source files | 476 (including 128 test files) |
+| Files under `src/` | 485 (vendored JavaScript is limited to `src/libs/`) |
 | v1 parity rows with a status | 147 |
 | Implemented / improved | 89 |
 | Partial | 37 |
 | Missing | 20 |
 | Replaced by a different v2 surface | 1 |
-| v2-only additions | 13 |
+| v2-only additions | 14 |
 
 In percentage terms, about 61% of parity rows are implemented/improved, 25% partial and 14% missing (rounded).
 
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 123 files / 1033 tests pass
-- `npm run build` — pass, `2.0.10-salta.317`
+- `npm test` — 128 files / 1065 tests pass
+- `npm run build` — pass, `2.0.10-salta.331`
 
 ---
 
@@ -1517,3 +1517,68 @@ Root causes and fixes recorded from real user logs (`B.log`, `C.log`, `A.log`) a
 - **Force semantics:** `AutoJobsCoordinator.ensureInfo()` gained a `forceAll` path that ignores per-market TTL and the minimum refresh interval; it is used by reload recovery. Manual runs keep their existing full-refresh semantics, while ordinary scheduled/ready runs keep the TTL.
 - **Auto Finish result contract:** `runExclusive()` now returns the network queue result directly. This removes the false `Auto Finish returned no result` warning after a successful retry/force run.
 - **Verification:** typecheck, lint, build and Vitest (123 files / 1033 tests) pass at build `2.0.10-salta.317`.
+
+---
+
+# Part 75 — Valuable seller maintenance panel and force operation (2.0.10-salta.324)
+
+- **Maintenance data:** `MaintenanceState` already had `active` / `endsAt` / `timeUntil`; the valuable panel now exposes active/upcoming rows through `valuable.maintenance`. Active rows are display-only; only upcoming rows are selectable.
+- **Maintenance events:** `GameSocketHub` now normalizes `network-map` / `sai` `maintenance` events into a `V2_MAINTENANCE_STARTED` notice. Background messaging records the server in `MaintenanceMonitor`, which the force loop uses to stop immediately. A map refresh remains the fallback.
+- **Force operation:** `ValuableSellerService.forceMaintenance` follows v1 (furthest-first, SEARCH loadout, 50 attempts, 15 s window, maintenance event/map stop, `sai-access-denied` recovery). It adds download acceleration (one valuable file per attempt; log search/download every fifth attempt) as requested.
+- **Async/coordinator:** `valuable.forceMaintenance` starts and returns immediately; progress is followed through `valuable.progress`. The run uses `networkOps`. A successful `valuable.sell` with selected upcoming servers starts the force run automatically.
+- **UI:** below Status and report, a collapsible "Server status & maintenance" subsection with a persisted feature switch, selectable upcoming servers, countdowns, refresh/select-all, force/cancel controls, and a warning that forcing makes servers unavailable.
+- **Settings/report:** added `valuableForceMaintenanceEnabled` (default false), `forcedServers`, `lastForceAt` and force-download stats.
+- **Tests:** force ordering/event stop/downloads/attempt cap/cancel, maintenance monitor, maintenance list helpers, and bridge contract entries.
+- **Verification:** typecheck, lint, build and Vitest (124 files / 1032 tests) pass at build `2.0.10-salta.324`.
+
+---
+
+# Part 76 — Shared panel shell and drag-to-reorder (2.0.10-salta.325)
+
+- **Shared shell:** new `PanelCard` / `PanelHeader` (`src/ui/components/PanelCard.tsx`) own the page-card header, body and collapse state. `GameSection` and `AutomationCard` became thin wrappers, so Game/Progress/Settings/Developer/Automation pages kept their existing props. Overview's Extension Status, Credits, Market jobs and Timers now use the same header; Credits is a real `h2` title.
+- **Reordering:** `SortablePanelGroup` wraps the top-level cards of every page and uses `sortablejs@1.15.7` with a `.v2-drag-handle` grip. Only the grip starts a drag; the title still collapses/expands. Order is persisted once per drop. `PanelDragHandle` also supports `ArrowUp`/`ArrowDown` and announces the new position through an `aria-live` status.
+- **Persistence:** `panelOrderState` (`Record<pageKey, string[]>`, default `{}`) stores per-page order. `mergePanelOrder` keeps saved positions, appends new panels, ignores removed ids and tolerates conditional cards (Market jobs, Timers). `useSettings` exposes `panelOrder`, `reorderPanels` and `resetPanelOrder`.
+- **Reset:** Settings → Basic settings → Settings backup adds a two-click "Reset panel order" action that only clears `panelOrderState`.
+- **Docs:** design and library-choice rationale in `docs/architecture/cor3-helper-2.0-panel-layout-design.md`.
+- **Verification:** typecheck, lint, build and Vitest (125 files / 1039 tests) pass at build `2.0.10-salta.325`.
+
+---
+
+# Part 77 — Mercenary expedition mystery egg (2.0.10-salta.328)
+
+- **Payout capture:** `open.container` responses are kept instead of discarded. `ExpeditionService.payout()` returns per-expedition `riskScore`, `outcome`, `completedAt` and normalized `containerData` loot. The latest payout is stored under `auto-expedition-payout` for diagnostics but never rendered.
+- **Mapping:** `mapExpedition()` now reads `outcome`, `completedAt` and flat/nested loot slots; `get.archived` `{ items }` wrappers are unwrapped.
+- **Egg condition:** `isMysteryEggPayout()` requires final risk >= 95, exactly two pool items (`Artificial milk`, `CCS "Kaloshi" Utility boots`, `Old Abibas beanie`), and no explicit non-full outcome.
+- **Trigger:** automatic payment matching the condition persists `auto-expedition-egg`, disables Auto Expedition, and publishes `expeditions.auto.done`. The state is cleared on the next launch.
+- **UI:** Auto Expedition card auto-expands once and renders a card-local animated banner with “我从地狱里回来了！”. Archived expeditions are moved out of the active list into a collapsed History section after the auto-pay option.
+- **Settings:** `mysteryEggEnabled` (default false) appears after Developer tools in Basic settings.
+- **Verification:** typecheck, lint, build and Vitest (127 files / 1056 tests) pass at build `2.0.10-salta.328`.
+
+---
+
+# Part 78 — Settings backup actions layout (2.0.10-salta.329)
+
+- Export / Import / Reset settings are compact and share one row.
+- Reset panel order moved below its own divider.
+- Removed the redundant Developer jump button from Settings → Basic settings; the Developer tab remains in the main navigation.
+- Verification: typecheck, lint, build and Vitest (127 files / 1056 tests) pass at build `2.0.10-salta.329`.
+
+---
+
+# Part 79 — Easter egg setting label (2.0.10-salta.330)
+
+- Settings → Basic settings now labels the toggle simply as “彩蛋” / “Easter egg”.
+- Removed the explanatory description under the label.
+- Verification: typecheck, lint, build and Vitest (127 files / 1056 tests) pass at build `2.0.10-salta.330`.
+
+---
+
+# Part 80 — Merge of the v2-dev feature line (2.0.10-salta.331)
+
+- **Merge:** `v2-dev` (`3854686`, valuable maintenance / sortable panels / mystery egg) is merged into `v2` (`18bf964`, automation recovery fixes). Both lines had diverged from `236d826` with one commit each, so every conflict was resolved as a union instead of choosing a side.
+- **Expedition payout:** `ExpeditionService.payout()` keeps the per-expedition payout record and the "already fully collected counts as paid" rule. An already-collected row is recorded with `opened: true`, empty loot and no error, so it does not block later cycles or feed the mystery egg.
+- **Expedition model:** `ActiveExpedition` carries both `containerOpenedAt` (payment gating) and `completedAt` / `outcome` / `loot` (history and egg detection); the portal schema, raw contract and view models agree.
+- **Readiness and maintenance events:** background messaging handles both `V2_MINIGAME_STUCK` (page reload coordinator) and `V2_MAINTENANCE_STARTED` (valuable maintenance monitor); the content script forwards both.
+- **Version:** build counter takes the higher `v2-dev` value (330) and increments for this merge batch, so the merged artifact is `2.0.10-salta.331`.
+- **Verification:** typecheck, lint, build and Vitest (128 files / 1065 tests) pass at build `2.0.10-salta.331`.
+

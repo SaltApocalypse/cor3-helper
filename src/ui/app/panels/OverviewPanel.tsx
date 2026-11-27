@@ -54,6 +54,8 @@ export function OverviewPanel({
             networkDiag={network.networkDiag}
             panelOpen={settings.panelOpen}
             onPanelOpenChange={settings.updatePanelOpen}
+            panelOrder={settings.panelOrder}
+            onReorderPanels={settings.reorderPanels}
             hasTimerData={hasOverviewTimerData({
                 daily: daily.daily,
                 specialists: inventory.specialists,

@@ -5,7 +5,7 @@
     "description": "COR3 Helper 2.0 — Chrome extension for cor3.gg",
     "cor3Fork": {
         "releaseLabel": "salta",
-        "build": 317
+        "build": 331
     },
     "engines": {
         "node": ">=24"
@@ -27,6 +27,7 @@
     "devDependencies": {
         "@types/chrome": "^0.3.7",
         "@types/node": "^26.6.6",
+        "@types/sortablejs": "^1.15.9",
         "esbuild": "^0.25.0",
         "oxlint": "^1.93.0",
         "prettier": "^3.9.10",
@@ -38,6 +39,7 @@
     },
     "dependencies": {
         "preact": "^11.2.0",
+        "sortablejs": "^1.15.7",
         "zod": "^4.6.7"
     }
 }

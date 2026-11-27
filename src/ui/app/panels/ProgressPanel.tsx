@@ -16,6 +16,8 @@ export function ProgressPanel({ network, settings }: ProgressPanelProps) {
             servers={network.servers}
             panelOpen={settings.panelOpen}
             onPanelOpenChange={settings.updatePanelOpen}
+            panelOrder={settings.panelOrder}
+            onReorderPanels={settings.reorderPanels}
         />
     );
 }

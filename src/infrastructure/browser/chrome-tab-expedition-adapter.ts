@@ -25,9 +25,8 @@ export class ChromeTabExpeditionAdapter implements ExpeditionPort {
         return result.ok ? ok(undefined) : result;
     }
 
-    async openContainer(expeditionId: string): Promise<Result<void, GameError>> {
-        const result = await this.action('openContainer', { expeditionId });
-        return result.ok ? ok(undefined) : result;
+    async openContainer(expeditionId: string): Promise<Result<unknown, GameError>> {
+        return this.action('openContainer', { expeditionId });
     }
 
     private async action(kind: string, payload: Record<string, unknown>): Promise<Result<unknown, GameError>> {

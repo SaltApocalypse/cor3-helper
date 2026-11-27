@@ -9,6 +9,7 @@ import {
     type ActiveExpedition,
     type ExpeditionDecision,
     type ExpeditionLocation,
+    type ExpeditionLootItem,
     type ExpeditionMercenary,
     type ExpeditionOverview,
 } from '../../domains/expeditions/model.js';
@@ -47,7 +48,49 @@ function mapDecision(raw: RawDecision): ExpeditionDecision | null {
     };
 }
 
-function mapExpedition(raw: unknown): ActiveExpedition | null {
+function mapLootItem(raw: unknown): ExpeditionLootItem | null {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const slot = raw as Record<string, unknown>;
+    const item = slot.item && typeof slot.item === 'object' && !Array.isArray(slot.item)
+        ? slot.item as Record<string, unknown>
+        : slot;
+    const name = typeof item.name === 'string'
+        ? item.name
+        : typeof item.itemName === 'string'
+            ? item.itemName
+            : typeof slot.name === 'string' ? slot.name : '';
+    if (name.length === 0) return null;
+    const quantity = typeof item.quantity === 'number'
+        ? item.quantity
+        : typeof slot.quantity === 'number' ? slot.quantity : 1;
+    const collected = typeof slot.isCollected === 'boolean'
+        ? slot.isCollected
+        : typeof item.isCollected === 'boolean' ? item.isCollected : null;
+    const deleted = typeof slot.isDeleted === 'boolean'
+        ? slot.isDeleted
+        : typeof item.isDeleted === 'boolean' ? item.isDeleted : null;
+    return {
+        name,
+        quantity,
+        tier: typeof item.tier === 'string' ? item.tier : typeof slot.tier === 'string' ? slot.tier : null,
+        imageUrl: typeof item.imageUrl === 'string' ? item.imageUrl : typeof slot.imageUrl === 'string' ? slot.imageUrl : null,
+        isCollected: collected,
+        isDeleted: deleted,
+    };
+}
+
+function mapLoot(raw: unknown): ExpeditionLootItem[] {
+    const list = Array.isArray(raw)
+        ? raw
+        : raw && typeof raw === 'object' && Array.isArray((raw as { items?: unknown }).items)
+            ? (raw as { items: unknown[] }).items
+            : [];
+    return list
+        .map(mapLootItem)
+        .filter((item): item is ExpeditionLootItem => item !== null);
+}
+
+export function mapExpedition(raw: unknown): ActiveExpedition | null {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
     const entry = raw as Record<string, unknown>;
     const mercenary = entry.mercenary;
@@ -61,6 +104,7 @@ function mapExpedition(raw: unknown): ActiveExpedition | null {
     return {
         id: typeof entry.id === 'string' ? entry.id : '',
         status: typeof entry.status === 'string' ? entry.status : 'UNKNOWN',
+        outcome: typeof entry.outcome === 'string' ? entry.outcome : null,
         locationName: typeof entry.locationName === 'string' ? entry.locationName : 'Unknown location',
         mercenaryName,
         totalCost: typeof entry.totalCost === 'number' ? entry.totalCost : null,
@@ -71,6 +115,8 @@ function mapExpedition(raw: unknown): ActiveExpedition | null {
             ? entry.endsAt
             : typeof entry.endTime === 'string' ? entry.endTime : null,
         containerOpenedAt: typeof entry.containerOpenedAt === 'string' ? entry.containerOpenedAt : null,
+        completedAt: typeof entry.completedAt === 'string' ? entry.completedAt : null,
+        loot: mapLoot(entry.containerData ?? entry.container),
     };
 }
 
@@ -129,6 +175,7 @@ function extractExpeditions(raw: unknown): ExtractedExpeditions {
             expeditions?: unknown;
             active?: unknown;
             activeExpeditions?: unknown;
+            items?: unknown;
             expedition?: unknown;
             decisions?: unknown;
             id?: unknown;
@@ -143,6 +190,10 @@ function extractExpeditions(raw: unknown): ExtractedExpeditions {
         }
         if (Array.isArray(entry.activeExpeditions)) {
             return { expeditions: entry.activeExpeditions, decisions: decisions as RawDecision[] };
+        }
+        // `get.archived` returns `{ items, hasMore, nextCursor, totalCount }`.
+        if (Array.isArray(entry.items)) {
+            return { expeditions: entry.items, decisions: decisions as RawDecision[] };
         }
         if (entry.expedition !== undefined && entry.expedition !== null) {
             return { expeditions: [entry.expedition], decisions: decisions as RawDecision[] };
@@ -225,6 +276,7 @@ export function mapExpeditionOverview(
         activeById.set(decision.expeditionId, {
             id: decision.expeditionId,
             status: 'DECISION_PENDING',
+            outcome: null,
             locationName: 'Unknown location',
             mercenaryName: null,
             totalCost: null,
@@ -233,6 +285,8 @@ export function mapExpeditionOverview(
             hasInsurance: null,
             endsAt: null,
             containerOpenedAt: null,
+            completedAt: null,
+            loot: [],
         });
     }
     return {

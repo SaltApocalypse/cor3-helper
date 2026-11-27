@@ -117,3 +117,50 @@ describe('expedition decision score baselines', () => {
         expect(overview.decisions[0]).toMatchObject({ riskScore: 40, lootScore: 28 });
     });
 });
+
+describe('expedition payout metadata', () => {
+    it('reads outcome, completedAt and flat loot from the expedition object', () => {
+        const overview = mapExpeditionOverview({
+            expeditions: [{
+                id: 'exp-1',
+                status: 'COMPLETED',
+                outcome: 'FULL_SUCCESS',
+                completedAt: '2026-11-27T10:00:00.000Z',
+                riskScore: 91,
+                containerData: [
+                    { name: 'Artificial milk', quantity: 2, tier: 'RARE', imageUrl: 'milk.png', isCollected: true },
+                ],
+            }],
+        }, {}, {}, {});
+        expect(overview.active[0]).toMatchObject({
+            outcome: 'FULL_SUCCESS',
+            completedAt: '2026-11-27T10:00:00.000Z',
+            riskScore: 91,
+        });
+        expect(overview.active[0]?.loot[0]).toMatchObject({ name: 'Artificial milk', quantity: 2, tier: 'RARE', isCollected: true });
+    });
+
+    it('accepts nested loot slots and the archived items wrapper', () => {
+        const overview = mapExpeditionOverview({}, {
+            items: [{
+                id: 'exp-2',
+                status: 'COMPLETED',
+                outcome: 'PARTIAL_SUCCESS',
+                container: [{
+                    item: { name: 'Old Abibas beanie', quantity: 1, tier: 'EPIC' },
+                    isCollected: true,
+                    isDeleted: false,
+                }],
+            }],
+            hasMore: false,
+        }, {}, {});
+        expect(overview.archived[0]?.outcome).toBe('PARTIAL_SUCCESS');
+        expect(overview.archived[0]?.loot[0]).toMatchObject({
+            name: 'Old Abibas beanie',
+            quantity: 1,
+            tier: 'EPIC',
+            isCollected: true,
+            isDeleted: false,
+        });
+    });
+});

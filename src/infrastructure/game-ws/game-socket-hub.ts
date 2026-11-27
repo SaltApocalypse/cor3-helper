@@ -1128,6 +1128,23 @@ export class GameSocketHub {
         }
     }
 
+    private notifyMaintenance(data: unknown): void {
+        const entry = data && typeof data === 'object' ? data as { serverId?: unknown; reason?: unknown } : null;
+        const serverId = typeof entry?.serverId === 'string' && entry.serverId.length > 0 ? entry.serverId : null;
+        const reason = typeof entry?.reason === 'string' ? entry.reason : null;
+        try {
+            window.postMessage({
+                version: 2,
+                type: 'V2_MAINTENANCE_STARTED',
+                ...(serverId ? { serverId } : {}),
+                ...(reason ? { reason } : {}),
+            }, '*');
+        } catch {
+            // The page may be tearing down.
+        }
+        this.notifyHost('info', 'Server maintenance started', { serverId, reason });
+    }
+
     private notifyExpeditionDecisions(decisions: readonly unknown[]): void {
         try {
             window.postMessage({ version: 2, type: 'V2_EXPEDITION_DECISIONS', decisions }, '*');
@@ -1287,7 +1304,14 @@ export class GameSocketHub {
         };
         const action = actions[kind];
         if (!action) return err({ code: 'GAME_UNKNOWN_ACTION', message: `Unknown valuable action: ${kind}` });
-        const response = await this.request(action.event, action.action, payload, action.timeoutMs).catch((error) => error);
+        const timeoutOverride = payload.timeoutMs;
+        const requestPayload = timeoutOverride === undefined
+            ? payload
+            : Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'timeoutMs'));
+        const timeoutMs = typeof timeoutOverride === 'number' && Number.isFinite(timeoutOverride) && timeoutOverride > 0
+            ? timeoutOverride
+            : action.timeoutMs;
+        const response = await this.request(action.event, action.action, requestPayload, timeoutMs).catch((error) => error);
         if (response instanceof Error) return err({ code: 'GAME_TIMEOUT', message: response.message });
         if (response.error) return err(gameError(response.error, 'GAME_VALUABLE_ACTION_FAILED'));
         return ok(response.data);
@@ -1671,6 +1695,12 @@ export class GameSocketHub {
             }
         }
         if (!action) return;
+
+        // The game announces maintenance on both rooms. v1 only listened to
+        // network-map; accepting sai as well makes the force loop stop sooner.
+        if ((eventName === 'network-map' || eventName === 'sai') && action === 'maintenance') {
+            this.notifyMaintenance(payload.data);
+        }
 
         if (eventName === 'network-map' && action === 'get.map') {
             const map = payload.data as RawNetworkMap | undefined;

@@ -102,6 +102,10 @@ export function parseTabCommand(type: string, payload: unknown): Record<string, 
 
 export const contentNoticeSchemas = {
     V2_GAME_READY: z.object({ readiness: z.unknown() }).strict(),
+    V2_MAINTENANCE_STARTED: z.object({
+        serverId: z.string().min(1).optional(),
+        reason: z.string().optional(),
+    }).strict(),
     V2_MARKET_CACHE: z.object({
         marketId: z.string().min(1),
         snapshot: z.unknown(),

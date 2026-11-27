@@ -233,7 +233,6 @@ export function SidePanelApp({ portal, windowMode = false }: SidePanelAppProps) 
                         connection={connection}
                         network={network}
                         gameStatus={gameStatus}
-                        onOpenDeveloper={setActivePage}
                     />
                 ) : null}
 

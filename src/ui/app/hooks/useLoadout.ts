@@ -18,6 +18,7 @@ export interface LoadoutState {
     readonly loadoutPower: number;
     readonly setLoadoutPower: (power: number) => void;
     readonly loadoutBusy: boolean;
+    readonly loadoutLoading: boolean;
     readonly setLoadoutFeedback: (feedback: LoadoutFeedback | null) => void;
     readonly loadLoadout: () => Promise<void>;
     readonly applyLoadout: (strategy?: 'best' | 'weakest') => Promise<void>;
@@ -34,15 +35,21 @@ export function useLoadout(portal: PopupPortal, tt: TranslateSource): LoadoutSta
     const [loadoutTarget, setLoadoutTarget] = useState('');
     const [loadoutPower, setLoadoutPower] = useState(0);
     const [loadoutBusy, setLoadoutBusy] = useState(false);
+    const [loadoutLoading, setLoadoutLoading] = useState(false);
 
     const loadLoadout = useCallback(async () => {
-        const response = await portal.loadoutView();
-        if (response.ok) {
-            setLoadout(response.value);
-            setLoadoutStatus(tt('{hardware} hardware / {software} software owned', { hardware: response.value.ownedHardware, software: response.value.ownedSoftware }));
-        } else {
-            setLoadoutStatus(tt('Loadout load failed'));
-            setLoadoutFeedback({ scope: 'general', message: response.error.message, tone: 'error' });
+        setLoadoutLoading(true);
+        try {
+            const response = await portal.loadoutView();
+            if (response.ok) {
+                setLoadout(response.value);
+                setLoadoutStatus(tt('{hardware} hardware / {software} software owned', { hardware: response.value.ownedHardware, software: response.value.ownedSoftware }));
+            } else {
+                setLoadoutStatus(tt('Loadout load failed'));
+                setLoadoutFeedback({ scope: 'general', message: response.error.message, tone: 'error' });
+            }
+        } finally {
+            setLoadoutLoading(false);
         }
     }, [portal, tt]);
 
@@ -93,6 +100,7 @@ export function useLoadout(portal: PopupPortal, tt: TranslateSource): LoadoutSta
         loadoutPower,
         setLoadoutPower,
         loadoutBusy,
+        loadoutLoading,
         setLoadoutFeedback,
         loadLoadout,
         applyLoadout,

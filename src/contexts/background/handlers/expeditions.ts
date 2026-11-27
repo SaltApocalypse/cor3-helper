@@ -45,6 +45,7 @@ export function registerExpeditionHandlers(server: CoreRuntime['server'], deps: 
                 locations: overview.locations.length,
             });
             await core.stores.featureAvailability.set({ mercenaryExpedition: hasAnyData });
+            await automation.expedition.clearMysteryEggIfExpeditionStarted(overview.active);
             return ok(overview);
         }
         core.logger.warn('expedition', 'Expedition view failed', { code: result.error.code, message: result.error.message });

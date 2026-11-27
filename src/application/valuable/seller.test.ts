@@ -5,6 +5,7 @@ import { asEdgeId, asServerId } from '../../kernel/ids.js';
 import { InMemoryEndpointLeaseService } from '../network/endpoint-lease.js';
 import { RouteExecutor } from '../network/route-executor.js';
 import { ValuableSellerService } from './seller.js';
+import { MaintenanceMonitor } from './maintenance-monitor.js';
 
 const home = asServerId('home');
 const serverA = asServerId('server-a');
@@ -206,5 +207,148 @@ describe('ValuableSellerService', () => {
         });
         expect(result.ok).toBe(true);
         if (result.ok) expect(result.value.marketFailures).toHaveLength(1);
+    });
+});
+
+describe('ValuableSellerService forceMaintenance', () => {
+    function forceSnapshot(): NetworkSnapshot {
+        const upcoming = (server: NetworkServer) => ({
+            ...server,
+            maintenance: { active: false, endsAt: null, timeUntil: '2026-11-26T12:00:00.000Z' },
+        });
+        return {
+            ...snapshot,
+            servers: new Map([
+                [home, node(home, 'home', 'Home')],
+                [serverA, upcoming(node(serverA, 'server-a'))],
+                [serverB, upcoming(node(serverB, 'server-b'))],
+                [market, { ...node(market, 'market'), maintenance: { active: true, endsAt: '2026-11-26T12:00:00.000Z', timeUntil: null } }],
+            ]),
+        };
+    }
+
+    it('forces selected upcoming servers furthest-first and stops on the maintenance event', async () => {
+        const clock = new FakeClock(0);
+        const monitor = new MaintenanceMonitor();
+        const calls: string[] = [];
+        const downloads: string[] = [];
+        const searchCounts = new Map<string, number>();
+        const service = new ValuableSellerService(
+            { get: async () => ({ ok: true, value: forceSnapshot() }) },
+            executor(clock),
+            {
+                searchFiles: async (serverId: string) => {
+                    calls.push(serverId);
+                    const count = (searchCounts.get(serverId) ?? 0) + 1;
+                    searchCounts.set(serverId, count);
+                    if (count >= 2) monitor.record(serverId);
+                    return { ok: true as const, value: { found: [{ id: `file-${serverId}`, basePrice: 10 }] } };
+                },
+                searchLogs: async () => ({ ok: true as const, value: { found: [] } }),
+                getFiles: async () => ({ ok: true as const, value: [] }),
+                getLogs: async () => ({ ok: true as const, value: [] }),
+                downloadFile: async (_serverId: string, fileId: string) => { downloads.push(fileId); return { ok: true as const, value: undefined }; },
+                downloadLog: async () => ({ ok: true as const, value: undefined }),
+            },
+            {
+                getSellableItems: async () => ({ ok: true, value: { items: [], totalPrice: 0, totalRepGain: 0 } }),
+                sellItems: async () => ({ ok: true, value: { sold: 0, credits: 0, reputation: 0 } }),
+            },
+            clock,
+            undefined,
+            undefined,
+            undefined,
+            async () => ({ ok: true, value: undefined }),
+            monitor,
+            async () => undefined,
+        );
+
+        const result = await service.forceMaintenance({
+            owner: 'valuable',
+            serverIds: [serverA, serverB, market],
+            includeDownloads: true,
+        });
+
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.value.stopped).toBe(false);
+        expect(result.value.forcedServers).toBe(2);
+        expect(result.value.failedServers).toEqual([{ target: 'market', message: 'Not scheduled for upcoming maintenance' }]);
+        expect(calls.slice(0, 2)).toEqual([serverB, serverB]);
+        expect(calls).toEqual(expect.arrayContaining([serverA, serverB]));
+        expect(downloads).toEqual([`file-${serverB}`, `file-${serverA}`]);
+    });
+
+    it('caps each server at 50 attempts and reports failure', async () => {
+        const clock = new FakeClock(0);
+        let calls = 0;
+        const service = new ValuableSellerService(
+            { get: async () => ({ ok: true, value: forceSnapshot() }) },
+            executor(clock),
+            {
+                searchFiles: async () => { calls += 1; return { ok: true as const, value: { found: [] } }; },
+                searchLogs: async () => ({ ok: true as const, value: { found: [] } }),
+                getFiles: async () => ({ ok: true as const, value: [] }),
+                getLogs: async () => ({ ok: true as const, value: [] }),
+                downloadFile: async () => ({ ok: true as const, value: undefined }),
+                downloadLog: async () => ({ ok: true as const, value: undefined }),
+            },
+            {
+                getSellableItems: async () => ({ ok: true, value: { items: [], totalPrice: 0, totalRepGain: 0 } }),
+                sellItems: async () => ({ ok: true, value: { sold: 0, credits: 0, reputation: 0 } }),
+            },
+            clock,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            async () => undefined,
+        );
+
+        const result = await service.forceMaintenance({
+            owner: 'valuable',
+            serverIds: [serverB],
+            includeDownloads: false,
+        });
+
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(calls).toBe(50);
+        expect(result.value.forcedServers).toBe(0);
+        expect(result.value.failedServers).toHaveLength(1);
+    });
+
+    it('stops promptly when cancellation is requested', async () => {
+        const clock = new FakeClock(0);
+        let calls = 0;
+        const service = new ValuableSellerService(
+            { get: async () => ({ ok: true, value: forceSnapshot() }) },
+            executor(clock),
+            {
+                searchFiles: async () => { calls += 1; return { ok: true as const, value: { found: [] } }; },
+                searchLogs: async () => ({ ok: true as const, value: { found: [] } }),
+                getFiles: async () => ({ ok: true as const, value: [] }),
+                getLogs: async () => ({ ok: true as const, value: [] }),
+                downloadFile: async () => ({ ok: true as const, value: undefined }),
+                downloadLog: async () => ({ ok: true as const, value: undefined }),
+            },
+            {
+                getSellableItems: async () => ({ ok: true, value: { items: [], totalPrice: 0, totalRepGain: 0 } }),
+                sellItems: async () => ({ ok: true, value: { sold: 0, credits: 0, reputation: 0 } }),
+            },
+            clock,
+            undefined,
+            { shouldStop: () => true },
+            undefined,
+            undefined,
+            undefined,
+            async () => undefined,
+        );
+
+        const result = await service.forceMaintenance({ owner: 'valuable', serverIds: [serverB], includeDownloads: false });
+        expect(result.ok).toBe(true);
+        if (result.ok) expect(result.value.stopped).toBe(true);
+        expect(calls).toBe(0);
     });
 });
