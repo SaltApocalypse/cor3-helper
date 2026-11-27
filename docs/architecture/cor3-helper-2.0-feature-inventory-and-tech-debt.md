@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-27 against build `2.0.12-salta.336`
+- **Last verified:** 2026-11-27 against build `2.0.13-salta.336`
 - **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (130 files / 1093 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.12-salta.336`)
+## Current completion snapshot (build `2.0.13-salta.336`)
 
 | Metric | Value |
 |---|---|
@@ -607,7 +607,7 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 - `npm run typecheck` — pass
 - `npm run lint` — pass
 - `npm test` — 130 files / 1093 tests pass
-- `npm run build` — pass, `2.0.12-salta.336`
+- `npm run build` — pass, `2.0.13-salta.336`
 
 ---
 
@@ -1644,3 +1644,15 @@ Root causes and fixes recorded from real user logs (`B.log`, `C.log`, `A.log`) a
 - **Routing:** the last reached endpoint is reused between targets to avoid a redundant `set.endpoint`.
 - **Diagnostics:** per-attempt debug traces (duration, result, rate-limit flag), per-server start/finish/warn lines and a run summary now go to the debug log and the visible run log.
 - **Verification:** typecheck, lint, build and Vitest (130 files / 1093 tests) pass at build `2.0.12-salta.336`.
+
+---
+
+# Part 87 — Release 2.0.13-salta
+
+- **Version:** `package.json` `2.0.13`; release artifact `2.0.13-salta`; local build identity `2.0.13-salta.336`.
+- **Force maintenance:** restored to v1 parity. The loop reads the cached map and only refreshes for `sai-access-denied` recovery, no longer downloads valuables, reuses the reached endpoint between targets, and paces attempts at 1000-1500 ms.
+- **Rate-limit special case:** force searches bypass the shared game cooldown (still the 250 ms send throttle) and do not escalate the global cooldown used by other automations.
+- **Diagnostics:** per-attempt traces plus per-server and run summaries now reach both the debug log and the visible run log.
+- **Carried from 2.0.12:** unreachable-target preflight gate, larger retained logs and persisted run logs, UI alignment and toolbar window menu.
+- **Packaging:** draft release only; the tag is created when the release is published.
+- **Verification:** typecheck, lint, build and Vitest (130 files / 1093 tests) pass at build `2.0.13-salta.336`.
