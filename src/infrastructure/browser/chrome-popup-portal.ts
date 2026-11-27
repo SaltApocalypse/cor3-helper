@@ -20,6 +20,7 @@ import { marketCompletedJobsSchema } from '../../contracts/market-completed-jobs
 import { autoJobsScheduleStateSchema, autoJobsStatusSchema } from '../../contracts/auto-jobs.js';
 import { autoFinishLastRunSchema, autoFinishMarketSchema, autoFinishRunResultSchema, autoFinishUnknownJobSchema } from '../../contracts/auto-finish.js';
 import { buildNumberFromVersionName } from '../../kernel/version.js';
+import { openStandaloneWindow } from './standalone-window.js';
 
 const pingSchema = z.object({ version: z.string(), phase: z.string() });
 const settingsExportSchema = z.object({
@@ -713,33 +714,7 @@ export class ChromePopupPortal implements PopupPortal {
     }
 
     async openWindow(): Promise<boolean> {
-        try {
-            const baseUrl = chrome.runtime.getURL('sidepanel.html');
-            const windows = await chrome.windows.getAll({ populate: true });
-            const existing = windows.find((window) => (
-                window.type === 'popup'
-                && typeof window.id === 'number'
-                && window.tabs?.some((tab) => tab.url?.startsWith(baseUrl))
-            ));
-            if (existing && typeof existing.id === 'number') {
-                try {
-                    await chrome.windows.update(existing.id, { focused: true });
-                    return true;
-                } catch {
-                    // The window may have closed between the query and the focus.
-                }
-            }
-            await chrome.windows.create({
-                url: `${baseUrl}?mode=window`,
-                type: 'popup',
-                width: 430,
-                height: 800,
-                focused: true,
-            });
-            return true;
-        } catch {
-            return false;
-        }
+        return openStandaloneWindow();
     }
 
     ping() {

@@ -17,7 +17,7 @@
 - 分支：`v2`
 - 架构：分层、强类型的 2.0 重写（domain / application / infrastructure / contexts）
 - 构建输出：`dist/`（Manifest V3）
-- 验证状态：`2.0.10-salta.332` 下 typecheck、lint、Vitest（129 个文件 / 1070 个测试）和构建均通过；PR 会运行同样的 CI 检查
+- 验证状态：`2.0.10-salta.333` 下 typecheck、lint、Vitest（130 个文件 / 1078 个测试）和构建均通过；PR 会运行同样的 CI 检查
 - 已知缺口：静态物品目录仍需真实模块转储，后台/内容/portal 与 UI 渲染测试仍不完整；见[功能清单与技术债](./docs/architecture/cor3-helper-2.0-feature-inventory-and-tech-debt.md)
 
 ## 环境要求

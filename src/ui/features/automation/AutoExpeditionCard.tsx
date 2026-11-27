@@ -196,6 +196,10 @@ function Fold({ title, titleExtra, open, onToggle, children }: {
                     <span class="v2-expedition-fold-title">{title}</span>
                 </button>
                 {titleExtra ?? null}
+                {/* Click target for the empty part of the row. Kept as a
+                    sibling so the info button and its modal never bubble into
+                    the toggle. */}
+                <div class="v2-expedition-fold-filler" aria-hidden="true" onClick={onToggle} />
             </div>
             {open ? <div class="v2-loadout-section-body">{children}</div> : null}
         </div>

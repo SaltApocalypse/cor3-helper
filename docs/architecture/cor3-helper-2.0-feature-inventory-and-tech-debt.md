@@ -5,15 +5,15 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-27 against build `2.0.10-salta.332`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (129 files / 1070 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-27 against build `2.0.10-salta.333`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (130 files / 1078 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.10-salta.332`)
+## Current completion snapshot (build `2.0.10-salta.333`)
 
 | Metric | Value |
 |---|---|
-| TypeScript/TSX source files | 478 (including 129 test files) |
-| Files under `src/` | 487 (vendored JavaScript is limited to `src/libs/`) |
+| TypeScript/TSX source files | 481 (including 130 test files) |
+| Files under `src/` | 490 (vendored JavaScript is limited to `src/libs/`) |
 | v1 parity rows with a status | 147 |
 | Implemented / improved | 89 |
 | Partial | 37 |
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 129 files / 1070 tests pass
-- `npm run build` — pass, `2.0.10-salta.332`
+- `npm test` — 130 files / 1078 tests pass
+- `npm run build` — pass, `2.0.10-salta.333`
 
 ---
 
@@ -1591,3 +1591,12 @@ Root causes and fixes recorded from real user logs (`B.log`, `C.log`, `A.log`) a
 - **Expedition dividers:** the dashed divider above "Auto pay and send rewards to mailbox" moved below it, so the divider separates auto-pay from "History" as intended.
 - **Credit floor:** `mercMinCredits` is now a post-payment floor. A run starts only when `credits - total cost >= mercMinCredits` (`expeditionCreditBudget` in `src/application/expeditions/credits.ts`). The estimated candidate cost is checked before the preparation window and the configured cost is checked again before launch; a blocked run disables Auto Expedition with the credits, cost, threshold and remaining balance in the diagnostic. A credit read failure postpones the launch instead of guessing. The settings description explains the subtraction rule.
 - **Verification:** typecheck, lint, build and Vitest (129 files / 1070 tests) pass at build `2.0.10-salta.332`.
+
+---
+
+# Part 82 — Toolbar menu, Founders Portal link and a full-row fold header (2.0.10-salta.333)
+
+- **Toolbar context menu:** `registerActionMenu()` (`src/contexts/background/action-menu.ts`) adds an `action`-context item under Chrome's built-in "Open in side panel". It opens or focuses the detached workspace through `openStandaloneWindow()`, which the popup's own button now shares. The item is recreated on install/startup and after any settings write (import/reset included), so its title follows `uiLanguage` (`在独立窗口中打开` / `Open in a separate window`). The manifest gained the `contextMenus` permission.
+- **Related links:** a third entry, Founders Portal (`https://community.cor3.gg/`, Chinese label `官方创始人门户`), sits after the Fragmentary Order website.
+- **Fold headers:** the empty part of an Auto Expedition fold header is a sibling click target again, so the whole row toggles. The title button, the info button and its modal stay independent elements, so clicking the info button (or the modal backdrop) cannot collapse the section.
+- **Verification:** typecheck, lint, build and Vitest (130 files / 1078 tests) pass at build `2.0.10-salta.333`.

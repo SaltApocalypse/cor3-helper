@@ -21,6 +21,9 @@ import { registerValuableHandlers } from './handlers/valuable.js';
 import { registerAlarmRouter } from './alarms.js';
 import { registerMessaging } from './messaging.js';
 import { registerUpdateCheckLifecycle } from './update-check-lifecycle.js';
+import { registerActionMenu } from './action-menu.js';
+import { openStandaloneWindow } from '../../infrastructure/browser/standalone-window.js';
+import { SETTINGS_STORAGE_KEY } from '../../infrastructure/storage/settings-repository.js';
 import { startBackground } from './bootstrap.js';
 
 const core = createCoreRuntime();
@@ -48,6 +51,17 @@ registerValuableHandlers(core.server, { core, automation });
 registerAlarmRouter(automation, core.logger);
 registerMessaging(core, automation);
 registerUpdateCheckLifecycle({ runtime: chrome.runtime, service: core.updateCheck, logger: core.logger });
+const actionMenu = registerActionMenu({
+    menus: chrome.contextMenus,
+    runtime: chrome.runtime,
+    readLanguage: async () => (await core.settings.get()).uiLanguage,
+    openWindow: openStandaloneWindow,
+    logger: core.logger,
+});
+// The menu title follows the UI language, including imports and resets.
+chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === 'local' && SETTINGS_STORAGE_KEY in changes) void actionMenu.refresh();
+});
 
 core.transport.start((request) => core.server.handle(request));
 
