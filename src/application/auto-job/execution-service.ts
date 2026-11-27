@@ -279,6 +279,20 @@ export class JobExecutionService implements JobExecutionPort {
             if (current.alreadyTaken && current.canComplete) {
                 return this.completeWithTransientRetry(current, state, executionResetAt);
             }
+        } else if (this.beforeExecute) {
+            // A job taken earlier can become impossible later (the target was
+            // never unlocked, or the map moved and no route is left). Re-check
+            // before spending an attempt so the automation stops hammering an
+            // unreachable target; the result is reported as a skip.
+            const preflight = await this.beforeExecute(current);
+            if (!preflight.ok) {
+                return err({
+                    code: 'PREFLIGHT_FAILED',
+                    message: preflight.error.message,
+                    retryable: false,
+                    stage: 'preflight',
+                });
+            }
         }
 
         if (this.beforeTarget && current.serverId) {

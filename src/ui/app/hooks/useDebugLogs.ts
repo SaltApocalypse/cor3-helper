@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'preact/hooks';
 import type { DebugLogLine, PopupPortal } from '../../../application/popup/portal.js';
 import type { PopupPage } from '../AppShell.js';
 import { displayVersion } from '../view-models/version.js';
+import { formatLogLines } from '../../format.js';
 
 /**
  * Merged automation debug log (H8 phase 7).
@@ -50,12 +51,11 @@ export function useDebugLogs(portal: PopupPortal, deps: DebugLogsDeps): DebugLog
     const [debugLogs, setDebugLogs] = useState<readonly DebugLogLine[]>([]);
     const [debugLogsLoading, setDebugLogsLoading] = useState(false);
 
-    const loadDebugLogs = useCallback(async (silent = false) => {
-        if (!silent) setDebugLogsLoading(true);
+    const fetchMergedLogs = useCallback(async (globalLimit: number, runLimit: number) => {
         const runId = jobRunId ?? autoFinishRunId;
         const [global, run] = await Promise.all([
-            portal.debugLogs(300),
-            runId ? portal.runDebugLogs(runId, 300) : Promise.resolve(null),
+            portal.debugLogs(globalLimit),
+            runId ? portal.runDebugLogs(runId, runLimit) : Promise.resolve(null),
         ]);
         const merged = new Map<string, DebugLogLine>();
         for (const line of global.ok ? global.value : []) {
@@ -66,11 +66,20 @@ export function useDebugLogs(portal: PopupPortal, deps: DebugLogsDeps): DebugLog
                 merged.set(`${line.at}:${line.level}:${line.scope}:${line.message}`, line);
             }
         }
-        const sorted = [...merged.values()].sort((left, right) => left.at - right.at).slice(-299);
-        const status = buildDebugLogStatusLine(portal.versionInfo(), sorted.length, runId, silent);
-        setDebugLogs([status, ...sorted]);
-        if (!silent) setDebugLogsLoading(false);
+        return {
+            runId,
+            sorted: [...merged.values()].sort((left, right) => left.at - right.at),
+        };
     }, [portal, jobRunId, autoFinishRunId]);
+
+    const loadDebugLogs = useCallback(async (silent = false) => {
+        if (!silent) setDebugLogsLoading(true);
+        const { runId, sorted } = await fetchMergedLogs(300, 300);
+        const limited = sorted.slice(-299);
+        const status = buildDebugLogStatusLine(portal.versionInfo(), limited.length, runId, silent);
+        setDebugLogs([status, ...limited]);
+        if (!silent) setDebugLogsLoading(false);
+    }, [portal, fetchMergedLogs]);
 
     useEffect(() => {
         if (activePage !== 'developer') return;
@@ -85,9 +94,13 @@ export function useDebugLogs(portal: PopupPortal, deps: DebugLogsDeps): DebugLog
         await portal.copyText(text);
     }, [portal]);
 
-    const exportDebugLogs = useCallback((text: string) => {
+    // Export the whole retained buffer, not the 300 lines the console renders.
+    const exportDebugLogs = useCallback(async () => {
+        const { runId, sorted } = await fetchMergedLogs(6000, 2000);
+        const status = buildDebugLogStatusLine(portal.versionInfo(), sorted.length, runId, false);
+        const text = formatLogLines([status, ...sorted]);
         portal.exportText(`cor3-auto-jobs-${new Date().toISOString().replace(/[:.]/g, '-')}.log`, text);
-    }, [portal]);
+    }, [portal, fetchMergedLogs]);
 
     return { debugLogs, debugLogsLoading, loadDebugLogs, refreshDebugLogs, copyDebugLogs, exportDebugLogs };
 }

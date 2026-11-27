@@ -35,7 +35,14 @@ const BUILD_NUMBER = typeof __COR3_BUILD_NUMBER__ === 'string' ? __COR3_BUILD_NU
 export const DISPLAY_VERSION = mergeBuildNumber(VERSION, BUILD_NUMBER);
 
 const SESSION_LOG_KEY = 'v2.sessionLogs';
+const SESSION_RUN_LOG_KEY = 'v2.runLogs';
 const LOG_RETENTION_MS = 24 * 60 * 60 * 1000;
+/** Keep roughly a night of automation output before the ring buffer rotates. */
+const LOG_MAX_ENTRIES = 6000;
+/** Stay well inside the 10 MB chrome.storage.session quota. */
+const LOG_MAX_BYTES = 4_000_000;
+const RUN_LOG_MAX_RUNS = 20;
+const RUN_LOG_MAX_LINES = 500;
 
 export interface BackgroundEvent {
     readonly type: string;
@@ -110,9 +117,14 @@ export function createCoreRuntime(): CoreRuntime {
         sessionLogTimer = setTimeout(() => {
             sessionLogTimer = null;
             void sessionLogArea.set({ [SESSION_LOG_KEY]: logger.events().filter(isFreshLogEvent) }).catch(() => undefined);
-        }, 200);
+        }, 1500);
     };
-    const logger = new BufferedLogger(new ConsoleLogger(), 500, () => persistSessionLogs());
+    const logger = new BufferedLogger(
+        new ConsoleLogger(),
+        LOG_MAX_ENTRIES,
+        () => persistSessionLogs(),
+        LOG_MAX_BYTES,
+    );
     if (sessionLogArea) {
         void sessionLogArea.get(SESSION_LOG_KEY).then((raw) => {
             const stored = raw[SESSION_LOG_KEY];
@@ -145,7 +157,23 @@ export function createCoreRuntime(): CoreRuntime {
     } else {
         logInitialized('info');
     }
-    const runLogs = new RunLogStore();
+    let runLogTimer: ReturnType<typeof setTimeout> | null = null;
+    function persistRunLogs(): void {
+        if (!sessionLogArea || runLogTimer !== null) return;
+        runLogTimer = setTimeout(() => {
+            runLogTimer = null;
+            void sessionLogArea.set({
+                [SESSION_RUN_LOG_KEY]: { schemaVersion: 1, runs: runLogs.snapshot() },
+            }).catch(() => undefined);
+        }, 1500);
+    }
+    const runLogs = new RunLogStore(RUN_LOG_MAX_RUNS, RUN_LOG_MAX_LINES, () => persistRunLogs());
+    if (sessionLogArea) {
+        void sessionLogArea.get(SESSION_RUN_LOG_KEY).then((raw) => {
+            const stored = raw[SESSION_RUN_LOG_KEY] as { runs?: unknown } | undefined;
+            if (stored && typeof stored === 'object') runLogs.hydrate(stored.runs);
+        }).catch(() => undefined);
+    }
     setInterval(() => {
         logger.prune(isFreshLogEvent);
     }, 60 * 60 * 1000);

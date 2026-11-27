@@ -25,6 +25,8 @@ const persistedServerSchema = z.object({
     }).strict(),
     endpointCapable: z.boolean(),
     reachableNow: z.boolean(),
+    discovered: z.boolean().optional(),
+    accessible: z.boolean().optional(),
 }).strict();
 
 const persistedEdgeSchema = z.object({
@@ -70,9 +72,12 @@ export class NetworkSnapshotStore {
         if (!stored) return null;
         const servers = new Map<ServerId, NetworkServer>();
         for (const server of stored.servers) {
+            const { discovered, accessible, ...rest } = server;
             servers.set(asServerId(server.id), {
-                ...server,
+                ...rest,
                 id: asServerId(server.id),
+                ...(discovered !== undefined ? { discovered } : {}),
+                ...(accessible !== undefined ? { accessible } : {}),
             });
         }
         return {
@@ -108,6 +113,8 @@ export class NetworkSnapshotStore {
                 access: server.access,
                 endpointCapable: server.endpointCapable,
                 reachableNow: server.reachableNow,
+                ...(server.discovered !== undefined ? { discovered: server.discovered } : {}),
+                ...(server.accessible !== undefined ? { accessible: server.accessible } : {}),
             })),
             edges: snapshot.edges.map((edge) => ({
                 id: edge.id,

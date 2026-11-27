@@ -58,6 +58,46 @@ describe('JobExecutionService', () => {
         expect(fake.calls).toEqual(['complete']);
     });
 
+    it('re-checks a taken job before executing it and skips an unreachable target', async () => {
+        const fake = actions();
+        const service = new JobExecutionService(
+            fake.port,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            async () => ({ ok: false as const, error: { code: 'PREFLIGHT_FAILED', message: 'Target server D4RK T43274 cannot be used for this run' } }),
+        );
+        const result = await service.executeDetailed(job('IP Cleanup', { alreadyTaken: true }));
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+            expect(result.error.code).toBe('PREFLIGHT_FAILED');
+            expect(result.error.stage).toBe('preflight');
+            expect(result.error.retryable).toBe(false);
+        }
+        expect(fake.calls).toEqual([]);
+    });
+
+    it('keeps executing a taken job whose target is still reachable', async () => {
+        const fake = actions();
+        fake.port.getTransit = async () => ({ ok: true, value: [{ ip: '1.2.3.4', source: 'job', jobId: 'job1' }] });
+        const service = new JobExecutionService(
+            fake.port,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            async () => ({ ok: true as const, value: undefined }),
+        );
+        const result = await service.executeDetailed(job('IP Cleanup', { alreadyTaken: true }));
+        expect(result.ok).toBe(true);
+        expect(fake.calls).toEqual(['remove:1.2.3.4', 'complete']);
+    });
+
     it('injects IPs and completes', async () => {
         const fake = actions();
         const service = new JobExecutionService(fake.port);

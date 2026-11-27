@@ -24,6 +24,13 @@ export interface NetworkServer {
     readonly access: AccessState;
     readonly endpointCapable: boolean;
     readonly reachableNow: boolean;
+    /**
+     * v1 parity: the map marks servers the player has not discovered yet.
+     * `undefined` means the payload did not say, which is treated as discovered.
+     */
+    readonly discovered?: boolean;
+    /** v1 parity: the player already holds an access grant for this server. */
+    readonly accessible?: boolean;
 }
 
 export interface NetworkEdge {

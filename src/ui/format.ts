@@ -16,3 +16,33 @@ export function formatAge(ms: number | null): string {
     if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
     return `${Math.round(seconds / 3600)}h`;
 }
+
+export interface FormattableLogLine {
+    readonly at: number;
+    readonly level: string;
+    readonly scope: string;
+    readonly message: string;
+    readonly data?: unknown;
+}
+
+/** Compact JSON for a log line's payload; long payloads are truncated. */
+export function compactLogData(data: unknown): string {
+    if (data === undefined) return '';
+    try {
+        const text = JSON.stringify(data);
+        if (typeof text !== 'string') return '';
+        return text.length > 500 ? `${text.slice(0, 497)}...` : text;
+    } catch {
+        return '[unserializable]';
+    }
+}
+
+/** Plain-text log format shared by the console view, copy and export. */
+export function formatLogLines(lines: readonly FormattableLogLine[]): string {
+    return lines
+        .map((line) => {
+            const data = compactLogData(line.data);
+            return `${new Date(line.at).toLocaleTimeString()} [${line.level}] ${line.scope}: ${line.message}${data ? ` | ${data}` : ''}`;
+        })
+        .join('\n');
+}

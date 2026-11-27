@@ -24,7 +24,7 @@ export function registerDevtoolsHandlers(server: CoreRuntime['server'], deps: De
             return ok([]);
         }
     });
-    server.register('devtools.logs', z.object({ limit: z.number().int().positive().max(500).default(200) }).strict(), async ({ limit }) => {
+    server.register('devtools.logs', z.object({ limit: z.number().int().positive().max(6000).default(200) }).strict(), async ({ limit }) => {
         return ok(core.logger.events().filter(isFreshLogEvent).slice(-limit));
     });
     server.register('devtools.clearLogs', z.object({}).strict(), async () => {

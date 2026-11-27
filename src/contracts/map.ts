@@ -14,6 +14,8 @@ export const rawNetworkServerSchema = z.object({
     isEndpoint: z.boolean().optional(),
     canSetEndpoint: z.boolean().optional(),
     isReachable: z.boolean().optional(),
+    isDiscovered: z.boolean().optional(),
+    isAccessible: z.boolean().optional(),
     accessType: z.string().optional(),
     hasAdminAccess: z.boolean().optional(),
 }).passthrough();

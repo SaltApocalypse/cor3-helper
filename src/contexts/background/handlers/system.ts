@@ -174,7 +174,7 @@ export function registerSystemHandlers(server: CoreRuntime['server'], deps: Syst
     });
     server.register('automation.logs', z.object({
         runId: z.string().min(1),
-        limit: z.number().int().positive().max(500).default(300),
+        limit: z.number().int().positive().max(2000).default(300),
     }).strict(), async ({ runId, limit }) => {
         return ok(deps.core.runLogs.list(runId, limit));
     });

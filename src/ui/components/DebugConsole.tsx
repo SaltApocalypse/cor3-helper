@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useT } from '../i18n-context.js';
+import { formatLogLines } from '../format.js';
 
 export interface DebugLogLine {
     readonly at: number;
@@ -7,17 +8,6 @@ export interface DebugLogLine {
     readonly scope: string;
     readonly message: string;
     readonly data?: unknown;
-}
-
-function compactData(data: unknown): string {
-    if (data === undefined) return '';
-    try {
-        const text = JSON.stringify(data);
-        if (typeof text !== 'string') return '';
-        return text.length > 500 ? `${text.slice(0, 497)}...` : text;
-    } catch {
-        return '[unserializable]';
-    }
 }
 
 export interface DebugConsoleProps {
@@ -76,12 +66,7 @@ export function DebugConsole({
         feedbackTimer.current = setTimeout(() => setFeedback(null), 1800);
     };
 
-    const text = lines
-        .map((line) => {
-            const data = compactData(line.data);
-            return `${new Date(line.at).toLocaleTimeString()} [${line.level}] ${line.scope}: ${line.message}${data ? ` | ${data}` : ''}`;
-        })
-        .join('\n');
+    const text = formatLogLines(lines);
 
     const body = (
         <>

@@ -1,7 +1,7 @@
 import { NetworkGraph, type NetworkError } from '../../../domains/network/graph.js';
-import type { NetworkSnapshot } from '../../../domains/network/model.js';
+import type { NetworkServer, NetworkSnapshot } from '../../../domains/network/model.js';
 import type { RoutePlan } from '../../../domains/network/model.js';
-import { decryptFileType, isGenericEncryptedFileType, type JobOffer } from '../../../domains/jobs/model.js';
+import { decryptFileType, isGenericEncryptedFileType, isServerlessJob, type JobOffer } from '../../../domains/jobs/model.js';
 import type { GameError } from '../../../application/game/ports.js';
 import type { LoadoutService } from '../../../application/loadout/service.js';
 import type { NetworkSnapshotService } from '../../../application/network/snapshot-service.js';
@@ -9,6 +9,11 @@ import type { AutomationLogger } from '../../../application/automation/ports.js'
 import type { JobLockRegistry } from './job-locks.js';
 import { asServerId } from '../../../kernel/ids.js';
 import { err, ok, type Result } from '../../../kernel/result.js';
+
+/** A negative reachability result is only trusted on a map this recent. */
+const FRESH_SNAPSHOT_MS = 60_000;
+/** Throttle forced map refreshes triggered by a preflight block. */
+const TARGET_REFRESH_MS = 30_000;
 
 export interface JobAccessProbe {
     inspect(serverId: string): Promise<Result<{ readonly hasAccess: boolean; readonly defenceRate: number | null }, GameError>>;
@@ -25,14 +30,49 @@ export interface JobPreflightDeps {
     readonly now?: () => number;
 }
 
-function checkJobTarget(snapshot: NetworkSnapshot, job: JobOffer): Result<void, GameError> {
-    const targetId = job.serverId
-        ?? [...snapshot.servers.values()].find((server) => server.name === job.serverName)?.id
-        ?? null;
-    if (!targetId) {
-        return err({ code: 'SERVER_LOCKED', message: `Target server ${job.serverName ?? job.id} is not on the network map` });
+interface JobTarget {
+    /** Server id the job points at, after resolving a stale id through the name. */
+    readonly id: string | null;
+    readonly server: NetworkServer | null;
+    /** True when the job id was unknown to the map and the name resolved instead. */
+    readonly resolvedByName: boolean;
+}
+
+/**
+ * Resolve the job target against the map. The job id remains authoritative when
+ * the map knows it; a stale/config id falls back to the server name so an
+ * outdated row is not reported as unreachable.
+ */
+function resolveJobTarget(snapshot: NetworkSnapshot, job: JobOffer): JobTarget {
+    if (job.serverId) {
+        const server = snapshot.servers.get(asServerId(job.serverId)) ?? null;
+        if (server) return { id: job.serverId, server, resolvedByName: false };
     }
-    const target = asServerId(targetId);
+    const byName = job.serverName
+        ? [...snapshot.servers.values()].find((server) => server.name === job.serverName) ?? null
+        : null;
+    if (byName) {
+        return {
+            id: byName.id,
+            server: byName,
+            resolvedByName: job.serverId !== null && job.serverId !== byName.id,
+        };
+    }
+    return { id: job.serverId, server: null, resolvedByName: false };
+}
+
+function checkJobTarget(snapshot: NetworkSnapshot, job: JobOffer): Result<void, GameError> {
+    const resolved = resolveJobTarget(snapshot, job);
+    if (!resolved.id) {
+        return err({ code: 'SERVER_LOCKED', message: `Target server ${job.serverName ?? job.id} is missing from the network map` });
+    }
+    if (!resolved.server) {
+        return err({ code: 'SERVER_LOCKED', message: `Target server ${job.serverName ?? resolved.id} is missing from the network map` });
+    }
+    if (resolved.server.discovered === false) {
+        return err({ code: 'SERVER_LOCKED', message: `Target server ${resolved.server.name} has not been discovered` });
+    }
+    const target = asServerId(resolved.id);
     const start = snapshot.endpointId ?? snapshot.homeId;
     const graph = new NetworkGraph(snapshot);
     if (start === target) {
@@ -68,12 +108,6 @@ function jobRequiresDecrypt(job: JobOffer): boolean {
     if (job.type === 'File Decryption' || job.type === 'Decrypt & Extract') return true;
     return (job.conditions ?? []).some((condition) =>
         condition.type === 'DecryptFile' || condition.type === 'DecryptDownloadedFile');
-}
-
-function targetServerId(snapshot: NetworkSnapshot, job: JobOffer) {
-    return job.serverId
-        ?? [...snapshot.servers.values()].find((server) => server.name === job.serverName)?.id
-        ?? null;
 }
 
 function lockMessage(expiresAt: number, now: number): string {
@@ -170,7 +204,8 @@ export class JobPreflight {
             }
         }
 
-        const targetId = snapshot ? targetServerId(snapshot, job) : null;
+        const resolvedTarget = snapshot ? resolveJobTarget(snapshot, job) : null;
+        const targetId = resolvedTarget?.id ?? null;
         if (snapshot && targetId) {
             const graph = new NetworkGraph(snapshot);
             const target = asServerId(targetId);
@@ -220,7 +255,7 @@ export class JobPreflight {
             // the job would be taken and fail later at `set.endpoint`. Block it
             // before take only when a hack is required and the owned loadout
             // cannot reach the server's defence rate.
-            const targetServer = snapshot.servers.get(target);
+            const targetServer = resolvedTarget?.server ?? null;
             const probe = await this.inspectAccess(targetId);
             if (
                 targetServer
@@ -263,10 +298,12 @@ export class JobPreflight {
     }
 
     /**
-     * Check the live map before taking a job. Only a fresh maintenance block is
-     * treated as fatal: an unknown target or missing route is often just a stale or
-     * incomplete map snapshot, and v1 still attempted those jobs. Blocking them
-     * caused valid servers to be marked failed after GAME_MAP_FAILED refreshes.
+     * Check the live map before taking a job. Maintenance is always fatal;
+     * unreachable targets (missing from the map, undiscovered, or without a
+     * route) are fatal only on a fresh snapshot. A stale or incomplete map
+     * must not block a valid job: previously `GAME_MAP_FAILED` refreshes made
+     * the map disagree with the live server list and every target looked
+     * unreachable.
      */
     async preflight(job: JobOffer): Promise<Result<void, GameError>> {
         const first = await this.deps.snapshots.get();
@@ -277,23 +314,84 @@ export class JobPreflight {
             return jobRequiresDecrypt(job) ? this.checkCapability(null, job) : ok(undefined);
         }
         let snapshot = first.value;
-        let target = checkJobTarget(snapshot, job);
-        if (!target.ok && isMaintenancePreflightError(target.error.code)) {
-            const now = this.now();
-            const canRefresh = now - snapshot.capturedAt > 30_000
-                && now - this.lastMapRefreshAt >= 30_000;
-            if (canRefresh) {
-                this.lastMapRefreshAt = now;
-                const refreshed = await this.deps.snapshots.get(true);
-                if (refreshed.ok) {
-                    snapshot = refreshed.value;
-                    target = checkJobTarget(snapshot, job);
+        if (!isServerlessJob(job.type)) {
+            let target = checkJobTarget(snapshot, job);
+            if (!target.ok) {
+                const now = this.now();
+                const canRefresh = now - snapshot.capturedAt > TARGET_REFRESH_MS
+                    && now - this.lastMapRefreshAt >= TARGET_REFRESH_MS;
+                if (canRefresh) {
+                    this.lastMapRefreshAt = now;
+                    const refreshed = await this.deps.snapshots.get(true);
+                    if (refreshed.ok) {
+                        snapshot = refreshed.value;
+                        target = checkJobTarget(snapshot, job);
+                    }
                 }
             }
-            if (!target.ok && isMaintenancePreflightError(target.error.code)) return target;
+            if (!target.ok) {
+                if (isMaintenancePreflightError(target.error.code)) return target;
+                const diagnostics = this.targetDiagnostics(snapshot, job);
+                if (this.now() - snapshot.capturedAt <= FRESH_SNAPSHOT_MS) {
+                    this.deps.logger.warn('auto-job', `Skipping ${job.name}: target server is not available`, {
+                        jobId: job.id,
+                        code: target.error.code,
+                        message: target.error.message,
+                        ...diagnostics,
+                    });
+                    // Deliberately avoid maintenance/route/lock wording: the
+                    // outcome classifier turns those into endless retries,
+                    // while an unreachable target should be a skip for this run.
+                    return err({
+                        code: 'PREFLIGHT_FAILED',
+                        message: `Target server ${job.serverName ?? job.serverId ?? job.id} cannot be reached in this run`,
+                    });
+                }
+                this.deps.logger.debug('auto-job', `Target preflight kept permissive on a stale map for ${job.name}`, {
+                    jobId: job.id,
+                    code: target.error.code,
+                    message: target.error.message,
+                    mapAgeMs: this.now() - snapshot.capturedAt,
+                    ...diagnostics,
+                });
+            }
         }
 
         const capability = await this.checkCapability(snapshot, job);
         return capability.ok ? ok(undefined) : capability;
+    }
+
+    /** Diagnostics for a blocked/uncertain target decision; never throws. */
+    private targetDiagnostics(snapshot: NetworkSnapshot, job: JobOffer): Record<string, unknown> {
+        try {
+            const resolved = resolveJobTarget(snapshot, job);
+            const start = snapshot.endpointId ?? snapshot.homeId;
+            const graph = new NetworkGraph(snapshot);
+            const target = resolved.id ? asServerId(resolved.id) : null;
+            const fromCurrent = target ? graph.findRoutesFrom(start, target, 3) : null;
+            const fromHome = target && start !== snapshot.homeId ? graph.findRoutes(target, 3) : null;
+            return {
+                marketKey: job.marketKey,
+                serverId: job.serverId,
+                serverName: job.serverName,
+                resolvedId: resolved.id,
+                resolvedByName: resolved.resolvedByName,
+                inMap: resolved.server !== null,
+                discovered: resolved.server?.discovered ?? null,
+                accessible: resolved.server?.accessible ?? null,
+                reachableNow: resolved.server?.reachableNow ?? null,
+                endpointCapable: resolved.server?.endpointCapable ?? null,
+                mapAgeMs: this.now() - snapshot.capturedAt,
+                currentEndpoint: snapshot.endpointId,
+                routeFromCurrent: fromCurrent
+                    ? fromCurrent.ok ? fromCurrent.value.length : fromCurrent.error.code
+                    : 'skipped',
+                routeFromHome: fromHome
+                    ? fromHome.ok ? fromHome.value.length : fromHome.error.code
+                    : 'skipped',
+            };
+        } catch (error) {
+            return { diagnosticsError: error instanceof Error ? error.message : String(error) };
+        }
     }
 }

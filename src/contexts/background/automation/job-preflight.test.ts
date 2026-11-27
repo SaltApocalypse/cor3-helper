@@ -276,6 +276,57 @@ describe('JobPreflight', () => {
         expect(hackChecks).toBe(0);
     });
 
+
+    it('blocks a target that is missing from a fresh map', async () => {
+        const snap = snapshot([server(home, 'Home', { access: true })], []);
+        const result = await preflight(snap, async () => ok({ feasible: true, reason: null }))
+            .preflight(job({ serverId: 'ghost', serverName: 'D4RK T43274' }));
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+            expect(result.error.code).toBe('PREFLIGHT_FAILED');
+            expect(result.error.message).toContain('D4RK T43274');
+        }
+    });
+
+    it('blocks a target the map knows but cannot route to', async () => {
+        const snap = snapshot(
+            [server(home, 'Home', { access: true }), server(target, 'D4RK')],
+            [],
+        );
+        const result = await preflight(snap, async () => ok({ feasible: true, reason: null }))
+            .preflight(job());
+        expect(result.ok).toBe(false);
+        if (!result.ok) expect(result.error.message).toContain('cannot be reached in this run');
+    });
+
+    it('blocks a target the map reports as undiscovered', async () => {
+        const snap = snapshot(
+            [{ ...server(target, 'D4RK'), discovered: false }, server(home, 'Home', { access: true })],
+            [['home', 'target']],
+        );
+        const result = await preflight(snap, async () => ok({ feasible: true, reason: null }))
+            .preflight(job());
+        expect(result.ok).toBe(false);
+        if (!result.ok) expect(result.error.message).toContain('cannot be reached in this run');
+    });
+
+    it('keeps an unreachable target permissive when the map is stale', async () => {
+        const snap = { ...snapshot([server(home, 'Home', { access: true })], []), capturedAt: -120_000 };
+        const result = await preflight(snap, async () => ok({ feasible: true, reason: null }))
+            .preflight(job({ serverId: 'ghost', serverName: 'D4RK T43274' }));
+        expect(result.ok).toBe(true);
+    });
+
+    it('resolves a stale job id through the server name instead of blocking', async () => {
+        const snap = snapshot(
+            [server(home, 'Home', { access: true }), server(target, 'D4RK')],
+            [['home', 'target']],
+        );
+        const result = await preflight(snap, async () => ok({ feasible: true, reason: null }))
+            .preflight(job({ serverId: 'old-id', serverName: 'target' }));
+        expect(result.ok).toBe(true);
+    });
+
     it('does not block when the access probe is unavailable', async () => {
         const snap = snapshot(
             [server(home, 'Home', { access: true }), server(target, 'D4RK')],

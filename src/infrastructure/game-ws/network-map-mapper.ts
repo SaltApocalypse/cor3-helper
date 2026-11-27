@@ -41,6 +41,8 @@ export function mapRawNetworkToSnapshot(raw: RawNetworkMap, capturedAt = Date.no
             access: accessOf(server),
             endpointCapable: server.canSetEndpoint !== false,
             reachableNow: server.isReachable === true,
+            discovered: server.isDiscovered !== false,
+            accessible: server.isAccessible === true,
         };
         servers.set(id, mapped);
         if ((server.serverTypeName ?? '').toLowerCase() === 'home') homeId = id;

@@ -8,6 +8,8 @@ describe('classifyJobFailure', () => {
         expect(classifyJobFailure({ code: 'TYPE_DISABLED', message: 'Job type disabled' }).status).toBe('skipped');
         expect(classifyJobFailure({ code: 'NO_SERVER', message: 'No target server' }).status).toBe('skipped');
         expect(classifyJobFailure({ code: 'LOADOUT_NO_PLAN', message: 'NO_SOFTWARE' }).status).toBe('skipped');
+        // Unreachable target: the job was never taken, so it is a skip, not a retry.
+        expect(classifyJobFailure({ code: 'PREFLIGHT_FAILED', message: 'Target server D4RK T43274 cannot be reached in this run' }).status).toBe('skipped');
         expect(classifyJobFailure({ code: 'JOB_FAILED', detailCode: 'LOADOUT_NO_PLAN', message: 'NO_SOFTWARE' }).status).toBe('skipped');
     });
 

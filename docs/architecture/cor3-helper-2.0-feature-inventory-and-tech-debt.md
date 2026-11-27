@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-27 against build `2.0.11-salta.333`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (130 files / 1078 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-27 against build `2.0.11-salta.334`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (130 files / 1091 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.11-salta.333`)
+## Current completion snapshot (build `2.0.11-salta.334`)
 
 | Metric | Value |
 |---|---|
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 130 files / 1078 tests pass
-- `npm run build` — pass, `2.0.11-salta.333`
+- `npm test` — 130 files / 1091 tests pass
+- `npm run build` — pass, `2.0.11-salta.334`
 
 ---
 
@@ -1612,3 +1612,14 @@ Root causes and fixes recorded from real user logs (`B.log`, `C.log`, `A.log`) a
 - **UI:** left-aligned Overview credits, expedition fold headers with the info button next to the title and a full-row click target, the reordered divider, and the Founders Portal link.
 - **Toolbar:** an `action` context menu item under the built-in side panel entry opens the detached workspace and follows the UI language.
 - **Verification:** typecheck, lint, build and Vitest (130 files / 1078 tests) pass at build `2.0.11-salta.333`.
+
+---
+
+# Part 84 — Unreachable job targets and a retained debug log (2.0.11-salta.334)
+
+- **Preflight reachability:** `JobPreflight.preflight()` no longer ignores every non-maintenance target error. On a fresh map (`capturedAt` within 60 s) a job is skipped when its target is missing from the map, is reported as undiscovered, or has no route from the current endpoint or home. Maintenance still returns its retryable error. A stale map or a failed refresh keeps the old permissive behaviour so `GAME_MAP_FAILED` snapshots cannot reject valid jobs.
+- **Target resolution:** the job id stays authoritative, but when the map does not know it the server name resolves the target instead, so an outdated row is not reported as unreachable. The decision is logged with `inMap`/`discovered`/`accessible`/`reachableNow`/route results.
+- **Taken jobs:** `JobExecutionService` re-runs the preflight for jobs taken earlier (not claimable) before spending an attempt, so an impossible target becomes a skip instead of an endless retry loop. The block message avoids maintenance/lock wording, so `classifyJobFailure` reports `skipped` rather than `retry`.
+- **Map fields:** v1 parity for `isDiscovered`/`isAccessible` in the map contract, `NetworkServer` and the persisted snapshot.
+- **Log retention:** the background ring buffer grew from 500 to 6000 entries with a 4 MB byte budget and a 1.5 s persist debounce; per-run automation logs now persist to `chrome.storage.session` (`v2.runLogs`, six newest runs) so a service-worker restart no longer erases the run log; `devtools.logs` accepts up to 6000 lines and `automation.logs` up to 2000; Developer → Export writes the whole retained buffer instead of the 300 rendered lines.
+- **Verification:** typecheck, lint, build and Vitest (130 files / 1091 tests) pass at build `2.0.11-salta.334`.
