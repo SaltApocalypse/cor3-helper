@@ -141,7 +141,7 @@ export class AutoJobsCoordinator {
     private warnedMissingMarketSource = false;
     private bootstrapAt = 0;
     private lastAttemptAt = 0;
-    private pendingEnsure: { readonly reason: string; readonly tabIdHint?: number } | null = null;
+    private pendingEnsure: { readonly reason: string; readonly tabIdHint?: number; readonly forceAll?: boolean } | null = null;
     private autoFinish: AutoFinishPort | null = null;
     private dismisser: FailedJobDismisser | null = null;
     private readonly recoveryByMarket = new Map<string, { attempts: number; lastAttemptAt: number }>();
@@ -277,6 +277,17 @@ export class AutoJobsCoordinator {
 
     cancel(): void {
         this.cancelRequested = true;
+    }
+
+    /** Drop in-memory freshness after a page reload; the WS/cache is new. */
+    resetAfterPageReload(): void {
+        this.snapshot = null;
+        this.lastAttemptAt = 0;
+        this.bootstrapAt = 0;
+        this.pendingEnsure = null;
+        this.lastSkipReason = null;
+        this.lastError = null;
+        this.recoveryByMarket.clear();
     }
 
     publishSnapshot(update: AutoJobsSnapshot): void {
@@ -430,7 +441,7 @@ export class AutoJobsCoordinator {
         }
     }
 
-    async ensureInfo(reason: string, force = false, tabIdHint?: number): Promise<void> {
+    async ensureInfo(reason: string, force = false, tabIdHint?: number, forceAll = false): Promise<void> {
         const current = await this.deps.settings.get();
         if (current.helperMode) {
             this.lastSkipReason = 'helper-mode';
@@ -443,7 +454,11 @@ export class AutoJobsCoordinator {
         if (this.cycleRunning) {
             // Do not lose a trigger that arrives while a cycle is running.
             // Coalesce it and re-check freshness afterwards.
-            this.pendingEnsure = { reason, ...(tabIdHint !== undefined ? { tabIdHint } : {}) };
+            this.pendingEnsure = {
+                reason,
+                ...(tabIdHint !== undefined ? { tabIdHint } : {}),
+                ...(forceAll ? { forceAll } : {}),
+            };
             this.lastSkipReason = 'cycle-running';
             return;
         }
@@ -458,13 +473,14 @@ export class AutoJobsCoordinator {
         }
         const now = this.deps.clock.now();
         const manual = reason === 'manual-enable';
-        // Manual enable is a user request and always refreshes every market.
-        // Everything else only refreshes markets whose data is older than
-        // their TTL; a recent game push therefore makes the pass a no-op.
+        // Full refreshes are reserved for explicit runs and recovery paths
+        // (for example after a page reload). Ordinary scheduled/ready passes
+        // keep the per-market TTL so we do not hammer every market every time.
+        const fullRefresh = manual || forceAll === true;
         // The selection detail is logged every cycle so a starved market is
         // diagnosable from an exported log (HOME skip reports). The stale-jobs
         // watchdog forces a market that has not been observed for too long.
-        const selection = manual ? undefined : this.marketSelection(now, current.autoJobsIntervalMinutes);
+        const selection = fullRefresh ? undefined : this.marketSelection(now, current.autoJobsIntervalMinutes);
         const targets = selection?.targets;
         if (selection) {
             this.deps.logger.debug('auto-jobs', 'Auto Jobs market selection', {
@@ -482,14 +498,14 @@ export class AutoJobsCoordinator {
                 });
             }
         }
-        if (!manual && targets !== undefined && targets.length === 0) {
+        if (!fullRefresh && targets !== undefined && targets.length === 0) {
             this.lastSkipReason = 'snapshot-fresh';
             // A one-shot reset alarm must still schedule the next wake-up even
             // when a recent push already made the snapshot fresh.
             if (reason === 'scheduled') await this.scheduleNextRefresh();
             return;
         }
-        if (!manual && reason !== 'scheduled' && this.snapshot && now - this.lastAttemptAt < AUTO_JOBS_MIN_INTERVAL_MS) {
+        if (!fullRefresh && reason !== 'scheduled' && this.snapshot && now - this.lastAttemptAt < AUTO_JOBS_MIN_INTERVAL_MS) {
             this.lastSkipReason = 'recently-refreshed';
             if (reason === 'scheduled') await this.scheduleNextRefresh();
             return;
@@ -507,7 +523,7 @@ export class AutoJobsCoordinator {
             const result = await this.runCycle(
                 `auto-jobs-${reason}:${tabId}`,
                 reason,
-                current.autoFinishEnabled || force ? 50 : 35,
+                forceAll ? 80 : current.autoFinishEnabled || force ? 50 : 35,
                 tabId,
                 targets,
             );
@@ -521,7 +537,7 @@ export class AutoJobsCoordinator {
             if (pending) {
                 // Re-enter once; the freshness check makes this a no-op when
                 // the cycle that just finished already refreshed the market.
-                void this.ensureInfo(pending.reason, true, pending.tabIdHint);
+                void this.ensureInfo(pending.reason, true, pending.tabIdHint, pending.forceAll === true);
             }
         }
     }

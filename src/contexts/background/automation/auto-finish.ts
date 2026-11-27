@@ -462,11 +462,10 @@ export class AutoFinishCoordinator {
             return { ok: true as const, value: finished };
         });
         if (!result.ok) return { ok: false, error: { code: result.error?.code ?? 'AUTO_FINISH_FAILED', message: result.error?.message ?? 'Auto Finish failed' } };
-        const value = result.value as unknown;
-        if (!value || typeof value !== 'object' || !('ok' in value)) {
-            return { ok: false, error: { code: 'AUTO_FINISH_FAILED', message: 'Auto Finish returned no result' } };
-        }
-        return value as { readonly ok: true; readonly value: AutoFinishRunResult } | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } };
+        // `networkOps.enqueue` already returns the callback's Result. Do not
+        // unwrap `result.value` again: doing so made every successful run look
+        // like "Auto Finish returned no result".
+        return result as { readonly ok: true; readonly value: AutoFinishRunResult };
     }
 
     async run(

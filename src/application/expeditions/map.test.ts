@@ -33,6 +33,13 @@ describe('expedition mapping', () => {
         expect(overview.active).toHaveLength(1);
     });
 
+    it('maps the paid container timestamp so already collected rows can be filtered', () => {
+        const overview = mapExpeditionOverview({
+            expeditions: [{ ...expedition, status: 'COMPLETED', containerOpenedAt: '2026-11-27T10:00:00.000Z' }],
+        }, {}, {}, {});
+        expect(overview.active[0]?.containerOpenedAt).toBe('2026-11-27T10:00:00.000Z');
+    });
+
     it('surfaces an in-progress archived expedition when active is empty', () => {
         const overview = mapExpeditionOverview({}, { expeditions: [expedition] }, {}, {});
         expect(overview.active).toHaveLength(1);

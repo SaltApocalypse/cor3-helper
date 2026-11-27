@@ -70,6 +70,7 @@ function mapExpedition(raw: unknown): ActiveExpedition | null {
         endsAt: typeof entry.endsAt === 'string'
             ? entry.endsAt
             : typeof entry.endTime === 'string' ? entry.endTime : null,
+        containerOpenedAt: typeof entry.containerOpenedAt === 'string' ? entry.containerOpenedAt : null,
     };
 }
 
@@ -231,6 +232,7 @@ export function mapExpeditionOverview(
             lootScore: null,
             hasInsurance: null,
             endsAt: null,
+            containerOpenedAt: null,
         });
     }
     return {

@@ -21,7 +21,7 @@ export interface ReadinessDeps {
         readonly helperMode: boolean;
     }) => Promise<void>;
     /** Called when a game tab becomes ready; loadout/inventory may have changed. */
-    readonly onReady?: () => void;
+    readonly onReady?: (tabId: number) => void;
 }
 
 /** Sole owner of per-tab game readiness and duplicate ready notices. */
@@ -46,7 +46,7 @@ export class ReadinessRegistry {
         const key = `${tabId}:${readiness.readyAt}`;
         if (this.autoReadyKeys.has(key)) return;
         this.autoReadyKeys.add(key);
-        this.deps.onReady?.();
+        this.deps.onReady?.(tabId);
         void this.deps.settings.get().then(this.deps.syncAutoSolvers);
         while (this.autoReadyKeys.size > 50) {
             const oldest = this.autoReadyKeys.values().next().value;

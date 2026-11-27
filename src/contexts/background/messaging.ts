@@ -39,6 +39,15 @@ export function registerMessaging(core: CoreRuntime, automation: AutomationRunti
             }
             return false;
         }
+        if (type === 'V2_MINIGAME_STUCK') {
+            const kind = (message as { kind?: unknown }).kind;
+            const reason = (message as { reason?: unknown }).reason;
+            const detail = typeof reason === 'string' && reason.length > 0
+                ? reason
+                : 'minigame room stopped responding';
+            void automation.pageReload.request(detail, typeof kind === 'string' ? kind : null);
+            return false;
+        }
         if (type === 'V2_WS_NOTICE') {
             const level = (message as { level?: unknown }).level;
             const text = (message as { message?: unknown }).message;

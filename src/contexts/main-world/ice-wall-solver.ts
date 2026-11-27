@@ -32,6 +32,28 @@ function targetPreview(): Element | null {
     return document.querySelector('[data-component-name="TargetPreview"]');
 }
 
+let lastStuckReportAt = 0;
+
+function reportIceWallStuck(reason: string): void {
+    const now = Date.now();
+    if (now - lastStuckReportAt < 30_000) return;
+    lastStuckReportAt = now;
+    try {
+        window.postMessage({ version: 2, type: 'V2_MINIGAME_STUCK', kind: 'ice-wall', reason }, '*');
+    } catch {
+        // The game page may be tearing down.
+    }
+}
+
+function iceWallAwaitingSecureChannel(): boolean {
+    const app = iceWallApp();
+    if (!app) return false;
+    const emptyStage = app.querySelector('[data-component-name="EmptyStage"]')
+        ?? app.querySelector('[data-sentry-component="EmptyStage"]');
+    if (!emptyStage) return false;
+    return (emptyStage.textContent ?? '').includes('Awaiting secure channel');
+}
+
 function normalizeCoords(value: string): string {
     return value.replace(/-?\d+(\.\d+)?/g, (match) => String(Math.round(Number(match))));
 }
@@ -153,8 +175,9 @@ function roundCounts(): { completed: number; total: number } | null {
     if (!counter) return null;
     const spans = counter.querySelectorAll('span');
     if (spans.length < 2) return null;
-    const completed = Number(spans[0]?.textContent ?? '');
+    const completedMatch = (spans[0]?.textContent ?? '').match(/\d+/);
     const totalMatch = (spans[1]?.textContent ?? '').match(/\d+/);
+    const completed = completedMatch?.[0] ? Number(completedMatch[0]) : NaN;
     const total = totalMatch?.[0] ? Number(totalMatch[0]) : NaN;
     return Number.isNaN(completed) || Number.isNaN(total) ? null : { completed, total };
 }
@@ -163,9 +186,10 @@ async function waitForUniqueCandidate(
     pattern: IceTargetPattern,
     invalid: ReadonlySet<string>,
     isAborted: () => boolean,
+    deadline: number,
 ): Promise<Map<string, IceCell> | null> {
     const started = Date.now();
-    while (Date.now() - started < 45_000) {
+    while (Date.now() - started < 45_000 && Date.now() < deadline) {
         if (isAborted()) return null;
         if (!wallBoard() || !iceWallApp()) return null;
         const cellMap = buildCellMap();
@@ -178,6 +202,7 @@ async function waitForUniqueCandidate(
         }
         await sleep(150);
     }
+    if (Date.now() >= deadline) return null;
     const finalMap = buildCellMap();
     return findIcePossiblePositions(finalMap.values(), pattern, invalid).length <= 5 ? finalMap : null;
 }
@@ -192,9 +217,9 @@ async function waitForAdvance(previousSignature: string): Promise<boolean> {
     return false;
 }
 
-async function waitForNextRound(completedBefore: number, isAborted: () => boolean): Promise<boolean> {
+async function waitForNextRound(completedBefore: number, isAborted: () => boolean, deadline: number): Promise<boolean> {
     const started = Date.now();
-    while (Date.now() - started < 10_000) {
+    while (Date.now() - started < 10_000 && Date.now() < deadline) {
         if (isAborted() || !iceWallApp()) return false;
         const counts = roundCounts();
         if (counts && Number.isFinite(counts.total) && counts.completed >= counts.total) return false;
@@ -204,12 +229,12 @@ async function waitForNextRound(completedBefore: number, isAborted: () => boolea
     return false;
 }
 
-async function runRound(pattern: IceTargetPattern, isAborted: () => boolean): Promise<boolean> {
+async function runRound(pattern: IceTargetPattern, isAborted: () => boolean, deadline: number): Promise<boolean> {
     const invalid = new Set<string>();
     let current = pattern;
     for (let falsePositives = 0; falsePositives < 8; falsePositives++) {
-        if (isAborted() || !iceWallApp()) return false;
-        const cellMap = await waitForUniqueCandidate(current, invalid, isAborted);
+        if (isAborted() || !iceWallApp() || Date.now() >= deadline) return false;
+        const cellMap = await waitForUniqueCandidate(current, invalid, isAborted, deadline);
         if (!cellMap) return false;
         const candidates = findIceCandidates(cellMap.values(), current, invalid);
         const possible = findIcePossiblePositions(cellMap.values(), current, invalid);
@@ -227,11 +252,32 @@ async function runRound(pattern: IceTargetPattern, isAborted: () => boolean): Pr
     return false;
 }
 
-export async function solveIceWall(isAborted: () => boolean): Promise<MinigameResult> {
+export async function solveIceWall(isAborted: () => boolean, deadline = Number.POSITIVE_INFINITY): Promise<MinigameResult> {
     if (!iceWallApp()) return { kind: 'ice-wall', solved: false, message: 'ICE Wall app not found' };
     let roundsCompleted = 0;
     let total = roundCounts()?.total ?? null;
-    while (!isAborted() && iceWallApp() && roundsCompleted < 20) {
+    let stuckSince: number | null = null;
+    let loadingSince: number | null = null;
+    while (!isAborted() && iceWallApp() && roundsCompleted < 20 && Date.now() < deadline) {
+        const now = Date.now();
+        if (iceWallAwaitingSecureChannel()) {
+            stuckSince ??= now;
+            if (now - stuckSince >= 10_000) {
+                reportIceWallStuck('awaiting secure channel');
+                return { kind: 'ice-wall', solved: false, message: 'ICE Wall stuck on Awaiting secure channel' };
+            }
+        } else {
+            stuckSince = null;
+        }
+        if (!wallBoard()) {
+            loadingSince ??= now;
+            if (now - loadingSince >= 20_000) {
+                reportIceWallStuck('wall board did not render');
+                return { kind: 'ice-wall', solved: false, message: 'ICE Wall board did not render' };
+            }
+        } else {
+            loadingSince = null;
+        }
         const counts = roundCounts();
         if (counts && Number.isFinite(counts.total)) total = counts.total;
         if (total !== null && roundsCompleted >= total) break;
@@ -241,15 +287,25 @@ export async function solveIceWall(isAborted: () => boolean): Promise<MinigameRe
             continue;
         }
         const before = counts?.completed ?? roundsCompleted;
-        const advanced = await runRound(pattern, isAborted);
+        const advanced = await runRound(pattern, isAborted, deadline);
         if (!advanced) break;
         roundsCompleted++;
         if (total !== null && roundsCompleted >= total) break;
-        if (!(await waitForNextRound(before, isAborted))) break;
+        if (!(await waitForNextRound(before, isAborted, deadline))) break;
     }
+    // Fail closed when the round counter is unavailable. Returning success
+    // after the first layer is exactly what leaves a 3-layer ICE Wall open and
+    // triggers the server's 20-minute minigame lock.
+    const solved = total !== null && roundsCompleted >= total;
     return {
         kind: 'ice-wall',
-        solved: roundsCompleted > 0 && (total === null || roundsCompleted >= total),
-        ...(roundsCompleted === 0 ? { message: 'No ICE Wall round completed' } : {}),
+        solved,
+        ...(!solved
+            ? {
+                message: roundsCompleted === 0
+                    ? 'No ICE Wall round completed'
+                    : `ICE Wall incomplete (${roundsCompleted}/${total ?? '?'} rounds)`,
+            }
+            : {}),
     };
 }

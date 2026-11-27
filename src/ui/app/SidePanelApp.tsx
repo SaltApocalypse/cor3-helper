@@ -170,6 +170,7 @@ export function SidePanelApp({ portal, windowMode = false }: SidePanelAppProps) 
     usePortalEvents(portal, {
         activePage,
         reloadSettings: settings.loadSettings,
+        reloadAuth: settings.loadAuth,
         reloadNetwork: network.loadNetwork,
         reloadAutoFinish: autoFinish.loadAutoFinish,
         reloadDebugLogs: debug.loadDebugLogs,

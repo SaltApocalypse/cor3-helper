@@ -63,6 +63,7 @@ export interface ActiveExpedition {
     readonly lootScore: number | null;
     readonly hasInsurance: boolean | null;
     readonly endsAt: string | null;
+    readonly containerOpenedAt: string | null;
 }
 
 export interface ExpeditionOverview {

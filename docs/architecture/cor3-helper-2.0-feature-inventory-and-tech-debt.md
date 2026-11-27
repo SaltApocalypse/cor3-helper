@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-25 against build `2.0.10-salta.315`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (122 files / 1024 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-25 against build `2.0.10-salta.317`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (123 files / 1033 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.10-salta.315`)
+## Current completion snapshot (build `2.0.10-salta.317`)
 
 | Metric | Value |
 |---|---|
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 122 files / 1024 tests pass
-- `npm run build` — pass, `2.0.10-salta.315`
+- `npm test` — 123 files / 1033 tests pass
+- `npm run build` — pass, `2.0.10-salta.317`
 
 ---
 
@@ -1494,3 +1494,26 @@ Root causes and fixes recorded from real user logs (`B.log`, `C.log`, `A.log`) a
 - HACK loadout recovery also recognizes `sai-hack-not-available` and hack/access text, not only `sai-no-hack-software` / `sai-hack-impossible`.
 - `maximize` was replaced by a requirement mode: `none` (keep current), `known` (hard threshold), `unknown` (strongest attainable). Decrypt passes the observed current power and `unknown` instead of `current + 1`; HACK uses `known` when a defence rate exists, otherwise `unknown`.
 - Verification: 122 files / 1024 tests, including new preflight access-block/allow/probe-failure cases, route access recovery, `sai-hack-not-available`, unknown-requirement planning and empty-defence-rate planning.
+
+---
+
+# Part 73 — Automation timeout classification and ICE Wall recovery (2.0.10-salta.316)
+
+- **Completion barrier:** `lifecycleStatusForFailure()` no longer persists pre-Complete timeouts as `unknown`. Only a Complete-stage timeout or an explicit `unconfirmed` result may create the durable completion barrier. Decrypt/minigame timeouts stay `waiting-minigame`; route timeouts stay `blocked`; take timeouts stay retryable. This prevents a failed minigame from skipping the job until the next market reset.
+- **Minigame sessions:** `solveMinigame()` now waits briefly for a background auto-solver session to finish instead of returning a misleading "another minigame run is already active" immediately. Solver attempts have a hard deadline, and `solveSimpleDecrypt` / `solveConfigHack` / `solveIceWall` receive that deadline. A bridge-level solve error explicitly cancels the main-world session.
+- **ICE Wall:** the round counter is parsed more defensively; one completed layer is no longer treated as success when the total is unknown. The solver fails closed with `ICE Wall incomplete (N/?)` instead of leaving the minigame open.
+- **Auto Expedition:** `containerOpenedAt` is mapped and already-collected expeditions are excluded from ready payments; `Expedition already fully collected` is treated as paid instead of a blocking failure. The credit floor is checked at cycle start as well as before launch. User cancellation, configure failure, price-cap rejection, no available mercenary, and generic launch failure now disable Auto Expedition.
+- **Job tag:** a non-claimable `unknown` tag now explains that the previous completion result was unconfirmed.
+- **Verification:** typecheck, lint, build and Vitest (122 files / 1028 tests) pass at build `2.0.10-salta.316`.
+
+---
+
+# Part 74 — Safe game-tab reload for stuck minigames (2.0.10-salta.317)
+
+- **Stuck detection:** the ICE Wall solver detects the `EmptyStage` “Awaiting secure channel” state for 10 seconds and the missing `WallBoard` state for 20 seconds. Simple decrypt reports a missing decrypt button after 10 seconds; Terminal Hack reports missing fields after 15 seconds. Detections are posted as `V2_MINIGAME_STUCK` and forwarded by the content script.
+- **Reload coordinator:** background `PageReloadCoordinator` is enabled by default for automation runs. It only reloads when Auto Jobs or Auto Finish is running, Helper Mode is off, the tab is a cor3 tab, and the ten-minute window has fewer than two attempts. It cancels the active Auto Jobs/Finish work, persists a reload marker, and reloads via `chrome.tabs.reload`.
+- **Resume:** after the reloaded page reports readiness, the stale Auto Jobs snapshot is discarded and a full `reload-ready` refresh is requested. If only Auto Finish is enabled, it runs with `forceRefresh: true`. Other automation requests fail transiently during the reload and are retried by their readiness/alarm paths.
+- **Automatic auth recovery:** `game.readiness ready` now reloads auth/settings/network in the UI, so the header no longer stays on “needs refresh” after a page reload.
+- **Force semantics:** `AutoJobsCoordinator.ensureInfo()` gained a `forceAll` path that ignores per-market TTL and the minimum refresh interval; it is used by reload recovery. Manual runs keep their existing full-refresh semantics, while ordinary scheduled/ready runs keep the TTL.
+- **Auto Finish result contract:** `runExclusive()` now returns the network queue result directly. This removes the false `Auto Finish returned no result` warning after a successful retry/force run.
+- **Verification:** typecheck, lint, build and Vitest (123 files / 1033 tests) pass at build `2.0.10-salta.317`.

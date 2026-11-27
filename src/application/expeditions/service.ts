@@ -252,8 +252,18 @@ export class ExpeditionService {
         let opened = 0;
         for (const expedition of ready.value) {
             const result = await this.expeditions.openContainer(expedition.id);
-            if (result.ok) opened++;
-            else failed.push({ expeditionId: expedition.id, message: result.error.message });
+            if (result.ok) {
+                opened++;
+                continue;
+            }
+            // The game can keep a COMPLETED expedition visible after its
+            // container was already collected. Treat that as paid instead of
+            // blocking every later cycle on the same row.
+            if (/already.*(?:fully\s+)?collected/i.test(result.error.message)) {
+                opened++;
+                continue;
+            }
+            failed.push({ expeditionId: expedition.id, message: result.error.message });
         }
         return ok({ ready: ready.value.length, opened, failed });
     }
@@ -261,7 +271,8 @@ export class ExpeditionService {
     async readyExpeditions(marketId: string): Promise<Result<readonly ActiveExpedition[], { readonly code: string; readonly message: string }>> {
         const overview = await this.overview(marketId, { includeMercenaries: false, includeConfig: false });
         if (!overview.ok) return overview;
-        return ok([...overview.value.active, ...overview.value.archived].filter(isExpeditionReady));
+        return ok([...overview.value.active, ...overview.value.archived]
+            .filter((entry) => isExpeditionReady(entry) && entry.containerOpenedAt === null));
     }
 
     async openContainer(expeditionId: string): Promise<Result<void, { readonly code: string; readonly message: string }>> {

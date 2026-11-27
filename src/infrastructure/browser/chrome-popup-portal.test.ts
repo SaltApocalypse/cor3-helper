@@ -64,6 +64,7 @@ describe('portal response schemas', () => {
             active: [{
                 id: 'exp-1', status: 'IN_PROGRESS', locationName: 'Skylift Remains',
                 mercenaryName: 'Nova', totalCost: 100, riskScore: 20, lootScore: 30, hasInsurance: false, endsAt: null,
+                containerOpenedAt: null,
             }],
             archived: [],
             mercenaries: [{

@@ -122,6 +122,9 @@ export class AutoExpeditionCoordinator {
             this.state.preparationCancelled = true;
             this.deps.logger.info('auto-expedition', 'Expedition preparation cancellation requested');
         }
+        // Cancelling the preparation is a user decision to stop the automation,
+        // not just to skip the current launch.
+        void this.disable();
     }
 
     /** Helper Mode / disable cancels the preparation window even before it starts. */

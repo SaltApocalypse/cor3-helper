@@ -12,7 +12,7 @@ import { MemoryStorageArea } from '../../../infrastructure/storage/storage-area.
 const resetAt = '2026-11-20T11:00:00.000Z';
 
 function makeCoordinator(options: { readonly failingCompletionRead?: boolean; readonly failingClear?: boolean } = {}) {
-    const settings = settingsV1Schema.parse({ autoFinishEnabled: true });
+    const settings = settingsV1Schema.parse({ helperMode: false, autoFinishEnabled: true });
     const legacy = {
         get: vi.fn(async () => ({ last: null, completedResets: { home: resetAt }, completedJobs: { legacy: resetAt } })),
         set: vi.fn(async () => undefined),
@@ -288,5 +288,28 @@ describe('AutoFinish status storage health', () => {
         expect(made.coordinator.completionStateStatus()).toBe('loaded');
         expect(made.coordinator.completedJobsByMarketSnapshot()).toEqual({ byMarket: {} });
         expect((await made.coordinator.status()).completionStateStatus).toBe('loaded');
+    });
+});
+
+describe('AutoFinish runExclusive result contract', () => {
+    it('returns the successful run result instead of a no-result error', async () => {
+        const { coordinator, deps } = makeCoordinator();
+        const finished = {
+            jobs: 1,
+            done: 1,
+            retry: 0,
+            skipped: 0,
+            expired: 0,
+            failed: 0,
+            stopped: false,
+            markets: [],
+            failures: [],
+        };
+        vi.spyOn(coordinator, 'run').mockResolvedValue(finished);
+        (deps.networkOps.enqueue as unknown as {
+            mockImplementation: (implementation: (request: unknown, run: () => Promise<unknown>) => Promise<unknown>) => void;
+        }).mockImplementation(async (_request, run) => run());
+        const result = await coordinator.runExclusive('test');
+        expect(result).toEqual({ ok: true, value: finished });
     });
 });

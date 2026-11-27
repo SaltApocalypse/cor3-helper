@@ -12,9 +12,21 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 
 interface MinigameSession { abort: boolean; }
 let activeSession: MinigameSession | null = null;
+let lastStuckReportAt = 0;
+
+function reportMinigameStuck(kind: string, reason: string): void {
+    const now = Date.now();
+    if (now - lastStuckReportAt < 30_000) return;
+    lastStuckReportAt = now;
+    try {
+        window.postMessage({ version: 2, type: 'V2_MINIGAME_STUCK', kind, reason }, '*');
+    } catch {
+        // The game page may be tearing down.
+    }
+}
 
 function simpleDecryptApp(): Element | null {
-    return document.querySelector('[data-component-name="SimpleDecryptApplication"], [data-sentry-component="SimpleDecryptApplication"], [data-component-name="SimpleDecryptionApplication"], [data-sentry-component="SimpleDecryptionApplication"]');
+    return document.querySelector('[data-component-name="SimpleDecryptApplication"], [data-sentry-component="SimpleDecryptApplication"], [data-component-name="SimpleDecryptionApplication"], [data-sentry-component="SimpleDecryptionApplication"], [data-component-name="DecryptionApplication"], [data-sentry-component="DecryptionApplication"]');
 }
 
 function configHackApp(): Element | null {
@@ -38,14 +50,23 @@ function progressPercent(): number | null {
     return match?.[1] ? Number(match[1]) : null;
 }
 
-async function solveSimpleDecrypt(session: MinigameSession): Promise<MinigameResult> {
+async function solveSimpleDecrypt(session: MinigameSession, deadline: number): Promise<MinigameResult> {
     await sleep(500);
     if (session.abort) return { kind: 'simple-decrypt', solved: false, message: 'aborted' };
-    const button = decryptButton();
-    if (!button) return { kind: 'simple-decrypt', solved: false, message: 'decrypt button not found' };
+    let button = decryptButton();
+    const buttonWaitStarted = Date.now();
+    while (!button && Date.now() - buttonWaitStarted < 10_000 && Date.now() < deadline) {
+        if (session.abort) return { kind: 'simple-decrypt', solved: false, message: 'aborted' };
+        await sleep(250);
+        button = decryptButton();
+    }
+    if (!button) {
+        reportMinigameStuck('simple-decrypt', 'decrypt button did not render');
+        return { kind: 'simple-decrypt', solved: false, message: 'decrypt button not found' };
+    }
     button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     const started = Date.now();
-    while (Date.now() - started < 120_000) {
+    while (Date.now() - started < 120_000 && Date.now() < deadline) {
         if (session.abort) return { kind: 'simple-decrypt', solved: false, message: 'aborted' };
         if (!simpleDecryptApp()) return { kind: 'simple-decrypt', solved: true };
         if ((progressPercent() ?? 0) >= 100) {
@@ -54,7 +75,7 @@ async function solveSimpleDecrypt(session: MinigameSession): Promise<MinigameRes
         }
         await sleep(500);
     }
-    return { kind: 'simple-decrypt', solved: false, message: 'timed out' };
+    return { kind: 'simple-decrypt', solved: false, message: session.abort ? 'aborted' : 'timed out' };
 }
 
 function dispatchKey(element: Element, key: string, keyCode: number, count = 1): void {
@@ -143,13 +164,13 @@ function configHackReady(): boolean {
     return lines.some((line) => line.startsWith('Attempts:'));
 }
 
-async function waitForResponse(combo: string, session: MinigameSession, timeout = 8000): Promise<number | null> {
+async function waitForResponse(combo: string, session: MinigameSession, deadline: number, timeout = 8000): Promise<number | null> {
     const pattern = new RegExp(
         `Input:\\s*${escapeRegExp(combo)}\\s*(?:\\r?\\n)+Result:\\s*(?:\\r?\\n)+Mismatched\\s*:?\\s*(\\d+)`,
         'i',
     );
     const started = Date.now();
-    while (Date.now() - started < timeout) {
+    while (Date.now() - started < timeout && Date.now() < deadline) {
         if (session.abort || !configHackApp()) return null;
         const match = logLines().join('\n').match(pattern);
         if (match?.[1]) return Number(match[1]);
@@ -252,7 +273,7 @@ function bestGuess(solver: MastermindSolver, possibilities: readonly number[], p
     return result;
 }
 
-async function solveConfigHack(session: MinigameSession): Promise<MinigameResult> {
+async function solveConfigHack(session: MinigameSession, deadline: number): Promise<MinigameResult> {
     const fields = detectFields(logLines());
     if (fields.length === 0) return { kind: 'config-hack', solved: false, message: 'could not detect fields' };
     if (!configHackApp()) return { kind: 'config-hack', solved: false, message: 'hack container not found' };
@@ -261,13 +282,14 @@ async function solveConfigHack(session: MinigameSession): Promise<MinigameResult
     let guessNumber = 0;
     while (possibilities.length > 0) {
         if (session.abort) return { kind: 'config-hack', solved: false, message: 'aborted' };
+        if (Date.now() >= deadline) return { kind: 'config-hack', solved: false, message: 'timed out' };
         const best = bestGuess(solver, possibilities);
         const guess = solver.guesses[best.guess];
         if (!guess) return { kind: 'config-hack', solved: false, message: 'solver produced no guess' };
         const combo = buildCombo(guess, fields);
         const submitted = await submitGuess(fields, guess);
         if (!submitted) return { kind: 'config-hack', solved: false, message: 'failed to submit guess' };
-        const mismatch = await waitForResponse(combo, session);
+        const mismatch = await waitForResponse(combo, session, deadline);
         guessNumber++;
         if (mismatch === null) return { kind: 'config-hack', solved: false, message: `no response for guess ${guessNumber}` };
         if (mismatch === 0) {
@@ -298,27 +320,44 @@ export async function solveMinigame(
     timeoutMs = 180_000,
     allowed: ReadonlySet<MinigameKind> = new Set(['simple-decrypt', 'config-hack', 'ice-wall']),
 ): Promise<MinigameResult> {
+    if (activeSession) {
+        // A background auto-solver tick may already own the minigame. Give it a
+        // bounded chance to finish instead of failing the job instantly with a
+        // misleading "another minigame run is already active" timeout.
+        const waitUntil = Date.now() + Math.min(timeoutMs, 20_000);
+        while (activeSession && Date.now() < waitUntil) await sleep(100);
+    }
     if (activeSession) return { kind: 'none', solved: false, message: 'another minigame run is already active' };
     const session: MinigameSession = { abort: false };
     activeSession = session;
     try {
         const started = Date.now();
+        let configHackStuckSince: number | null = null;
         while (Date.now() - started < timeoutMs) {
             if (session.abort) return { kind: 'none', solved: false, message: 'aborted' };
             const detected = detectMinigameKind();
+            if (detected === 'config-hack' && !configHackReady()) {
+                configHackStuckSince ??= Date.now();
+                if (Date.now() - configHackStuckSince >= 15_000) {
+                    reportMinigameStuck('config-hack', 'terminal hack did not render its fields');
+                    return { kind: 'config-hack', solved: false, message: 'terminal hack stuck' };
+                }
+            } else {
+                configHackStuckSince = null;
+            }
             if (detected !== null && !allowed.has(detected)) {
                 // Stop immediately instead of waiting for the timeout. The
                 // caller can report a capability/configuration problem rather
                 // than treating it as a failed or locked minigame.
                 return { kind: detected, solved: false, message: `solver disabled for ${detected}` };
             }
-            if (simpleDecryptApp() && allowed.has('simple-decrypt')) return await solveSimpleDecrypt(session);
+            if (simpleDecryptApp() && allowed.has('simple-decrypt')) return await solveSimpleDecrypt(session, started + timeoutMs);
             if (configHackApp() && allowed.has('config-hack')) {
-                if (configHackReady()) return await solveConfigHack(session);
+                if (configHackReady()) return await solveConfigHack(session, started + timeoutMs);
                 await sleep(250);
                 continue;
             }
-            if (iceWallApp() && allowed.has('ice-wall')) return await solveIceWall(() => session.abort);
+            if (iceWallApp() && allowed.has('ice-wall')) return await solveIceWall(() => session.abort, started + timeoutMs);
             await sleep(250);
         }
         return { kind: 'none', solved: false, message: 'no minigame detected' };

@@ -83,6 +83,7 @@ export const rawExpeditionSchema = z.object({
     hasInsurance: z.boolean().nullable().optional(),
     endsAt: z.string().nullable().optional(),
     endTime: z.string().nullable().optional(),
+    containerOpenedAt: z.string().nullable().optional(),
     decision: z.unknown().optional(),
     messages: z.array(z.unknown()).nullable().optional(),
 }).passthrough();

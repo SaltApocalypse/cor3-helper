@@ -12,7 +12,7 @@ export function partitionExpeditions(overview: ExpeditionOverview | null): {
     const unique = [...new Map(all.map((entry) => [entry.id, entry])).values()];
     return {
         active: unique.filter((entry) => !isExpeditionReady(entry)),
-        completed: unique.filter(isExpeditionReady),
+        completed: unique.filter((entry) => isExpeditionReady(entry) && entry.containerOpenedAt === null),
     };
 }
 

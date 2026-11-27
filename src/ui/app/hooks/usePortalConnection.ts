@@ -55,6 +55,7 @@ export function usePortalConnection(portal: PopupPortal): PortalConnection {
 export interface PortalEventHandlers {
     readonly activePage: PopupPage;
     readonly reloadSettings: () => void | Promise<void>;
+    readonly reloadAuth: () => void | Promise<void>;
     readonly reloadNetwork: () => void | Promise<void>;
     readonly reloadAutoFinish: () => void | Promise<void>;
     readonly reloadDebugLogs: (silent?: boolean) => void | Promise<void>;
@@ -144,7 +145,18 @@ export function usePortalEvents(portal: PopupPortal, handlers: PortalEventHandle
             void current.reloadAutoExpedition();
             if (event.type === 'expeditions.auto.done') void current.reloadExpeditions();
         }
-        if (event.type === 'network.queue' || event.type === 'game.readiness') {
+        if (event.type === 'game.readiness') {
+            const payload = event.payload as { readiness?: { ready?: unknown } } | undefined;
+            if (payload?.readiness?.ready === true) {
+                // A page reload drops the main-world token and re-captures it.
+                // Refresh auth/settings automatically instead of leaving the
+                // header stuck on "needs refresh".
+                void current.reloadAuth();
+                void current.reloadSettings();
+            }
+            void current.reloadNetwork();
+        }
+        if (event.type === 'network.queue') {
             void current.reloadNetwork();
         }
         if (event.type === 'job.queue.progress') {

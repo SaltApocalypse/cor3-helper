@@ -26,11 +26,17 @@ export function lifecycleStatusForFailure(error: JobLifecycleFailure): JobLifecy
     if (error.lockExpiresAt !== undefined
         || error.code === 'MINIGAME_FAILED'
         || error.code === 'MINIGAME_DISABLED'
-        || MINIGAME_LOCK.test(text)) {
+        || MINIGAME_LOCK.test(text)
+        || (error.stage === 'minigame' && UNCONFIRMED_RESULT.test(text))) {
         return 'waiting-minigame';
     }
-    // A timeout or lost reply does not prove the remote mutation failed.
-    if (error.code === 'GAME_TIMEOUT' || UNCONFIRMED_RESULT.test(text)) return 'unknown';
+    // Only a Complete-stage timeout can leave the remote reward in an
+    // indeterminate state. Decrypt, minigame, route and take timeouts happen
+    // before Complete and must stay retryable; otherwise a transient minigame
+    // failure becomes a durable completion barrier that skips the job until the
+    // next reset.
+    const completionStage = error.stage === 'complete' || error.code === 'COMPLETE_FAILED';
+    if (completionStage && (error.code === 'GAME_TIMEOUT' || UNCONFIRMED_RESULT.test(text))) return 'unknown';
     if (error.code === 'PREFLIGHT_FAILED'
         || error.code === 'NO_SERVER'
         || error.code === 'UNSUPPORTED_JOB_TYPE'

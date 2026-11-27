@@ -122,6 +122,7 @@ export async function launchExpedition(ctx: ExpeditionLaunchContext): Promise<vo
             nextActionAt: null,
             lastError: null,
         });
+        await ctx.disable('preparation cancelled');
         deps.events.publish('expeditions.auto.done', state.last);
         return;
     }
@@ -199,6 +200,7 @@ export async function launchExpedition(ctx: ExpeditionLaunchContext): Promise<vo
     if (!configured.ok) {
         state.last = { at: deps.clock.now(), decisions, launched: false, error: configured.error.message, paid, selectedMerc: selected.mercenary.name, marketKey: profileKey };
         deps.logger.warn('auto-expedition', 'Expedition configure failed', { mercenary: selected.mercenary.name, message: configured.error.message });
+        await ctx.disable('expedition configure failed');
         return;
     }
     const configuredCost = totalCostInfo(configured.value);
@@ -227,6 +229,7 @@ export async function launchExpedition(ctx: ExpeditionLaunchContext): Promise<vo
             selectedTotalCost: selected.totalCost,
             maxPrice,
         });
+        await ctx.disable('configured total cost exceeds max price');
         return;
     }
     await humanDelay(500, 900);
@@ -246,6 +249,8 @@ export async function launchExpedition(ctx: ExpeditionLaunchContext): Promise<vo
         if (creditFailure) await ctx.disable('expedition launch failed with insufficient credits');
         else if (/maintenance|unreachable|no route|ROUTE_FAILED/i.test(launched.error.message)) {
             await ctx.scheduleMaintenanceRetry(AUTO_EXPEDITION_RETRY_ALARM);
+        } else {
+            await ctx.disable('expedition launch failed');
         }
         return;
     }

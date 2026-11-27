@@ -26,6 +26,7 @@ import { AutoExpeditionCoordinator } from '../automation/auto-expedition.js';
 import { DailyOpsCacheService } from '../automation/daily-cache.js';
 import { AutoDailyCoordinator } from '../automation/auto-daily.js';
 import { ReadinessRegistry } from '../automation/readiness.js';
+import { PageReloadCoordinator } from '../automation/page-reload.js';
 import { InventorySortLock } from '../automation/inventory-lock.js';
 import { humanDelay } from '../automation/delay.js';
 
@@ -48,6 +49,7 @@ export interface AutomationRuntime {
     readonly dailyCache: DailyOpsCacheService;
     readonly daily: AutoDailyCoordinator;
     readonly readiness: ReadinessRegistry;
+    readonly pageReload: PageReloadCoordinator;
     readonly inventoryLock: InventorySortLock;
     readonly autoJobsRunner: AutoJobRunner;
     readonly autoJobsQueue: AutoJobQueueService;
@@ -325,6 +327,17 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
     queue.attachDismisser((owner, reason, marketKeys, shouldStop, runId, skipIds) =>
         autoJobs.dismissFailedJobs(owner, reason, marketKeys, shouldStop, runId, skipIds));
 
+    const pageReload = new PageReloadCoordinator({
+        tabs,
+        settings,
+        state: stores.automationState,
+        autoJobs,
+        autoFinish,
+        logger,
+        events,
+        clock,
+    });
+
     const readiness = new ReadinessRegistry({
         adapter: game.gameReadinessAdapter,
         tabs,
@@ -332,7 +345,10 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
         events,
         autoJobs,
         syncAutoSolvers: core.syncAutoSolvers,
-        onReady: () => game.loadout.invalidate(),
+        onReady: (tabId) => {
+            game.loadout.invalidate();
+            void pageReload.handleGameReady(tabId);
+        },
     });
 
     return {
@@ -354,6 +370,7 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
         dailyCache,
         daily,
         readiness,
+        pageReload,
         inventoryLock,
         autoJobsRunner,
         autoJobsQueue,

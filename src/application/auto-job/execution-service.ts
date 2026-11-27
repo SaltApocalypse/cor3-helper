@@ -16,6 +16,12 @@ import { sleep as defaultSleep } from '../../kernel/sleep.js';
 /** Bounded wait for a background solver to make the job claimable. */
 const SOLVER_HANDOFF_DEADLINE_MS = 30_000;
 const SOLVER_HANDOFF_INTERVAL_MS = 3_000;
+/**
+ * Keep one solver attempt below the game's ~2 minute minigame window. The
+ * bridge has a 190 s timeout, but letting the solver run that long causes the
+ * server to lock the minigame before the helper can abort cleanly.
+ */
+const MINIGAME_SOLVE_TIMEOUT_MS = 90_000;
 const UNCONFIRMED_COMPLETE_CODES = new Set(['GAME_TIMEOUT', 'GAME_NO_SOCKET', 'JOB_COMMAND_FAILED', 'JOB_ACTION_FAILED', 'GAME_DISCONNECTED', 'GAME_SOCKET_CLOSED']);
 // Only locally-generated pre-send failures are provably safe to retry.
 const EXPLICIT_COMPLETE_CODES = new Set(['NO_COR3_TAB', 'INVALID_JOB']);
@@ -561,7 +567,7 @@ export class JobExecutionService implements JobExecutionPort {
         }
         await this.pace?.();
         this.trace?.('Opening file for decryption', { jobId: job.id, fileId: file.id, fileName: file.name });
-        const solving = this.minigames.solve(30_000);
+        const solving = this.minigames.solve(MINIGAME_SOLVE_TIMEOUT_MS);
         const opened = await this.actions.decryptFile(file.id);
         let openTimedOut = false;
         if (!opened.ok) {

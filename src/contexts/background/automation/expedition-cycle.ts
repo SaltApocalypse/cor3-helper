@@ -16,7 +16,6 @@ import type { AutoExpeditionDeps, ExpeditionDecisionState, ExpeditionRunState } 
 
 const AUTO_EXPEDITION_CONNECTION_RETRY_MS = 30_000;
 const AUTO_EXPEDITION_ACTIVE_RETRY_MS = 60_000;
-const AUTO_EXPEDITION_CANDIDATE_RETRY_MS = 5 * 60_000;
 
 export function expeditionConnectionError(message: string | null | undefined): boolean {
     return !!message && /Could not establish connection|Receiving end does not exist|NO_COR3_TAB|No game WebSocket|GAME_NO_SOCKET|AUTH_REQUIRED|AUTH_EXPIRED/i.test(message);
@@ -76,6 +75,33 @@ export class ExpeditionCycle {
             }
 
             let decisions = 0;
+
+            // Check the credit floor before payout/active gates. Otherwise a
+            // stuck "already collected" payout or a long-running expedition can
+            // keep Auto Expedition enabled well below the configured threshold.
+            if (current.mercMinCreditsEnabled) {
+                const credits = await this.readHomeCredits(home.marketId);
+                if (credits !== null) {
+                    this.deps.logger.info('auto-expedition', 'Credits checked at cycle start', {
+                        credits,
+                        threshold: current.mercMinCredits,
+                        enabled: true,
+                    });
+                    if (credits < current.mercMinCredits) {
+                        this.state.last = {
+                            at: this.deps.clock.now(),
+                            decisions,
+                            launched: false,
+                            error: `Credits ${credits.toLocaleString()} below threshold ${current.mercMinCredits.toLocaleString()}`,
+                            paid: 0,
+                            message: 'Auto Expedition disabled: credits below threshold',
+                        };
+                        await this.disable('credits below threshold');
+                        this.deps.events.publish('expeditions.auto.done', this.state.last);
+                        return;
+                    }
+                }
+            }
 
             let paid = 0;
             if (current.mercAutoPayEnabled) {
@@ -331,9 +357,12 @@ export class ExpeditionCycle {
                     .map((value) => Date.parse(value))
                     .filter((value) => Number.isFinite(value) && value > this.deps.clock.now())
                     .sort((left, right) => left - right)[0];
-                const retryAt = restReadyAt !== undefined
-                    ? Math.max(this.deps.clock.now() + 5_000, restReadyAt + 5_000)
-                    : this.deps.clock.now() + AUTO_EXPEDITION_CANDIDATE_RETRY_MS;
+                if (restReadyAt === undefined) {
+                    await this.disable('no available mercenary');
+                    this.deps.events.publish('expeditions.auto.done', this.state.last);
+                    return;
+                }
+                const retryAt = Math.max(this.deps.clock.now() + 5_000, restReadyAt + 5_000);
                 await this.deps.state.set('auto-expedition', {
                     phase: 'waiting',
                     nextActionAt: retryAt,

@@ -783,7 +783,11 @@ describe('jobTagView', () => {
     });
 
     it('keeps Unknown when the row is not claimable', () => {
-        expect(jobTagView(blocked, 'unknown')).toEqual({ primary: 'unknown', tone: 'warn' });
+        expect(jobTagView(blocked, 'unknown')).toEqual({
+            primary: 'unknown',
+            tone: 'warn',
+            title: 'The previous completion result was unconfirmed. Auto Finish will retry it after it is recovered.',
+        });
     });
 });
 

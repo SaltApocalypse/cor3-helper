@@ -152,6 +152,25 @@ describe('AutoJobsCoordinator scheduled trigger', () => {
         expect(made.networkOps.enqueue).toHaveBeenCalledTimes(1);
     });
 
+    it('forceAll refreshes every market even when the snapshot is fresh', async () => {
+        const made = makeScheduledCoordinator();
+        made.coordinator.publishSnapshot({
+            at: 1,
+            jobs: [],
+            markets: JOB_MARKETS.map((market) => ({
+                marketKey: market.key,
+                label: market.label,
+                ok: true,
+                skipped: 0,
+                resetAt: '1970-01-01T00:05:00.000Z',
+                updatedAt: 99_999,
+            })),
+        });
+        await made.coordinator.ensureInfo('reload-ready', true, 1, true);
+
+        expect(made.networkOps.enqueue).toHaveBeenCalledTimes(1);
+    });
+
     it('keeps the min interval for ordinary non-scheduled refreshes', async () => {
         const made = makeScheduledCoordinator();
         await made.coordinator.ensureInfo('ready', true, 1);

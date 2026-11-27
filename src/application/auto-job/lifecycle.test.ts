@@ -5,10 +5,28 @@ describe('lifecycleStatusForFailure', () => {
     it('does not turn an unconfirmed complete into failure or success', () => {
         expect(lifecycleStatusForFailure({ code: 'COMPLETE_FAILED', message: 'Timed out waiting for desktop:complete' }))
             .toBe('unknown');
-        expect(lifecycleStatusForFailure({ code: 'GAME_TIMEOUT', message: 'No response' })).toBe('unknown');
-        expect(lifecycleStatusForFailure({ code: 'TAKE_FAILED', message: 'socket disconnected' })).toBe('unknown');
+        expect(lifecycleStatusForFailure({ code: 'GAME_TIMEOUT', message: 'No response', stage: 'complete' })).toBe('unknown');
+        expect(lifecycleStatusForFailure({ code: 'TAKE_FAILED', message: 'socket disconnected' })).toBe('failed');
         expect(lifecycleStatusForFailure({ code: 'COMPLETE_FAILED', message: 'complete rejected', unconfirmed: true }))
             .toBe('unknown');
+    });
+
+    it('keeps pre-complete minigame and route timeouts out of the completion barrier', () => {
+        expect(lifecycleStatusForFailure({
+            code: 'ACTION_FAILED',
+            message: 'Timed out waiting for desktop:decrypt.file; no minigame detected',
+            stage: 'minigame',
+        })).toBe('waiting-minigame');
+        expect(lifecycleStatusForFailure({
+            code: 'ACTION_FAILED',
+            message: 'Timed out waiting for desktop:decrypt.file; another minigame run is already active',
+            stage: 'minigame',
+        })).toBe('waiting-minigame');
+        expect(lifecycleStatusForFailure({
+            code: 'ACTION_FAILED',
+            message: 'Timed out waiting for sai:hack.start',
+            stage: 'route',
+        })).toBe('blocked');
     });
 
     it('keeps a minigame lock or failure in waiting-minigame', () => {
