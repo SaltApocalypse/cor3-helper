@@ -1,6 +1,6 @@
 # COR3 Helper 2.0 — Valuable Seller Maintenance Panel and Force Operation
 
-- **Status:** Implemented on `v2-dev` (build `2.0.10-salta.324`)
+- **Status:** Implemented on `v2-dev` (build `2.0.10-salta.324`); force loop restored to v1 parity at build `2.0.12-salta.335`
 - **Scope:** `Automation → Valuable Search & Sale`
 - **Purpose:** surface per-server maintenance state and let the user force selected upcoming servers into maintenance, matching the v1 Maintenance tab and batch force behavior.
 
@@ -51,18 +51,33 @@ Inside `Valuable Search & Sale`, below **Status and report**:
 - `Select all upcoming`, `Refresh maintenance`, `Force selected (N)` and cancel controls.
 - Starting a sale passes the checked upcoming servers to the background; after the sale completes, the background starts the force run automatically.
 
-### 3.3 Force use case
+### 3.3 Force use case (v1 parity)
 
-`ValuableSellerService.forceMaintenance` implements the v1 loop with two deliberate additions:
+`ValuableSellerService.forceMaintenance` is a deliberate special case that follows
+v1's loop instead of v2's shared network-refresh pipeline:
 
-- **50 attempts / 15 s** request window per server, **1.2 s** pacing.
+- **50 attempts / 15 s** request window per server, **400-900 ms human pacing**
+  (v1's `humanDelay`); the earlier fixed 1.2 s pacing was slower than v1.
 - SEARCH loadout via a strict `beforeForce` hook; no SEARCH power skips the server.
 - Dynamic route length sorting (furthest first) instead of the v1 static path table.
 - `file.search-valuable` remains the primary trigger.
-- When downloads are enabled (the UI always sends `true`), each attempt downloads one newly discovered valuable file; every fifth attempt also searches/downloads one valuable log.
-- Stop on `MaintenanceMonitor`, a refreshed map showing active maintenance, cancellation, or the attempt cap.
-- `sai-access-denied` refreshes the map, re-ensures access and re-equips SEARCH before retrying.
-- The result reports forced servers, failures and force-download counts.
+- **No downloads.** v2's "one file per attempt + one log per five attempts" was
+  removed; the force loop only pushes the server toward maintenance.
+- **No periodic map refresh.** The loop starts from the cached snapshot and only
+  forces `get.map` for `sai-access-denied` recovery, exactly like v1. The old
+  refresh every three attempts was the main source of `get.map` traffic and
+  "too many requests" responses.
+- **Rate-limit special case.** Force searches carry
+  `bypassRateLimitCooldown`, so the main-world hub keeps sending them (still at
+  the 250 ms send throttle) while ordinary commands wait out the game's
+  escalating 5-60 s cooldown. Rate-limit responses to these searches do not
+  escalate the global cooldown used by other features.
+- Reached endpoints are reused between targets so consecutive servers on the
+  same path skip a redundant `set.endpoint`.
+- Stop on `MaintenanceMonitor`, a refreshed map showing active maintenance
+  (access recovery only), cancellation, or the attempt cap.
+- Diagnostics: debug traces per attempt (duration, result, rate-limit flag) plus
+  per-server/run summaries in the visible run log.
 
 ### 3.4 Coordinator and async behavior
 

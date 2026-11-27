@@ -233,12 +233,16 @@ describe('ValuableSellerService forceMaintenance', () => {
         const calls: string[] = [];
         const downloads: string[] = [];
         const searchCounts = new Map<string, number>();
+        const snapshotCalls: Array<boolean | undefined> = [];
+        const bypassFlags: Array<boolean | undefined> = [];
+        const sleeps: number[] = [];
         const service = new ValuableSellerService(
-            { get: async () => ({ ok: true, value: forceSnapshot() }) },
+            { get: async (force?: boolean) => { snapshotCalls.push(force); return { ok: true, value: forceSnapshot() }; } },
             executor(clock),
             {
-                searchFiles: async (serverId: string) => {
+                searchFiles: async (serverId: string, _timeoutMs?: number, options?: { bypassRateLimitCooldown?: boolean }) => {
                     calls.push(serverId);
+                    bypassFlags.push(options?.bypassRateLimitCooldown);
                     const count = (searchCounts.get(serverId) ?? 0) + 1;
                     searchCounts.set(serverId, count);
                     if (count >= 2) monitor.record(serverId);
@@ -260,13 +264,12 @@ describe('ValuableSellerService forceMaintenance', () => {
             undefined,
             async () => ({ ok: true, value: undefined }),
             monitor,
-            async () => undefined,
+            async (ms?: number) => { sleeps.push(ms ?? 0); },
         );
 
         const result = await service.forceMaintenance({
             owner: 'valuable',
             serverIds: [serverA, serverB, market],
-            includeDownloads: true,
         });
 
         expect(result.ok).toBe(true);
@@ -276,7 +279,59 @@ describe('ValuableSellerService forceMaintenance', () => {
         expect(result.value.failedServers).toEqual([{ target: 'market', message: 'Not scheduled for upcoming maintenance' }]);
         expect(calls.slice(0, 2)).toEqual([serverB, serverB]);
         expect(calls).toEqual(expect.arrayContaining([serverA, serverB]));
-        expect(downloads).toEqual([`file-${serverB}`, `file-${serverA}`]);
+        // v1 parity: the force loop never downloads and never force-refreshes.
+        expect(downloads).toEqual([]);
+        expect(result.value.downloadedFiles).toBe(0);
+        expect(result.value.downloadedLogs).toBe(0);
+        expect(snapshotCalls).toEqual([undefined]);
+        expect(bypassFlags.length).toBeGreaterThan(0);
+        expect(bypassFlags.every((flag) => flag === true)).toBe(true);
+        // v1 pacing: 400-900 ms between attempts.
+        expect(sleeps.length).toBeGreaterThan(0);
+        expect(sleeps.every((ms) => ms >= 400 && ms <= 900)).toBe(true);
+    });
+
+    it('refreshes the map only for access recovery, not every few attempts', async () => {
+        const clock = new FakeClock(0);
+        const monitor = new MaintenanceMonitor();
+        const snapshotCalls: Array<boolean | undefined> = [];
+        let searches = 0;
+        const service = new ValuableSellerService(
+            { get: async (force?: boolean) => { snapshotCalls.push(force); return { ok: true, value: forceSnapshot() }; } },
+            executor(clock),
+            {
+                searchFiles: async () => {
+                    searches += 1;
+                    if (searches === 1) {
+                        return { ok: false as const, error: { code: 'GAME_VALUABLE_ACTION_FAILED', message: 'sai-access-denied' } };
+                    }
+                    monitor.record(serverB);
+                    monitor.record(serverA);
+                    return { ok: true as const, value: { found: [] } };
+                },
+                searchLogs: async () => ({ ok: true as const, value: { found: [] } }),
+                getFiles: async () => ({ ok: true as const, value: [] }),
+                getLogs: async () => ({ ok: true as const, value: [] }),
+                downloadFile: async () => ({ ok: true as const, value: undefined }),
+                downloadLog: async () => ({ ok: true as const, value: undefined }),
+            },
+            {
+                getSellableItems: async () => ({ ok: true, value: { items: [], totalPrice: 0, totalRepGain: 0 } }),
+                sellItems: async () => ({ ok: true, value: { sold: 0, credits: 0, reputation: 0 } }),
+            },
+            clock,
+            undefined,
+            undefined,
+            undefined,
+            async () => ({ ok: true, value: undefined }),
+            monitor,
+            async () => undefined,
+        );
+
+        const result = await service.forceMaintenance({ owner: 'valuable', serverIds: [serverA, serverB] });
+        expect(result.ok).toBe(true);
+        // Initial cached read + one forced refresh from the access recovery.
+        expect(snapshotCalls).toEqual([undefined, true]);
     });
 
     it('caps each server at 50 attempts and reports failure', async () => {
@@ -309,7 +364,6 @@ describe('ValuableSellerService forceMaintenance', () => {
         const result = await service.forceMaintenance({
             owner: 'valuable',
             serverIds: [serverB],
-            includeDownloads: false,
         });
 
         expect(result.ok).toBe(true);
@@ -346,7 +400,7 @@ describe('ValuableSellerService forceMaintenance', () => {
             async () => undefined,
         );
 
-        const result = await service.forceMaintenance({ owner: 'valuable', serverIds: [serverB], includeDownloads: false });
+        const result = await service.forceMaintenance({ owner: 'valuable', serverIds: [serverB] });
         expect(result.ok).toBe(true);
         if (result.ok) expect(result.value.stopped).toBe(true);
         expect(calls).toBe(0);

@@ -455,7 +455,6 @@ export interface ValuableForceMaintenanceStart {
 export interface ValuableSellOptions {
     readonly forceMaintenance?: {
         readonly serverIds: readonly string[];
-        readonly includeDownloads: boolean;
     };
 }
 
@@ -652,7 +651,7 @@ export interface PopupPortal {
     searchValuable(runId: string): Promise<BridgeResult<ValuableSearchResult>>;
     sellValuable(runId: string, options?: ValuableSellOptions): Promise<BridgeResult<ValuableSaleResult>>;
     valuableMaintenance(force?: boolean): Promise<BridgeResult<readonly ValuableMaintenanceServer[]>>;
-    startForceValuableMaintenance(runId: string, serverIds: readonly string[], includeDownloads: boolean): Promise<BridgeResult<ValuableForceMaintenanceStart>>;
+    startForceValuableMaintenance(runId: string, serverIds: readonly string[]): Promise<BridgeResult<ValuableForceMaintenanceStart>>;
     cancelValuable(runId: string): Promise<BridgeResult<void>>;
     valuableProgress(runId: string): Promise<BridgeResult<ValuableRunState | null>>;
     valuableReport(): Promise<BridgeResult<ValuableReport>>;

@@ -1095,7 +1095,6 @@ export class ChromePopupPortal implements PopupPortal {
                 ? {
                     forceMaintenance: {
                         serverIds: [...options.forceMaintenance.serverIds],
-                        includeDownloads: options.forceMaintenance.includeDownloads,
                     },
                 }
                 : {}),
@@ -1107,11 +1106,10 @@ export class ChromePopupPortal implements PopupPortal {
         return this.client.request('valuable.maintenance', { force }, z.array(valuableMaintenanceServerSchema), 20000) as Promise<{ ok: true; value: readonly ValuableMaintenanceServer[] } | { ok: false; error: { code: string; message: string } }>;
     }
 
-    startForceValuableMaintenance(runId: string, serverIds: readonly string[], includeDownloads: boolean): Promise<{ ok: true; value: ValuableForceMaintenanceStart } | { ok: false; error: { code: string; message: string } }> {
+    startForceValuableMaintenance(runId: string, serverIds: readonly string[]): Promise<{ ok: true; value: ValuableForceMaintenanceStart } | { ok: false; error: { code: string; message: string } }> {
         return this.client.request('valuable.forceMaintenance', {
             runId,
             serverIds: [...serverIds],
-            includeDownloads,
         }, valuableForceStartSchema, 15000) as Promise<{ ok: true; value: ValuableForceMaintenanceStart } | { ok: false; error: { code: string; message: string } }>;
     }
 

@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-27 against build `2.0.12-salta.334`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (130 files / 1091 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-27 against build `2.0.12-salta.335`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (130 files / 1093 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.12-salta.334`)
+## Current completion snapshot (build `2.0.12-salta.335`)
 
 | Metric | Value |
 |---|---|
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 130 files / 1091 tests pass
-- `npm run build` — pass, `2.0.12-salta.334`
+- `npm test` — 130 files / 1093 tests pass
+- `npm run build` — pass, `2.0.12-salta.335`
 
 ---
 
@@ -1632,3 +1632,15 @@ Root causes and fixes recorded from real user logs (`B.log`, `C.log`, `A.log`) a
 - **Content:** no code changes since 2.0.11-salta; this build carries Parts 81–84 (UI polish, toolbar window menu, credit floor, unreachable-target preflight gate and the larger retained debug log).
 - **Packaging:** draft release only; the tag is created when the release is published.
 - **Verification:** typecheck, lint, build and Vitest (130 files / 1091 tests) pass at build `2.0.12-salta.334`.
+
+---
+
+# Part 86 — Force maintenance restored to v1 parity (2.0.12-salta.335)
+
+- **Traffic:** the force loop no longer forces a `get.map` refresh every three attempts or at start; it reads the cached snapshot and only refreshes for `sai-access-denied` recovery, like v1. This was the main source of "too many requests" during a force run.
+- **No downloads:** the v2 "one valuable file per attempt, one log per five attempts" behaviour and the `includeDownloads` option were removed. The force run only pushes servers toward maintenance; the API still accepts the old field from older panels and ignores it.
+- **Pacing:** v1's 400-900 ms human delay replaces the fixed 1.2 s pause.
+- **Rate-limit special case:** `sai file.search-valuable` requests from the force loop carry `bypassRateLimitCooldown`, so the hub keeps sending them (250 ms throttle) while other commands wait out the game cooldown, and their rate-limit responses do not escalate the global cooldown. Other features are unchanged.
+- **Routing:** the last reached endpoint is reused between targets to avoid a redundant `set.endpoint`.
+- **Diagnostics:** per-attempt debug traces (duration, result, rate-limit flag), per-server start/finish/warn lines and a run summary now go to the debug log and the visible run log.
+- **Verification:** typecheck, lint, build and Vitest (130 files / 1093 tests) pass at build `2.0.12-salta.335`.

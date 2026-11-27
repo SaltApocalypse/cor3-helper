@@ -31,6 +31,21 @@ describe('ChromeTabValuableActionAdapter', () => {
         }
     });
 
+    it('forwards the force-maintenance cooldown bypass only when requested', async () => {
+        const payloads: Array<Record<string, unknown>> = [];
+        const adapter = new ChromeTabValuableActionAdapter({
+            findCor3Tab: async () => 1,
+            send: async (_tab, message) => {
+                payloads.push((message as { payload?: Record<string, unknown> }).payload ?? {});
+                return { ok: true, value: { found: [] } };
+            },
+        });
+        await adapter.searchFiles('s', 15_000, { bypassRateLimitCooldown: true });
+        await adapter.searchFiles('s', 15_000);
+        expect(payloads[0]).toMatchObject({ serverId: 's', timeoutMs: 15_000, bypassRateLimitCooldown: true });
+        expect(payloads[1]).not.toHaveProperty('bypassRateLimitCooldown');
+    });
+
     it('counts successful sell calls', async () => {
         const sent: unknown[] = [];
         const adapter = new ChromeTabValuableActionAdapter({

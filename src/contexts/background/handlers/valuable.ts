@@ -15,7 +15,9 @@ const valuableRunSchema = z.object({
 
 const forceMaintenanceOptionsSchema = z.object({
     serverIds: z.array(z.string().min(1)).max(200),
-    includeDownloads: z.boolean().default(true),
+    // Accepted for panels built before 2.0.13, where force maintenance also
+    // downloaded valuables. The v1-parity loop no longer downloads.
+    includeDownloads: z.boolean().optional(),
 }).strict();
 
 const valuableSellSchema = valuableRunSchema.extend({
@@ -24,7 +26,7 @@ const valuableSellSchema = valuableRunSchema.extend({
 
 const valuableForceSchema = valuableRunSchema.extend({
     serverIds: z.array(z.string().min(1)).max(200),
-    includeDownloads: z.boolean().default(true),
+    includeDownloads: z.boolean().optional(),
 }).strict();
 
 export function registerValuableHandlers(server: CoreRuntime['server'], deps: ValuableHandlerDeps): void {
@@ -41,7 +43,6 @@ export function registerValuableHandlers(server: CoreRuntime['server'], deps: Va
                 runId: `${request.runId}:force`,
                 owner: request.owner,
                 serverIds: force.serverIds,
-                includeDownloads: force.includeDownloads,
             });
             if (!started.ok) {
                 core.logger.warn('valuable', 'Automatic force maintenance did not start', {

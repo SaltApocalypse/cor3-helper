@@ -132,6 +132,7 @@ export function createAutomationRuntime(core: CoreRuntime, game: GameRuntime): A
         networkOps,
         events,
         runLogs,
+        logger,
     });
 
     const autoRefresh = new AutoRefreshCoordinator({

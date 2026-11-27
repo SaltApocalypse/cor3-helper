@@ -35,7 +35,7 @@ export interface ValuableState {
     readonly loadValuableReport: () => Promise<void>;
     readonly loadValuableMaintenance: (force?: boolean) => Promise<void>;
     readonly startValuableOperation: (operation: 'search' | 'sell', options?: ValuableSellOptions) => Promise<void>;
-    readonly startForceMaintenance: (serverIds: readonly string[], includeDownloads?: boolean) => Promise<void>;
+    readonly startForceMaintenance: (serverIds: readonly string[]) => Promise<void>;
     readonly cancelValuableOperation: () => Promise<void>;
     readonly toggleForceMaintenance: (enabled: boolean) => Promise<void>;
     readonly toggleMaintenanceServer: (serverId: string) => void;
@@ -156,7 +156,7 @@ export function useValuable(portal: PopupPortal, deps: ValuableDeps): ValuableSt
         }
     }, [portal, valuableRunId, loadValuableReport, loadValuableMaintenance, tt]);
 
-    const startForceMaintenance = useCallback(async (serverIds: readonly string[], includeDownloads = true) => {
+    const startForceMaintenance = useCallback(async (serverIds: readonly string[]) => {
         if (valuableRunId !== null || valuableStartLock.current || serverIds.length === 0) return;
         valuableStartLock.current = true;
         const runId = crypto.randomUUID();
@@ -166,7 +166,7 @@ export function useValuable(portal: PopupPortal, deps: ValuableDeps): ValuableSt
         setValuableCanceling(false);
         setValuableStatus(tt('Forcing server maintenance...'));
         try {
-            const response = await portal.startForceValuableMaintenance(runId, serverIds, includeDownloads);
+            const response = await portal.startForceValuableMaintenance(runId, serverIds);
             if (!response.ok) {
                 setValuableStatus(response.error.message);
                 setValuableRunId(null);

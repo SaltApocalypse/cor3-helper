@@ -7,7 +7,7 @@ import type { NetworkSnapshotService } from '../../../application/network/snapsh
 import type { ValuableForceMaintenanceRequest, ValuableForceMaintenanceSummary, ValuableProgress, ValuableSaleSummary, ValuableSearchSummary, ValuableSellerService } from '../../../application/valuable/seller.js';
 import type { MaintenanceSignalPort } from '../../../application/valuable/maintenance-monitor.js';
 import { listMaintenanceServers, type ValuableMaintenanceServer } from '../../../application/valuable/maintenance.js';
-import type { EventPublisher, RunLogSink } from '../../../application/automation/ports.js';
+import type { AutomationLogger, EventPublisher, RunLogSink } from '../../../application/automation/ports.js';
 
 export type ValuableOperation = 'search' | 'sell' | 'force-maintenance';
 export type ValuableRunStatus = 'running' | 'done' | 'cancelled' | 'error';
@@ -50,6 +50,7 @@ export interface ValuableDeps {
     readonly networkOps: NetworkOperationQueue;
     readonly events: EventPublisher;
     readonly runLogs: RunLogSink;
+    readonly logger: Pick<AutomationLogger, 'debug' | 'info' | 'warn'>;
 }
 
 function numberFromPayload(value: unknown, fallback = 0): number {
@@ -188,7 +189,6 @@ export class ValuableCoordinator {
                     owner: request.owner,
                     reason: 'valuable-force-maintenance',
                     serverIds: request.serverIds,
-                    includeDownloads: request.includeDownloads,
                 }, this.runControl(request.runId, state)),
             );
             if (!queued.ok) {
@@ -312,6 +312,12 @@ export class ValuableCoordinator {
                 state.progress = progress;
                 state.updatedAt = Date.now();
                 this.deps.events.publish('valuable.progress', { runId, progress });
+            },
+            // Debug traces go to the exported debug log; info/warn/error also
+            // land in the run log so a stuck force run stays diagnosable.
+            onTrace: (level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: Readonly<Record<string, unknown>>) => {
+                this.deps.logger[level === 'error' ? 'warn' : level]('valuable-seller', message, data);
+                if (level !== 'debug') this.deps.runLogs.add(runId, level, 'valuable-seller', message, data);
             },
         };
     }

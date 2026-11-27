@@ -106,7 +106,7 @@ export function ValuableSellerCard({
     const upcoming = maintenanceServers.filter((server) => !server.active && Boolean(server.timeUntil));
     const selectedUpcoming = upcoming.filter((server) => selectedMaintenanceIds.has(server.id));
     const sellOptions: ValuableSellOptions | undefined = forceMaintenanceEnabled && selectedUpcoming.length > 0
-        ? { forceMaintenance: { serverIds: selectedUpcoming.map((server) => server.id), includeDownloads: true } }
+        ? { forceMaintenance: { serverIds: selectedUpcoming.map((server) => server.id) } }
         : undefined;
 
     useEffect(() => {
