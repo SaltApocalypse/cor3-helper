@@ -154,6 +154,7 @@ export class ExpeditionCycle {
                 this.deps.logger.info('auto-expedition', 'Completed expedition payout checked', {
                     ready: payout.value.ready,
                     opened: payout.value.opened,
+                    terminal: payout.value.terminal,
                     failed: payout.value.failed.length,
                 });
                 for (const failure of payout.value.failed) {
@@ -164,6 +165,7 @@ export class ExpeditionCycle {
                 const payoutSummary = payout.value.payouts.map((entry) => ({
                     expeditionId: entry.expeditionId,
                     opened: entry.opened,
+                    terminal: entry.terminal === true,
                     riskScore: entry.riskScore,
                     outcome: entry.outcome,
                     completedAt: entry.completedAt,
@@ -229,7 +231,9 @@ export class ExpeditionCycle {
                     await this.disable('reward payment failed with insufficient credits');
                     return;
                 }
-                if (payout.value.ready > payout.value.opened) {
+                // Expired/consumed rows can never pay out; counting them as
+                // blocked made Auto Expedition retry for hours without launching.
+                if (payout.value.ready > payout.value.opened + payout.value.terminal) {
                     this.state.last = {
                         at: this.deps.clock.now(),
                         decisions,

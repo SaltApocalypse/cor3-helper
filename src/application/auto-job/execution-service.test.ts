@@ -58,6 +58,34 @@ describe('JobExecutionService', () => {
         expect(fake.calls).toEqual(['complete']);
     });
 
+    it('primes the server file list before a Data Upload', async () => {
+        const fake = actions();
+        fake.port.getServerFiles = async () => {
+            fake.calls.push('get-server-files');
+            return { ok: true as const, value: [] };
+        };
+        const service = new JobExecutionService(fake.port);
+        const result = await service.executeDetailed(job('Data Upload', {
+            fileInfo: { id: 'f1', name: 'report.dat' },
+        }));
+        expect(result.ok).toBe(true);
+        expect(fake.calls).toEqual(['take', 'get-server-files', 'upload:report.dat', 'complete']);
+    });
+
+    it('still uploads when the server file list cannot be loaded', async () => {
+        const fake = actions();
+        fake.port.getServerFiles = async () => {
+            fake.calls.push('get-server-files');
+            return { ok: false as const, error: { code: 'GAME_TIMEOUT', message: 'timed out' } };
+        };
+        const service = new JobExecutionService(fake.port);
+        const result = await service.executeDetailed(job('Data Upload', {
+            fileInfo: { id: 'f1', name: 'report.dat' },
+        }));
+        expect(result.ok).toBe(true);
+        expect(fake.calls).toEqual(['take', 'get-server-files', 'upload:report.dat', 'complete']);
+    });
+
     it('re-checks a taken job before executing it and skips an unreachable target', async () => {
         const fake = actions();
         const service = new JobExecutionService(

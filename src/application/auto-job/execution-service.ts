@@ -790,6 +790,17 @@ export class JobExecutionService implements JobExecutionPort {
             }
         }
         if (!fileName) return err({ code: 'ACTION_FAILED', message: 'No upload file found' });
+        // v1 loads the server file list before uploading. Without that priming
+        // the game answers `sai-files-not-available` and the job can never
+        // complete. The read is best-effort, exactly like v1.
+        const files = await this.actions.getServerFiles(job.serverId);
+        if (!files.ok) {
+            this.trace?.('Upload file list could not be loaded; uploading anyway', {
+                jobId: job.id,
+                code: files.error.code,
+                message: files.error.message,
+            });
+        }
         const result = await this.actions.uploadFile(job.serverId, fileName);
         if (!result.ok) return err({ code: 'ACTION_FAILED', message: result.error.message });
         return this.completeWithTransientRetry(job, state, executionResetAt);

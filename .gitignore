@@ -6,6 +6,10 @@ cor3-ws-export*.json
 *.zip
 *.log
 
+# Temporary user diagnostics and local scratch notes (never commit)
+logs/
+task.md
+
 # Local game captures (personal account data; never commit)
 catalog/captures/*.json
 cor3-loadout-*.json

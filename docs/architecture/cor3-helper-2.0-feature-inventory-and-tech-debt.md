@@ -5,10 +5,10 @@
 - **Method:** static source review of popup, content scripts, MAIN-world hooks, background scheduler, bridge contracts, tests, build/release config, and architecture docs
 - **Status legend for v1 → v2:** `Implemented` = equivalent user capability exists; `Partial` = core exists but visible scope/behavior differs; `Missing` = no counterpart found; `Unknown` = cannot confirm without runtime QA
 - **Caveat:** this is not a runtime parity sign-off. The 2.0 release line is complete; local builds use `<version>-salta.<build>`. Historical sections retain their original development labels.
-- **Last verified:** 2026-11-27 against build `2.0.13-salta.336`
-- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (130 files / 1093 tests) and `npm run build` all pass.
+- **Last verified:** 2026-11-27 against build `2.0.13-salta.337`
+- **Current verification:** `npm run typecheck`, `npm run lint`, `npm test` (130 files / 1097 tests) and `npm run build` all pass.
 
-## Current completion snapshot (build `2.0.13-salta.336`)
+## Current completion snapshot (build `2.0.13-salta.337`)
 
 | Metric | Value |
 |---|---|
@@ -606,8 +606,8 @@ Residual risk: these changes have unit coverage but still need a live-game smoke
 
 - `npm run typecheck` — pass
 - `npm run lint` — pass
-- `npm test` — 130 files / 1093 tests pass
-- `npm run build` — pass, `2.0.13-salta.336`
+- `npm test` — 130 files / 1097 tests pass
+- `npm run build` — pass, `2.0.13-salta.337`
 
 ---
 
@@ -1656,3 +1656,12 @@ Root causes and fixes recorded from real user logs (`B.log`, `C.log`, `A.log`) a
 - **Carried from 2.0.12:** unreachable-target preflight gate, larger retained logs and persisted run logs, UI alignment and toolbar window menu.
 - **Packaging:** draft release only; the tag is created when the release is published.
 - **Verification:** typecheck, lint, build and Vitest (130 files / 1093 tests) pass at build `2.0.13-salta.336`.
+
+---
+
+# Part 88 — Expired expedition loot, Data Upload priming and status labels (2.0.13-salta.337)
+
+- **Expired expedition loot (user log A/B):** `openContainer` rows that answer `Loot has expired`, `already fully collected`, `container not found` or `no loot` are now reported as `terminal` instead of failed. `ExpeditionPayoutResult` gained `terminal`, and the launch gate uses `ready > opened + terminal`. Before this, four expired archived rows kept `ready=4, opened=0` and Auto Expedition retried every 60 seconds for ~45 minutes without launching; the UI showed the generic "Data fetch failed" label. Real connection failures still block and retry.
+- **Data Upload (user log B):** `uploadFile` now loads the server file list (`sai get.files`) before `file.upload`, matching v1. Without the priming the game answered `sai-files-not-available` and the job kept retrying forever. The read is best-effort; a failed list still attempts the upload.
+- **Status labels (user log C):** the Overview extension-status summary now maps `market-not-reachable` / `MARKET_FETCH_FAILED` to "Market data fetch failed" instead of the generic "Data fetch failed". The underlying failures were transient market fetches that already used the Complete retry and market retry queue; no logic change was needed.
+- **Verification:** typecheck, lint, build and Vitest (130 files / 1097 tests) pass at build `2.0.13-salta.337`.

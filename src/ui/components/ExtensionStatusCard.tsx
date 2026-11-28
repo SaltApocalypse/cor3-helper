@@ -44,6 +44,7 @@ function healthLabel(health: ExtensionHealth, tr: TranslateSource): string {
 
 function errorSummary(message: string, tr: TranslateSource): string {
     if (/loadout|no plan|no software/i.test(message)) return tr('Loadout unavailable');
+    if (/market[\s-]?not[\s-]?reachable|MARKET_FETCH_FAILED|market fetch/i.test(message)) return tr('Market data fetch failed');
     if (/route|path|direct:/i.test(message)) return tr('Route failed');
     if (/websocket|socket|no game websocket/i.test(message)) return tr('Game WebSocket unavailable');
     if (/timeout|timed out/i.test(message)) return tr('Timeout');

@@ -167,7 +167,7 @@ describe('expedition payout state', () => {
         if (ready.ok) expect(ready.value.map((entry) => entry.id)).toEqual(['unpaid']);
     });
 
-    it('treats "already fully collected" as a successful payment instead of blocking the cycle', async () => {
+    it('treats "already fully collected" as terminal instead of blocking the cycle', async () => {
         const service = new ExpeditionService(payoutPort(async () => ({
             ok: false,
             error: { code: 'EXPEDITION_FAILED', message: 'Expedition already fully collected' },
@@ -175,8 +175,34 @@ describe('expedition payout state', () => {
         const result = await service.payout('home');
         expect(result.ok).toBe(true);
         if (result.ok) {
-            expect(result.value).toMatchObject({ ready: 1, opened: 1, failed: [] });
-            expect(result.value.payouts[0]).toMatchObject({ expeditionId: 'unpaid', opened: true, error: null });
+            expect(result.value).toMatchObject({ ready: 1, opened: 0, terminal: 1, failed: [] });
+            expect(result.value.payouts[0]).toMatchObject({ expeditionId: 'unpaid', opened: false, terminal: true });
+        }
+    });
+
+    it('treats expired loot as terminal so new launches are not blocked', async () => {
+        const service = new ExpeditionService(payoutPort(async () => ({
+            ok: false,
+            error: { code: 'EXPEDITION_FAILED', message: 'Loot has expired' },
+        })));
+        const result = await service.payout('home');
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.value).toMatchObject({ ready: 1, opened: 0, terminal: 1, failed: [] });
+            expect(result.value.payouts[0]).toMatchObject({ expeditionId: 'unpaid', opened: false, terminal: true, error: 'Loot has expired' });
+        }
+    });
+
+    it('keeps a real connection failure as a blocking failure', async () => {
+        const service = new ExpeditionService(payoutPort(async () => ({
+            ok: false,
+            error: { code: 'GAME_TIMEOUT', message: 'No game WebSocket is available' },
+        })));
+        const result = await service.payout('home');
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+            expect(result.value).toMatchObject({ ready: 1, opened: 0, terminal: 0 });
+            expect(result.value.failed).toEqual([{ expeditionId: 'unpaid', message: 'No game WebSocket is available' }]);
         }
     });
 });

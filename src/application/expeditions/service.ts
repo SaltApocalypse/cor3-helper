@@ -15,6 +15,16 @@ import {
 } from '../../domains/expeditions/model.js';
 import type { MercenaryCandidate, MercMarketKey } from '../../domains/expeditions/selection.js';
 
+/**
+ * Opening these rows can never succeed again, so they must be excluded from
+ * the "still waiting for payment" gate instead of retried forever. Without
+ * this, an expired archived expedition blocked every later launch for hours.
+ */
+export function isTerminalPayoutError(message: string): boolean {
+    return /loot has expired|already (?:fully )?collected|already (?:been )?opened|container (?:not found|missing|unavailable)|no loot/i.test(message)
+        || /\bexpired\b/i.test(message);
+}
+
 export interface ExpeditionPort {
     getActive(): Promise<Result<unknown, { readonly code: string; readonly message: string }>>;
     getArchived(): Promise<Result<unknown, { readonly code: string; readonly message: string }>>;
@@ -33,12 +43,19 @@ export interface ExpeditionPayout {
     readonly completedAt: string | null;
     readonly items: readonly ExpeditionLootItem[];
     readonly opened: boolean;
+    /**
+     * The row can never be opened again (loot expired, container already
+     * consumed). It must not block later expedition launches.
+     */
+    readonly terminal?: boolean;
     readonly error: string | null;
 }
 
 export interface ExpeditionPayoutResult {
     readonly ready: number;
     readonly opened: number;
+    /** Claimable rows that can never pay out (expired/consumed loot). */
+    readonly terminal: number;
     readonly failed: readonly { readonly expeditionId: string; readonly message: string }[];
     /** Per-expedition payment details, recorded internally but not rendered. */
     readonly payouts: readonly ExpeditionPayout[];
@@ -269,22 +286,24 @@ export class ExpeditionService {
         const failed: { expeditionId: string; message: string }[] = [];
         const payouts: ExpeditionPayout[] = [];
         let opened = 0;
+        let terminal = 0;
         for (const expedition of ready.value) {
             const result = await this.expeditions.openContainer(expedition.id);
             if (!result.ok) {
-                // The game can keep a COMPLETED expedition visible after its
-                // container was already collected. Treat that as paid instead
-                // of blocking every later cycle on the same row.
-                if (/already.*(?:fully\s+)?collected/i.test(result.error.message)) {
-                    opened++;
+                // The game keeps completed/expired rows visible long after they
+                // can pay out. Treating them as permanent claimables blocked
+                // every later launch (ready > opened) for hours.
+                if (isTerminalPayoutError(result.error.message)) {
+                    terminal++;
                     payouts.push({
                         expeditionId: expedition.id,
                         riskScore: expedition.riskScore,
                         outcome: expedition.outcome,
                         completedAt: expedition.completedAt,
                         items: [],
-                        opened: true,
-                        error: null,
+                        opened: false,
+                        terminal: true,
+                        error: result.error.message,
                     });
                     continue;
                 }
@@ -312,7 +331,7 @@ export class ExpeditionService {
                 error: null,
             });
         }
-        return ok({ ready: ready.value.length, opened, failed, payouts });
+        return ok({ ready: ready.value.length, opened, terminal, failed, payouts });
     }
 
     async readyExpeditions(marketId: string): Promise<Result<readonly ActiveExpedition[], { readonly code: string; readonly message: string }>> {
